@@ -149,7 +149,7 @@ def test_persistent_context_kwargs_omits_timezone_when_empty_string():
 
 
 @pytest.fixture
-def no_geo_lookup(monkeypatch):
+def no_geo_lookup(monkeypatch, session_executable):
     """`__enter__` resolves the timezone from the EGRESS, over the network.
 
     The four tests below drive `__enter__` with Playwright mocked to assert which

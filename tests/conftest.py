@@ -11,6 +11,15 @@ import pytest
 
 from _servers import LocalServer
 
+
+@pytest.fixture
+def session_executable(monkeypatch, tmp_path):
+    """An engine location for tests of session options and environment."""
+    executable = tmp_path / "firefox"
+    monkeypatch.setattr("invisible_playwright._session.resolve_executable",
+                        lambda binary_path=None: executable)
+    return executable
+
 # ── The watchdog that says WHERE it is stuck, while it is still stuck ─────────
 #
 # The e2e hangs in 12% of CI runs (4 out of 33, from 2026-08-01 to 08-13) and

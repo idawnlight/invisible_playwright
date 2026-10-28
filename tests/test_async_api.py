@@ -85,7 +85,7 @@ def test_async_default_context_kwargs_match_sync():
 
 # ── parity with the sync launcher, driven rather than declared ───────────────
 
-def test_the_async_api_stamps_the_session_token_into_the_browser_env():
+def test_the_async_api_stamps_the_session_token_into_the_browser_env(session_executable):
     """The gap that shipped a "fixed" leak to half the users.
 
     The Windows process-leak fix went into 0.4.0 and was described as fixed. It

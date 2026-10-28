@@ -39,12 +39,11 @@ import pathlib
 import re
 import tomllib
 
+from packaging.version import InvalidVersion, Version
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-#: The same shape `test_release_e2e.py` reads, deliberately: two gates that
-#: disagree about what a heading looks like would let a release through the
-#: crack between them.
-HEADING = re.compile(r"(?m)^##\s*\[(\d+\.\d+\.\d+)\]\s*-\s*(\d{4}-\d{2}-\d{2})\s*$")
+HEADING = re.compile(r"(?m)^##\s*\[([^\]\s]+)\]\s*-\s*(\d{4}-\d{2}-\d{2})\s*$")
 
 
 def declared_version(root: pathlib.Path = ROOT) -> str:
@@ -54,9 +53,16 @@ def declared_version(root: pathlib.Path = ROOT) -> str:
 
 
 def documented_versions(root: pathlib.Path = ROOT) -> dict[str, str]:
-    """Every `## [X.Y.Z] - YYYY-MM-DD` heading in the changelog, version to date."""
+    """Every dated PEP 440 version heading, including development releases."""
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-    return {m.group(1): m.group(2) for m in HEADING.finditer(text)}
+    documented = {}
+    for match in HEADING.finditer(text):
+        try:
+            Version(match.group(1))
+        except InvalidVersion:
+            continue
+        documented[match.group(1)] = match.group(2)
+    return documented
 
 
 def test_the_changelog_has_a_heading_for_the_version_this_tree_ships():
@@ -68,7 +74,7 @@ def test_the_changelog_has_a_heading_for_the_version_this_tree_ships():
     version = declared_version()
     assert version in documented, (
         f"pyproject.toml ships {version} and CHANGELOG.md does not document it. "
-        f"The newest heading is {max(documented, key=lambda v: tuple(int(p) for p in v.split('.')))}. "
+        f"The newest heading is {max(documented, key=Version)}. "
         f"The entry belongs in the commit that bumps the version, not in a "
         f"repair after the upload: 0.14.0 went out without one on 2026-09-08 "
         f"and the omission was public for seventeen hours")
@@ -113,3 +119,16 @@ def test_the_gate_accepts_the_repaired_tree(tmp_path):
         encoding="utf-8")
 
     assert declared_version(tmp_path) in documented_versions(tmp_path)
+
+
+def test_the_gate_accepts_an_exact_development_version_heading(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "invisible-playwright"\nversion = "0.43.1.dev0"\n',
+        encoding="utf-8")
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("# Changelog\n\n## [0.43.1.dev0] - 2026-10-28\n",
+                         encoding="utf-8")
+    assert declared_version(tmp_path) in documented_versions(tmp_path)
+    changelog.write_text("# Changelog\n\n## [0.43.1] - 2026-10-28\n",
+                         encoding="utf-8")
+    assert declared_version(tmp_path) not in documented_versions(tmp_path)

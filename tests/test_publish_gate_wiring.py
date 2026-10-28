@@ -44,7 +44,7 @@ def test_the_gate_recognises_THIS_project_and_not_the_core():
     from invisible_core.release import resolve_project_identity
 
     dist, pkg = resolve_project_identity(_REPO)
-    assert dist.replace("-", "_") == _REPO.name
+    assert dist.replace("-", "_") == "invisible_playwright"
     assert (_REPO / "src" / pkg).is_dir()
 
 

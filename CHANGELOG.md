@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.43.1.dev0] - 2026-10-28
+
+Pair the local Firefox 159.0 implementation with invisible_core 159.49.0.
+Keep the vendored Playwright 1.61 client and the existing Juggler API.
+Tests resolve sibling worktrees on the same branch and run with a generated
+seal recording the native source commit and BuildID.
+
 ## [0.43.0] - 2026-10-24
 
 The pin moves to invisible-core 53.48.0, which brings the firefox-53 engine.

@@ -187,7 +187,7 @@ def test_default_context_with_no_language_asked_is_en_us():
 
 
 @pytest.mark.unit
-def test_build_env_injects_webrtc_egress_when_discovered():
+def test_build_env_injects_webrtc_egress_when_discovered(session_executable):
     ip = InvisiblePlaywright(seed=42)
     # ⛔ TWO FIELDS, and this test only exercised one. `_webrtc_egress_ip`
     # is the FACT (where we exit from, read by the guard against drift);
@@ -202,7 +202,7 @@ def test_build_env_injects_webrtc_egress_when_discovered():
 
 
 @pytest.mark.unit
-def test_build_env_no_webrtc_keys_without_proxy(monkeypatch):
+def test_build_env_no_webrtc_keys_without_proxy(monkeypatch, session_executable):
     monkeypatch.delenv("STEALTHFOX_WEBRTC_PUBLIC_IP", raising=False)
     ip = InvisiblePlaywright(seed=42)
     ip._webrtc_egress_ip = None  # no proxy → real STUN already truthful
@@ -212,7 +212,7 @@ def test_build_env_no_webrtc_keys_without_proxy(monkeypatch):
 
 
 @pytest.mark.unit
-def test_build_env_caller_env_override_wins(monkeypatch):
+def test_build_env_caller_env_override_wins(monkeypatch, session_executable):
     monkeypatch.setenv("STEALTHFOX_WEBRTC_PUBLIC_IP", "198.51.100.5")
     ip = InvisiblePlaywright(seed=42)
     ip._webrtc_egress_ip = "203.0.113.9"  # auto-discovered
@@ -245,7 +245,7 @@ def test_build_env_drops_the_variables_the_display_names_absent():
 
 
 @pytest.mark.unit
-def test_build_env_never_injects_font_env():
+def test_build_env_never_injects_font_env(session_executable):
     # The patched binary is self-contained for fonts (always bundle-only; the
     # exposed set IS the bundle, system-ui + generics baked in C++). The wrapper
     # must NOT inject any STEALTHFOX_FONTLIST/SYSTEMUI env - even if legacy font
@@ -260,7 +260,7 @@ def test_build_env_never_injects_font_env():
 
 
 @pytest.mark.unit
-def test_build_env_no_font_keys_when_absent():
+def test_build_env_no_font_keys_when_absent(session_executable):
     ip = InvisiblePlaywright(seed=42)
     env = ip._build_env({})
     assert "STEALTHFOX_FONTLIST" not in env
