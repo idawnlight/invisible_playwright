@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "invisible_playwright"
-version = "0.43.1"
+version = "0.43.2"
 description = "Playwright wrapper for a patched Firefox with deterministic stealth profile."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -50,7 +50,7 @@ dependencies = [
     #
     # Install both repositories at the Git refs in docs/installation.md.
     # The version constraint also lets pip check detect an incompatible core.
-    "invisible_core==159.49.1",
+    "invisible_core==159.49.2",
     # ⛔ playwright is NO LONGER a dependency: since the full fork, the Python
     # client lives in src/invisible_playwright/_pw/ and the Node driver in
     # src/invisible_playwright/_driver/. Reintroducing it would not visibly

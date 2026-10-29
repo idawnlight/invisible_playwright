@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.43.2] - 2026-10-29
+
+- Pair the Git installation with invisible-core 159.49.2 and Firefox 159.0-r1.
+- Cover index and fork installation metadata in the import-floor and diagnostic tests.
+
 ## [0.43.1] - 2026-10-29
 
 - Install the fork from paired GitHub tags with invisible-core 159.49.1.
