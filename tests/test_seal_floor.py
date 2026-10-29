@@ -240,16 +240,36 @@ def test_a_core_whose_seal_json_is_gone_gets_the_message_not_a_traceback(tmp_pat
     assert not re.search(r"invisible-core==\d", err), err
 
 
-def test_the_message_names_the_remedy_and_the_reason(tmp_path):
-    """A floor that only says "too old" sends the user to a command they have to
-    invent. The remedy names an index distribution, which is what pip can
-    actually resolve and what `pip check` can actually verify afterwards."""
-    r = run_import(stub_core(tmp_path, with_seal=False), "invisible_playwright")
+@pytest.mark.parametrize("source", ["index", "fork"])
+def test_the_message_names_the_remedy_and_the_reason(tmp_path, source):
+    """A missing core gets a runnable remedy from the installed wrapper's source."""
+    root = stub_core(tmp_path, with_seal=False)
+    metadata = root / "invisible_playwright-1.2.3.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: invisible-playwright\nVersion: 1.2.3\n"
+        f"Requires-Dist: invisible-core=={DECLARED}\n", encoding="utf-8")
+    (metadata / "INSTALLER").write_text("pip\n", encoding="utf-8")
+    commit = "a" * 40
+    if source == "fork":
+        (metadata / "direct_url.json").write_text(json.dumps({
+            "url": "https://github.com/idawnlight/invisible_playwright.git",
+            "vcs_info": {"vcs": "git", "commit_id": commit,
+                         "requested_revision": "v1.2.3"},
+        }), encoding="utf-8")
+    r = run_import(root, "invisible_playwright")
+    assert r.returncode != 0, r.stdout
     err = " ".join(r.stderr.split())
     assert "invisible-core" in err, err
-    assert "git+" not in err, (
-        "the remedy still points at the git channel, which is the path whose "
-        "direct_url.json lies and which pip check cannot verify:\n" + err)
+    assert "pip install --force-reinstall" in err, err
+    if source == "index":
+        assert "git+" not in err, err
+        assert err.endswith("--force-reinstall invisible-playwright"), err
+    else:
+        assert (f"invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v{DECLARED}"
+                in err), err
+        assert (f"invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@{commit}"
+                in err), err
 
 
 def test_the_floor_is_the_first_thing_the_package_does(tmp_path):

@@ -9,6 +9,7 @@ was `pip install --force-reinstall` for everybody.
 from __future__ import annotations
 
 import importlib.metadata
+from email.message import Message
 import sys
 
 import pytest
@@ -19,10 +20,11 @@ from invisible_playwright import _pin
 class _Dist:
     def __init__(self, record):
         self._record = record
+        self.metadata = Message()
 
     def read_text(self, name):
-        assert name == "INSTALLER", name
-        return self._record
+        assert name in ("INSTALLER", "direct_url.json"), name
+        return self._record if name == "INSTALLER" else None
 
 
 @pytest.mark.parametrize("record", ["uv\n", "UV", " uv "])
