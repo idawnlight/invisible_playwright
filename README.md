@@ -15,8 +15,20 @@ Build the paired engine checkout with `./fork/build.sh`. Install the paired
 Python checkouts into one environment:
 
 ```sh
-python -m pip install -e /path/to/invisible_core -e /path/to/invisible_playwright
+uv venv
+uv pip install -e /path/to/invisible_core -e /path/to/invisible_playwright
 ```
+
+To install from GitHub tags or commits, specify both Python sources:
+
+```sh
+uv pip install \
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@<core-tag>" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@<wrapper-tag>"
+```
+
+The selected core must build the version this wrapper declares. These two
+packages can be used directly from Git without publishing them to PyPI.
 
 Pass the executable from that build explicitly. Its version, BuildID and source
 commit are recorded in the core's generated local seal:
@@ -38,13 +50,19 @@ with InvisiblePlaywright(
 
 ## Repository and release pairing
 
-Maintain these three repositories together:
+The three repositories have separate responsibilities:
 
 | Repository | Owns |
 | --- | --- |
 | Firefox engine | Native declarations, fonts, Juggler and platform builds |
 | invisible_core | Profile generation, prefs, protocol client, seal and downloads |
 | invisible_playwright | Playwright API, vendored client and Python server |
+
+The engine maintains Firefox 159 on `release/159`; core and wrapper each use
+`main`. Firefox is built separately from the Python packages. A built archive
+can be distributed directly, or uploaded with a release seal to GitHub
+Releases for automatic download. The current engine tree provides local build
+tooling; its fork release workflow is still to be implemented.
 
 `INVISIBLE_FIREFOX_RELEASE_REPOSITORY=owner/repository` selects the engine's
 GitHub release repository. Generate the seal from the built archives before
