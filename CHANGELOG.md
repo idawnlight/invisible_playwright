@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-10-29
+
+- Install the fork from paired GitHub tags with invisible-core 159.49.1.
+- Download and verify Firefox 159.0-r1 from the fork's GitHub Release on first launch.
+- Publish Python wheels and source archives through GitHub Releases.
+
 ## [0.43.1.dev0] - 2026-10-28
 
 Pair the local Firefox 159.0 implementation with invisible_core 159.49.0.

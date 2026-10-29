@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "invisible_playwright"
-version = "0.43.1.dev0"
+version = "0.43.1"
 description = "Playwright wrapper for a patched Firefox with deterministic stealth profile."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -48,28 +48,9 @@ dependencies = [
     # in invisible-core since the 2026-07-03 split; it pulls platformdirs/requests/
     # maxminddb/tzdata transitively. The wrapper only adds Playwright.
     #
-    # An EXACT specifier, not the bare `invisible-core @ git+...` direct reference
-    # this line used to carry. Measured, not assumed: pip is structurally blind to
-    # a violated direct reference. A direct reference carries no version specifier,
-    # so there is nothing for `pip check` to compare, and it reports "No broken
-    # requirements found" (exit 0) on an environment where the wrong core is
-    # installed. The same mismatch written as a real version specifier is reported,
-    # exit 1. pip also discards the metadata it just built for a moved git tag and
-    # leaves direct_url.json recording the OLD commit, so the file meant to be
-    # ground truth lies exactly when it matters.
-    #
-    # Cost, accepted knowingly: the pin literal now moves on every engine release,
-    # so a firefox-N bump is a two-repo release instead of a core-only push (it
-    # was three until invisible_firefox was deleted on 2026-08-18).
-    # invisible-core must be live on the index BEFORE this package is published,
-    # or a cold install fails to resolve.
-    #
-    # This literal is the ONLY place the expected core version is written. The
-    # import-time assertion in _pin.py reads it back out of this package's own
-    # metadata; nothing in src/ hardcodes a second copy (tests/test_core_pin.py
-    # fails if one appears). What stays invisible to install-time machinery is the
-    # --no-deps / lockfile residue, and _pin.py is the only layer that sees it.
-    "invisible_core==159.49.0",
+    # Install both repositories at the Git refs in docs/installation.md.
+    # The version constraint also lets pip check detect an incompatible core.
+    "invisible_core==159.49.1",
     # ⛔ playwright is NO LONGER a dependency: since the full fork, the Python
     # client lives in src/invisible_playwright/_pw/ and the Node driver in
     # src/invisible_playwright/_driver/. Reintroducing it would not visibly
@@ -185,11 +166,11 @@ norecursedirs = ["playwright-upstream"]
 invisible-playwright = "invisible_playwright.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/feder-cr/invisible_playwright"
-Repository = "https://github.com/feder-cr/invisible_playwright"
-Issues = "https://github.com/feder-cr/invisible_playwright/issues"
-Changelog = "https://github.com/feder-cr/invisible_playwright/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/feder-cr/invisible_playwright#readme"
+Homepage = "https://github.com/idawnlight/invisible_playwright"
+Repository = "https://github.com/idawnlight/invisible_playwright"
+Issues = "https://github.com/idawnlight/invisible_playwright/issues"
+Changelog = "https://github.com/idawnlight/invisible_playwright/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/idawnlight/invisible_playwright/blob/main/docs/installation.md"
 
 # No [tool.hatch.metadata] allow-direct-references opt-in: there is no direct
 # reference left in [project].dependencies, and leaving the switch on is what
@@ -225,6 +206,7 @@ exclude = ["tests/playwright-upstream"]
 pytest = true
 pin = true
 release_tags = ["v"]
+release_backend = "github"
 
 # What this repository declares about ITSELF to the shared language gate
 # (`python -m invisible_core.english`, since invisible-core 30.23.0). The logic

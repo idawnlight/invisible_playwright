@@ -235,82 +235,78 @@ def test_the_engine_version_on_the_page_is_the_one_in_the_seal():
             f"and nobody re-reads it, so a stale badge outlives every other copy")
 
 
+def _asset_platforms(assets) -> set[tuple[str, str]]:
+    """Keep the seal's OS and architecture together; accept older filename seals."""
+    platforms = set()
+    pattern = r"(?:^|[-_.])(windows|win|linux|macos)[-_](x86_64|amd64|arm64|aarch64)(?=[-_.]|$)"
+    for name, asset in assets.items():
+        system, arch = asset.get("platform"), asset.get("arch")
+        if not (system and arch):
+            match = re.search(pattern, name.lower())
+            assert match, f"asset has no OS/architecture: {name}"
+            system, arch = match.groups()
+        system, arch = system.lower(), arch.lower()
+        platforms.add(({"win": "windows", "win32": "windows", "darwin": "macos"}
+                       .get(system, system),
+                       {"amd64": "x86_64", "aarch64": "arm64"}.get(arch, arch)))
+    return platforms
+
+
+def _documented_platforms(text: str) -> set[tuple[str, str]]:
+    """Read the explicit support statement, including combined architectures."""
+    statement = re.search(r"supported platforms:\s*([^;\n.]+)", text.lower())
+    assert statement, "the README needs an explicit Supported platforms statement"
+    platforms = set()
+    for match in re.finditer(
+            r"\b(windows|linux|macos)\s+(x86_64|amd64|arm64|aarch64)"
+            r"(?:\s*/\s*(x86_64|amd64|arm64|aarch64))?",
+            statement.group(1).replace("*", "")):
+        system, first, second = match.groups()
+        for arch in (first, second):
+            if arch:
+                platforms.add((system, {"amd64": "x86_64", "aarch64": "arm64"}
+                               .get(arch, arch)))
+    assert platforms, "each supported platform must name its OS and architecture"
+    return platforms
+
+
 def test_the_supported_platforms_are_the_ones_the_seal_actually_ships():
-    """Five archives in the seal, five platforms on the page, and nothing tied
-    them together.
-
-    A platform claimed but not built is a download that 404s for whoever believed
-    the page - which is issue #14's shape, from the other end. A platform built
-    but not claimed is quieter and still wrong: somebody concludes it will not
-    work and uses something else.
-
-    Derived from the asset basenames rather than a written list, so a leg added or
-    dropped in the seal shows up here rather than in a bug report.
-    """
-    sealed_assets = _seal()["assets"]
-    text = _readme().lower()
-    if not sealed_assets:
-        assert "local build" in text
+    assets = _seal()["assets"]
+    text = _readme()
+    if not assets:
+        assert "local build" in text.lower()
         assert "binary_path" in text
-        assert "supported platforms:" not in text
+        assert "supported platforms:" not in text.lower()
         return
-    assets = " ".join(sealed_assets.keys()).lower()
+    shipped = _asset_platforms(assets)
+    assert shipped, "no OS/architecture was found in the sealed asset names"
+    documented = _documented_platforms(text)
+    assert documented == shipped, (
+        f"README platform pairs {sorted(documented)} differ from sealed assets "
+        f"{sorted(shipped)}")
 
-    #: seal token -> the SPECIFIC phrase the page has to carry for it.
-    #:
-    #: The first version accepted a bare family name, so "macos" alone satisfied
-    #: `macos-arm64` AND `macos-x86_64`. Deleting the whole "macOS arm64 / x86_64"
-    #: claim left the gate green, because the word macOS still appears in the
-    #: Gatekeeper note two lines down. A gate that a passing mention satisfies is
-    #: not a gate - measured by deleting exactly that phrase, 2026-07-28.
-    expected = {
-        "win-x86_64": ["windows x86_64"],
-        "linux-x86_64": ["linux x86_64"],
-        "linux-arm64": ["arm64"],
-        "macos-arm64": ["macos arm64"],
-        "macos-x86_64": ["macos arm64 / x86_64", "macos x86_64"],
-    }
-    #: ⛔ RETIRED PLATFORMS. macOS went out of support on 2026-08-26 (end of
-    #: support, owner's decision), but the PINNED seal is still firefox-20, which
-    #: did have macOS: so the seal OVER-ships relative to what the product
-    #: supports from now on. Until a firefox-N without macOS is cut and the pin
-    #: is moved, this is the only pair where the README declares LESS than what
-    #: the seal contains, and that is correct: it does not claim a platform that
-    #: is no longer supported. It is not the other half of the defect (claiming
-    #: what is not built): that stays forbidden below.
-    DROPPED = {"macos-arm64", "macos-x86_64"}
 
-    missing = []
-    for token, spellings in expected.items():
-        if token in DROPPED:
-            continue                      # retired: the page is NOT expected to declare it
-        if token not in assets:
-            continue                      # the seal does not ship it; nothing to claim
-        if not any(sp in text for sp in spellings):
-            missing.append(
-                f"{token} is in the seal and the page never says {spellings[0]!r}")
-    assert not missing, "\n  ".join(
-        ["the page and the seal disagree about what runs:"] + missing)
+@pytest.mark.parametrize("assets,text,expected", [
+    ({"firefox-159.0-r1-linux-x86_64.tar.gz": {"platform": "linux", "arch": "x86_64"}},
+     "Supported platforms: Linux x86_64.", {("linux", "x86_64")}),
+    ({"firefox-linux-x86_64.tar.gz": {}, "firefox-linux-arm64.tar.gz": {}},
+     "Supported platforms: Linux x86_64 / arm64.",
+     {("linux", "x86_64"), ("linux", "arm64")}),
+    ({"firefox-win-x86_64.zip": {"platform": "win32", "arch": "x86_64"},
+      "firefox-linux-arm64.tar.gz": {}},
+     "Supported platforms: Windows x86_64, Linux arm64.",
+     {("windows", "x86_64"), ("linux", "arm64")}),
+])
+def test_platform_claims_keep_the_architecture_with_its_os(assets, text, expected):
+    assert _asset_platforms(assets) == expected
+    assert _documented_platforms(text) == expected
 
-    # And silence is not enough: if a platform is retired but the seal still
-    # ships it, the page has to SAY SO, or a reader on that platform does not
-    # understand why the package refuses. A positive gate, not "do not mention it".
-    if any(t in assets for t in DROPPED):
-        assert "macos is no longer supported" in text or "no longer supported" in text, (
-            "the seal still ships macOS assets (historical pin) but the page does "
-            "not say macOS is no longer supported: a Mac user would not understand "
-            "the refusal")
 
-    # And the other direction: nothing claimed that is not built.
-    for token in expected:
-        if token in DROPPED:
-            continue                      # retired: the page MAY name it as unsupported
-        if token in assets:
-            continue
-        family = token.split("-")[0]
-        assert family not in text, (
-            f"the page mentions {family} but the seal ships no {token} archive, so "
-            f"that download does not exist")
+def test_a_missing_linux_architecture_does_not_remove_the_other_architecture():
+    shipped = _asset_platforms({"firefox-linux-x86_64.tar.gz": {}})
+    assert _documented_platforms("Supported platforms: Linux x86_64.") == shipped
+    assert _documented_platforms("Supported platforms: Linux arm64.") != shipped
+    assert _documented_platforms("Supported platforms: Linux x86_64 / arm64.") != shipped
 
 
 def test_every_python_example_on_the_page_parses():

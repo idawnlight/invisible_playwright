@@ -1,73 +1,11 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# user-install.yml - can a person who has never seen this repo install it and
-# drive a browser, on the two operating systems we claim to support?
-#
-# WHY THIS EXISTS, SEPARATELY FROM e2e.yml.
-# e2e.yml installs the wrapper FROM THE CHECKOUT and then pins Playwright by
-# hand. That is the right shape for testing a change: it exercises the code in
-# the PR. It is the wrong shape for answering "does the published thing work",
-# and the difference is not academic:
-#
-#   * a checkout install never resolves `invisible-core==X.Y.Z` from the index,
-#     so the entire pin mechanism - the part most likely to break a release,
-#     and the reason a binary bump is now a three-package release - is outside
-#     what that job can see;
-#   * installing a blessed `playwright==<pin>` afterwards REPAIRS the venv. If
-#     the declared range resolves to a client the shipped Juggler cannot speak,
-#     that manual line turns the job green while every fresh install is broken.
-#     What a user gets is what the installer resolves from the declaration,
-#     and that is what has to be under test.
-#
-# So this workflow installs nothing from the checkout except the test files.
-# test_release_e2e.py runs the README's install block for the runner's system
-# as written - uv from its own installer, `uv init`, `uv add
-# invisible-playwright` from the index, `fetch` - and then drives the browser
-# from the project it made, the way somebody's first script would.
-# test_upgrade_e2e.py stays on pip on purpose: it is the path of the people who
-# installed before the README said uv, and they are still there.
-#
-# WHY IT MUST NOT BE MADE TOLERANT.
-# There is a real window in which this cannot pass: between publishing the core
-# and publishing the consumers. The tempting fixes - `|| true`, `--no-deps`, a
-# git fallback - all produce a GREEN job that installed nothing, and that lie
-# outlives the window by months. A red run during a publish is correct and
-# readable. See core-on-index.yml, which makes the same argument at length.
-#
-# WHY BOTH OPERATING SYSTEMS.
-# Windows is the primary target, and the two most recent defects were
-# Windows-only by construction: firefox.exe is a launcher stub that spawns the
-# real browser and exits, so a killed runner used to leave the tree behind, and
-# the job-object fix for it has no counterpart on Linux. A Linux-only matrix
-# would have seen neither.
-# ─────────────────────────────────────────────────────────────────────────────
 name: user-install
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
-    inputs:
-      source:
-        description: "index (what users get) or git (an unpublished commit)"
-        required: false
-        default: index
-        type: choice
-        options: [index, git]
   schedule:
-    # Weekly (Monday). The published artifacts do not change on their own, but
-    # everything around them does: pip resolves a new Playwright, GitHub moves a
-    # release asset, an index mirror lags. Those break users without any commit
-    # here, so a run triggered only by pushes would never see them. Weekly is
-    # enough to catch that drift without adding a Windows job to the queue daily.
-    - cron: "17 6 * * 1"
-  # ⛔ THE LEDGER PULL REQUEST, not `release: published` ([B347], core
-  # 50.48.0). The Release is created by the publish workflow with GITHUB_TOKEN,
-  # and an event that token causes starts no other workflow: on `release:` this
-  # job had never run at release time. The ledger PR exists only after the
-  # upload and `record`, and merging it waits for this run, so a release does
-  # not close before what it published installs. `python -m
-  # invisible_core.install_job` checks the wiring (tests.yml).
-  pull_request:
-    paths:
-      - PUBLISHED.json
+    - cron: '17 6 * * 1'
 
 permissions:
   contents: read
@@ -78,120 +16,66 @@ concurrency:
 
 jobs:
   install:
-    name: ${{ matrix.os }} - install from ${{ github.event.inputs.source || 'index' }} and launch
-    runs-on: ${{ matrix.os }}
+    name: README cold install and first launch (Linux x86_64)
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
-    strategy:
-      fail-fast: false      # one OS failing must not hide the other's result
-      matrix:
-        os: [ubuntu-24.04, windows-latest]
-
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PYTHONNOUSERSITE: '1'
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
-
-      # Only what the TEST needs. The package under test is installed by the
-      # test itself, into a venv it creates, from the index - installing it
-      # here as well would put a second copy on the path and the assertions
-      # would be reading the wrong one.
-      - name: Test harness only
-        run: python -m pip install --upgrade pip pytest packaging
-
-      # PyPI does not serve a new version to pip the instant twine finishes, and
-      # this workflow runs on the ledger pull request, which the publish run
-      # opens seconds after the upload (it ran on `release:`, just as soon).
-      # MEASURED 2026-07-28: invisible-firefox 0.2.6 was uploaded, the release was
-      # created about forty seconds later, and the pip install below still resolved
-      # 0.2.5. The job reported a forgotten publish that had happened two minutes
-      # earlier, which is the most expensive kind of red: it looks exactly like the
-      # real defect this workflow exists to catch.
-      #
-      # Bounded at five minutes, so a genuinely forgotten publish still fails. The
-      # PER-VERSION endpoint is the authority; the aggregate `info.version` lags it
-      # by minutes and has its own trap, so this asks for the exact URL.
-      #
-      # Only on the ledger pull request. A scheduled or dispatched run is not
-      # racing anything, and a wait there would hide a real absence behind five
-      # minutes of polling.
-      - name: wait for the index to serve this version
-        if: github.event_name == 'pull_request'
-        shell: bash
+      - name: Install only the test harness
         run: |
-          python - <<'PY'
-          import json, os, sys, time, tomllib, urllib.error, urllib.request
-          dist = tomllib.load(open("pyproject.toml", "rb"))["project"]["name"]
-          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
-          url = f"https://pypi.org/pypi/{dist}/{version}/json"
-          deadline = time.monotonic() + 300
-          n = 0
-          while True:
-              n += 1
-              try:
-                  with urllib.request.urlopen(url, timeout=30) as r:
-                      if json.load(r).get("urls"):
-                          print(f"::notice::{dist} {version} is on the index (attempt {n})")
-                          sys.exit(0)
-              except urllib.error.HTTPError as e:
-                  if e.code != 404:
-                      print(f"::warning::index returned HTTP {e.code}; not waiting further")
-                      sys.exit(0)
-              except OSError as e:
-                  print(f"index unreachable ({e}); retrying")
-              if time.monotonic() >= deadline:
-                  print(f"::warning::{dist} {version} still not on the index after 300s; "
-                        f"running the checks anyway so a real absence is reported")
-                  sys.exit(0)
-              time.sleep(10)
-          PY
-
-      - name: Linux runtime libraries for the browser
-        if: runner.os == 'Linux'
+          python -m pip install --upgrade pip
+          python -m pip install pytest packaging
+          python -I -c 'import importlib.util; assert importlib.util.find_spec("invisible_core") is None; assert importlib.util.find_spec("invisible_playwright") is None'
+      - name: Linux browser runtime libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libgtk-3-0 libdbus-glib-1-2 libasound2t64
-
-      - name: The user path, end to end
+      - name: Run the README installation and browser example
         env:
-          # The release walk asks the GitHub API once per published version.
-          # Unauthenticated that is 60 calls an hour PER RUNNER IP, and the
-          # walk hit 403 on its eleventh call when measured by hand. A
-          # rate-limited walk SKIPS, and a skip is not a check.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INVPW_E2E_SOURCE: ${{ github.event.inputs.source || 'index' }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTEST_ADDOPTS: ''
         shell: bash
         run: |
-          set -o pipefail   # or the tee below would swallow pytest's exit code
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run -a python -m pytest tests/test_release_e2e.py tests/test_upgrade_e2e.py -m e2e \
-              -o addopts="" -v -rs | tee e2e-report.txt
-          else
-            python -m pytest tests/test_release_e2e.py tests/test_upgrade_e2e.py -m e2e \
-              -o addopts="" -v -rs | tee e2e-report.txt
-          fi
+          set -euo pipefail
+          xvfb-run -a python -I -m pytest tests/test_release_e2e.py -m e2e \
+            --noconftest -p no:invisible_core.testing.world \
+            -o pythonpath= -o addopts= -v -rs \
+            --junitxml=user-install.xml | tee user-install.txt
+      - name: Require every installation assertion to run
+        run: |
+          python - <<'PYTHON'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
 
-      # A run whose tests all SKIPPED is not a pass, and it is the failure this
-      # suite is most exposed to: every test here is gated on `-m e2e` and
-      # several on a platform. `-rs` above prints the skips; this turns "nothing
-      # ran" into a refusal rather than a green tick.
-      - name: Refuse a run in which nothing actually ran
-        shell: bash
-        run: |
-          python - <<'PY'
-          import pathlib, re, sys
-          # pytest's own exit code cannot distinguish "all passed" from "all
-          # skipped", so the count is read back from the report it wrote.
-          report = pathlib.Path("e2e-report.txt")
-          if not report.is_file():
-              print("no report written; the step above did not run", file=sys.stderr)
-              sys.exit(1)
-          text = report.read_text(encoding="utf-8", errors="ignore")
-          m = re.search(r"(\d+) passed", text)
-          passed = int(m.group(1)) if m else 0
-          if passed < 6:
-              print(f"only {passed} test(s) actually ran (expected at least 6) - a suite that skipped "
-                    f"itself is not a pass", file=sys.stderr)
-              sys.exit(1)
-          print(f"{passed} tests ran")
-          PY
+          required = {
+              "test_clean_install_the_way_a_user_does_it",
+              "test_the_resolved_playwright_is_inside_the_range_the_package_declares",
+              "test_version_command_reports_wrapper_and_binary",
+              "test_fetch_against_live_release",
+              "test_binary_executes_after_fetch",
+              "test_playwright_launch_against_real_site",
+              "test_the_published_version_has_a_github_release",
+              "test_the_changelog_documents_every_version_it_claims_to_cover",
+          }
+          cases = ET.parse("user-install.xml").findall(".//testcase")
+          passed = {case.attrib["name"] for case in cases if not list(case)}
+          missing = required - passed
+          assert not missing, f"Installation assertions did not pass: {sorted(missing)}"
+          assert not any(case.find(status) is not None
+                         for case in cases for status in ("failure", "error", "skipped"))
+          with Path("user-install.txt").open("a") as report:
+              report.write(f"\nAll {len(required)} installation assertions passed.\n")
+          PYTHON
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: user-install-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            user-install.xml
+            user-install.txt
+          if-no-files-found: warn

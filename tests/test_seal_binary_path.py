@@ -34,12 +34,13 @@ from invisible_playwright import _engine
 
 SEALED_VERSION = "151.0"
 SEALED_BUILD = "20260724001949"
+SEALED_SOURCE = "0123456789abcdef0123456789abcdef01234567"
 FOREIGN_BUILD = "20260611193205"
 OLD_VERSION = "150.0.1"
 OLD_BUILD = "20260624073725"
 
-APP_INI = "[App]\nVendor=Mozilla\nName=Firefox\nVersion={v}\nBuildID={b}\n\n[Gecko]\nMinVersion={v}\nMaxVersion={v}\n"
-PLAT_INI = "[Build]\nBuildID={b}\nMilestone={v}\n"
+APP_INI = "[App]\nVendor=Mozilla\nName=Firefox\nVersion={v}\nBuildID={b}\nSourceStamp={s}\n\n[Gecko]\nMinVersion={v}\nMaxVersion={v}\n"
+PLAT_INI = "[Build]\nBuildID={b}\nMilestone={v}\nSourceStamp={s}\n"
 
 ENTRY_REL = DEFAULT_ENTRY_REL.get(sys.platform, "firefox")
 
@@ -51,11 +52,11 @@ def resources_of(root: Path) -> Path:
 
 
 def build_tree(root: Path, *, version: str = SEALED_VERSION, build_id: str = SEALED_BUILD,
-               marked: int = 4) -> Path:
+               marked: int = 4, source_commit: str = SEALED_SOURCE) -> Path:
     res = resources_of(root)
     res.mkdir(parents=True, exist_ok=True)
-    (res / "application.ini").write_text(APP_INI.format(v=version, b=build_id), encoding="utf-8")
-    (res / "platform.ini").write_text(PLAT_INI.format(v=version, b=build_id), encoding="utf-8")
+    (res / "application.ini").write_text(APP_INI.format(v=version, b=build_id, s=source_commit), encoding="utf-8")
+    (res / "platform.ini").write_text(PLAT_INI.format(v=version, b=build_id, s=source_commit), encoding="utf-8")
     with zipfile.ZipFile(res / "omni.ja", "w") as zf:
         for i, name in enumerate(JUGGLER_ENTRIES):
             zf.writestr(name, b"'zoom.stealth.hw_seed'" if i < marked else b"// vanilla")
@@ -77,7 +78,7 @@ def active(tmp_path, monkeypatch):
     p = tmp_path / "firefox-18.seal.json"
     p.write_text(json.dumps({
         "schema": 2, "tag": "firefox-18", "upstream_version": SEALED_VERSION,
-        "build_id": SEALED_BUILD, "source_commit": "0123456789abcdef",
+        "build_id": SEALED_BUILD, "source_commit": SEALED_SOURCE,
         "playwright": {"min": "1.55.0", "max": "1.61.0"}, "assets": {},
     }, sort_keys=True), encoding="utf-8")
     monkeypatch.setenv("INVISIBLE_SEAL_FILE", str(p))
@@ -90,6 +91,12 @@ def test_sealed_tree_is_accepted(tmp_path, active):
     entry = build_tree(tmp_path / "sealed")
     assert _engine.resolve_executable(entry) == entry
     assert _engine.resolve_executable(str(entry)) == entry
+
+
+def test_different_source_with_the_same_version_and_build_id_is_refused(tmp_path, active):
+    entry = build_tree(tmp_path / "different-source", source_commit="f" * 40)
+    with pytest.raises(EngineMismatch, match="SourceStamp"):
+        _engine.resolve_executable(entry)
 
 
 def test_unpatched_engine_via_binary_path_is_refused(tmp_path, active):

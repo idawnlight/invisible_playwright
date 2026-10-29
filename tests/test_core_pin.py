@@ -232,13 +232,16 @@ def test_a_core_too_old_to_carry_the_check_is_refused_by_name(tmp_path):
     assert REMEDY in err, err
 
 
-def test_that_refusal_carries_no_version_literal_and_no_git_install(tmp_path):
-    """The remedy names this distribution, so pip resolves the core version out
-    of our own Requires-Dist. A version literal here would be a second source of
-    truth, and the git channel is not the source of truth any more."""
+def test_that_refusal_uses_the_installed_source_and_declared_pin(tmp_path):
+    """The recovery command comes from installed metadata, including Git sources."""
     r = run_import(stub_core(tmp_path, name="ancient2"))
     err = " ".join(r.stderr.split())
-    assert "git+" not in err, err
+    assert REMEDY in err, err
+    if "git+" in REMEDY:
+        assert "idawnlight/invisible_core.git@v" in err
+        assert "idawnlight/invisible_playwright.git@" in err
+    else:
+        assert "git+" not in err, err
     assert not re.search(r"invisible-core==\d", err), err
 
 

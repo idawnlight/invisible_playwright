@@ -42,7 +42,7 @@ _SKIP = re.compile(r"^(docs|chore|ci|test|style|build)(\(|:)", re.I)
 #: install block that nothing kept in step with it. A command written in two
 #: places is two commands the day one of them changes; the release points at the
 #: one the README keeps.
-INSTALL_DOC = "https://github.com/feder-cr/invisible_playwright#install"
+INSTALL_DOC = "https://github.com/idawnlight/invisible_playwright#install"
 
 
 def _api(url: str, token: str | None) -> dict:

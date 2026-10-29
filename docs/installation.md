@@ -1,92 +1,133 @@
 ---
 title: "Installation"
-description: "Install the wrapper with uv, then fetch the patched Firefox binary separately - a one-time, sha256-verified download. Supported on Windows and Linux."
+description: "Install the paired Python packages from GitHub tags. Firefox downloads from the fork's GitHub Release on first launch and is reused from the local cache."
 parent: "Documentation"
 nav_order: 1
 ---
 
-
 # Installation
 
-Install invisible-playwright in two steps: `uv add invisible-playwright` for
-the Python wrapper, then `uv run invisible-playwright fetch` to download the
-patched Firefox binary it drives. The steps are separate on purpose - the Python
-package is small, the browser is not.
+This guide installs `invisible_playwright 0.43.1`, `invisible_core 159.49.1`,
+and Firefox 159.0 from the `firefox-159.0-r1` engine release. The Python tags
+are `v0.43.1` and `v159.49.1`.
+
+Supported platforms: **Linux x86_64**. Use Python **3.11 or newer** and Git.
+
+## Linux runtime dependencies
+
+On Ubuntu 24.04:
 
 ```bash
-uv add invisible-playwright
-uv run invisible-playwright fetch      # one-time ~238 MB download (~544 MB unpacked), sha256-verified
+sudo apt-get update
+sudo apt-get install -y \
+  python3 python3-venv git xvfb xauth \
+  libgtk-3-0t64 libdbus-glib-1-2 libasound2t64 libx11-xcb1 libxt6t64
 ```
 
-If you do not have a uv project yet, [the README's install steps](https://github.com/feder-cr/invisible_playwright#install) create one.
+With `headless=True`, the wrapper starts its own Xvfb display on Linux.
+Run your script with `python`; an outer `xvfb-run` is optional. With
+`headless=False`, Firefox opens on your desktop's display.
 
-`uv add` gets you the wrapper and its API. `fetch` downloads the patched Firefox
-binary itself, verifies it against a sha256 shipped inside `invisible-core`, and caches
-it. You only pay that cost once per engine version - later runs use the cached copy
-without a network call.
+## Install the Python packages
 
-## Supported platforms
-
-**Windows x86_64**, **Linux x86_64 / arm64**. There is no macOS engine: its
-build ended on 2026-08-26.
-
-`invisible-playwright version` prints the cache location, and
-`invisible-playwright fetch` prints the exact binary path as its last line.
-
-## Where the engine is cached, and how to move it
-
-By default the engine lives in a per-user cache directory. To put it somewhere else -
-another drive, a shared location, a path your CI already caches between runs - set
-`INVISIBLE_PLAYWRIGHT_CACHE_DIR` before the first `fetch`:
+Create a fresh environment and install both Git references in the same command:
 
 ```bash
-export INVISIBLE_PLAYWRIGHT_CACHE_DIR=/mnt/big/engines
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install \
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.1" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.1"
 ```
 
-If you already have a compatible binary on disk and want to skip the download
-entirely, point `INVPW_BINARY_PATH` at it instead. The full list of environment
-variables, including the ones for corporate networks and CI, is in
-[Configuration](configuration.md).
+The wrapper requires `invisible-core==159.49.1`; supplying both references
+selects the fork's paired core directly. Its Playwright Python client is bundled.
 
-## Verifying the install
+## First launch
 
-Run `invisible-playwright version` to confirm what's actually installed:
+Save this as `smoke.py`:
+
+```python
+from invisible_playwright import InvisiblePlaywright
+
+with InvisiblePlaywright(seed=42, headless=True) as browser:
+    page = browser.new_page()
+    page.goto("https://example.com/")
+    print(page.title())
+```
+
+Run it:
 
 ```bash
-invisible-playwright version   # wrapper, core and engine versions, and the cache location
+python smoke.py
 ```
 
-There is no separate check to run: `fetch` compares every cached engine against
-the seal on every run, so re-running it is the verification. Both commands are in
-the [CLI reference](cli-reference.md).
+On first launch, the core downloads Firefox from
+[idawnlight/firefox_antidetect_patch](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-159.0-r1),
+checks the archive's SHA256, unpacks it, and starts the browser. Later launches
+check and reuse the cached engine. The normal installation uses the release
+record bundled with the core; it needs no `binary_path` or environment settings.
+The Python installation and browser download happen at separate times.
 
-## Short answers to the questions that lead here
+To download the browser ahead of the first launch, run:
 
-**Do I need to install Firefox myself?** No. `uv run invisible-playwright fetch`
-downloads the patched binary for you, verifies it, and caches it - there is nothing
-to install separately.
+```bash
+python -m invisible_playwright fetch
+```
 
-**How big is the download, and does it happen on every run?** Around 238 MB
-compressed (about 544 MB unpacked), and only once per engine version. Later runs
-reuse the cached copy with no network call.
+Its last output line is the executable path. The equivalent console command is
+`invisible-playwright fetch`.
 
-**How do I know the cached binary hasn't been tampered with?** `fetch` checks it
-against a sha256 shipped inside `invisible-core` every time it runs, not just on
-first install, so re-running `fetch` is itself the verification.
+## Versions and cache
 
-**What if I already have a compatible binary, or `fetch` can't reach the network?**
-Point `INVPW_BINARY_PATH` at a binary you already have to skip the download
-entirely. [Configuration](configuration.md) lists the other environment variables,
-including the ones for corporate networks and CI.
+```bash
+python -m invisible_playwright version
+python -m pip check
+```
 
-**Which platforms are supported?** Windows x86_64 and Linux x86_64/arm64.
+`version` prints the wrapper/core versions, Firefox release and BuildID, plus
+the engine and state cache directories. To put the cache on another disk, set
+this before launching or fetching:
 
-**See also:** [Configuration](configuration.md) for proxy, timezone and environment
-variables, [CLI reference](cli-reference.md) for what `fetch` and `version` do in
-detail, and [Quickstart](quickstart.md) for the two-line switch from plain
-Playwright.
+```bash
+export INVISIBLE_PLAYWRIGHT_CACHE_DIR=/mnt/browser-cache
+python -m invisible_playwright fetch
+```
 
-## Next
+## Preloaded or locally built Firefox
 
-[Quickstart](quickstart.md) has the two-line change from plain Playwright, and the
-sync and async examples.
+For machines where the browser is distributed separately, download the release
+archive on another machine and extract it. Pass its Firefox executable directly:
+
+```python
+with InvisiblePlaywright(
+    binary_path="/opt/invisible-firefox/firefox",
+    seed=42,
+    headless=True,
+) as browser:
+    page = browser.new_page()
+```
+
+The release build uses the same bundled release record. For a different local
+build, set `INVISIBLE_SEAL_FILE` to that build's generated seal before importing
+the package. `binary_path` is an API argument; `INVPW_BINARY_PATH` belongs to the
+repository's test runner.
+
+For an offline Python installation, build a wheel directory on a machine with
+the same Python/platform, copy it with the browser archive, then install from it:
+
+```bash
+python -m pip wheel --wheel-dir wheelhouse \
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.1" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.1"
+# On the destination machine:
+python -m pip install --no-index --find-links wheelhouse \
+  invisible-core==159.49.1 invisible-playwright==0.43.1
+```
+
+## Update
+
+Install the next release's two documented Git references together. Their Python
+versions and the core's selected Firefox release determine the installed pair.
+See [Quickstart](quickstart.md) for the sync and async APIs.

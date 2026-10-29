@@ -63,18 +63,57 @@ def reinstall_command() -> str:
     and takes the same two branches, for this one command. Until 2026-10-17 it was
     `pip install --force-reinstall` for everybody, and the venv the README makes
     (`uv init` + `uv add`) has no pip in it.
+
+    A known fork install restores both pinned Git sources, so a missing core
+    can be resolved without an unpublished index version.
     """
+    import json
+    import re
     from importlib.metadata import PackageNotFoundError, distribution
 
+    requirements = [DIST_NAME]
     try:
-        record = distribution(DIST_NAME).read_text("INSTALLER")
+        dist = distribution(DIST_NAME)
+        record = dist.read_text("INSTALLER")
+        raw = dist.read_text("direct_url.json")
+        try:
+            direct = json.loads(raw) if raw else {}
+        except ValueError:
+            direct = {}
+        if not isinstance(direct, dict):
+            direct = {}
+        vcs = direct.get("vcs_info") or {}
+        if not isinstance(vcs, dict):
+            vcs = {}
+        repository = "https://github.com/idawnlight/invisible_playwright"
+        if vcs.get("vcs") == "git":
+            fork = direct.get("url") in (repository, repository + ".git")
+        else:
+            fork = any(value.partition(",")[0].strip().lower() == "repository" and
+                       value.partition(",")[2].strip().rstrip("/") in (repository, repository + ".git")
+                       for value in dist.metadata.get_all("Project-URL", []))
+        if fork:
+            pins = [match.group(1) for value in dist.requires or ()
+                    if (match := re.fullmatch(
+                        r"invisible[-_]core\s*(?:\(\s*)?==\s*([0-9][A-Za-z0-9.+-]*)\s*\)?",
+                        value.strip(), re.IGNORECASE))]
+            commit = vcs.get("commit_id", "")
+            if not isinstance(commit, str):
+                commit = ""
+            revision = commit if re.fullmatch(r"[0-9a-fA-F]{40}", commit) else f"v{dist.version}"
+            if len(pins) != 1 or not re.fullmatch(r"(?:[0-9a-fA-F]{40}|v[0-9][A-Za-z0-9.+-]*)", revision):
+                return "Reinstall both pinned Git sources from README.md; installed version/core-pin metadata is incomplete."
+            requirements = [
+                f"invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v{pins[0]}",
+                f"{DIST_NAME} @ git+{repository}.git@{revision}",
+            ]
     except PackageNotFoundError:
         record = None
     if (record or "").strip().lower() == "uv":
         cmd = ["uv", "pip", "install", "--python", _sys.executable,
-               "--force-reinstall", DIST_NAME]
+               "--force-reinstall", *requirements]
     else:
-        cmd = [_sys.executable, "-m", "pip", "install", "--force-reinstall", DIST_NAME]
+        cmd = [_sys.executable, "-m", "pip", "install", "--force-reinstall", *requirements]
     return " ".join(f'"{t}"' if " " in t else t for t in cmd)
 
 # Captured BEFORE the core is imported, and it is the whole soundness argument
@@ -144,7 +183,7 @@ except ImportError as _e:
     ) from _e
 except Exception as _e:
     raise ImportError(
-        f"invisible-core is installed but it cannot even determine its own version: "
+        f"invisible-core is installed but cannot be imported: "
         f"importing it raised {type(_e).__name__}: {_e}\n"
         f"That is a partial or damaged installation, not an old one. A missing or "
         f"unreadable invisible_core/seal.json is the usual cause, and it is read "

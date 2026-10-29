@@ -29,11 +29,7 @@ permissions:
   contents: read
 
 jobs:
-  # `pip install .` below resolves `invisible-core==N.M.0` from the package
-  # index, and the core is published BEFORE this package. This gate answers
-  # whether it is there yet; during that window the smoke matrix is SKIPPED
-  # with the reason in the run summary rather than faked green, and once the
-  # core is up it runs unchanged. See .github/workflows/core-on-index.yml.
+  # The core Git tag must exist. Browser steps also require a Windows asset.
   core-on-index:
     uses: ./.github/workflows/core-on-index.yml
 
@@ -77,11 +73,37 @@ jobs:
             Format-Table -AutoSize
 
       - name: Install package from this commit
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install .
+          python -m pip install "$(python scripts/core_requirement.py)" .
+
+      - name: Check whether this engine publishes a Windows asset
+        id: platform
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import platform
+          import sys
+          from invisible_core.seal import active_seal, normalize_arch
+
+          seal = active_seal()
+          arch = normalize_arch(platform.machine())
+          supported = any(asset.platform == sys.platform and asset.arch == arch
+                          for asset in seal.assets.values())
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write(f"available={str(supported).lower()}\n")
+          if not supported:
+              message = f"{seal.tag} has no {sys.platform}/{arch} asset; browser steps are skipped."
+              print(f"::notice::{message}")
+              with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as summary:
+                  summary.write(message + "\n")
+          PY
 
       - name: Fetch the sealed binary
+        if: steps.platform.outputs.available == 'true'
         shell: pwsh
         run: |
           $fetchOutput = @(python -m invisible_playwright fetch)
@@ -99,6 +121,7 @@ jobs:
           "FF_PATH=$ffPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Verify firefox.exe can launch standalone
+        if: steps.platform.outputs.available == 'true'
         shell: pwsh
         run: |
           # CARRY the path from fetch, never rebuild it. The cache directory is
@@ -124,6 +147,7 @@ jobs:
           Write-Host "OK: firefox.exe runs and prints version."
 
       - name: Run reporter's exact InvisiblePlaywright snippet
+        if: steps.platform.outputs.available == 'true'
         run: |
           python -c "
           import asyncio

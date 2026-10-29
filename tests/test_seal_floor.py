@@ -22,8 +22,8 @@ comparison moved into invisible_core, a stub without them cannot reach the
 comparison at all: it would only ever produce the prelude's "core missing or too
 old" message, and every assertion here would be about the wrong code path. So
 the stub is built by copying this repo's installed core modules beside a
-fabricated seal.json, which means the version under test is derived the real
-way, from a seal tag and CORE_REVISION.
+fabricated seal.json. The Python version is declared independently in
+_version.py, as it is in the installed fork.
 
 No browser, no network. The real installation is never disturbed.
 """
@@ -110,7 +110,7 @@ def stub_core(tmp_path: Path, *, with_seal: bool, version: str | None = None,
     derivation.
     """
     version = version or DECLARED or "18.0.0"
-    major, minor = version.split(".")[0], version.split(".")[1]
+    major = version.split(".")[0]
     suffix = "with_seal" if with_seal else "no_seal"
     if not with_seal_json:
         suffix = "no_seal_json"
@@ -142,13 +142,15 @@ def stub_core(tmp_path: Path, *, with_seal: bool, version: str | None = None,
         f"the installed core at {CORE_PKG} has neither pin.py nor _pin.py, so "
         f"there is no pin machinery to build a stub from")
     text = (CORE_PKG / "_version.py").read_text(encoding="utf-8")
-    text = re.sub(r"(?m)^CORE_REVISION\s*=\s*\d+", f"CORE_REVISION = {minor}", text)
+    text = re.sub(r'(?m)^__version__\s*=\s*[^\n]+', f'__version__ = {version!r}', text)
     (pkg / "_version.py").write_text(text, encoding="utf-8")
     if with_seal_json:
         (pkg / "seal.json").write_text(
             json.dumps({"tag": f"firefox-{major}"}), encoding="utf-8")
     if with_seal:
         (pkg / "seal.py").write_text(
+            "import json\nfrom pathlib import Path\n"
+            "_seal = json.loads(Path(__file__).with_name('seal.json').read_text())\n"
             "def active_seal():\n    return None\n", encoding="utf-8")
     return root
 
@@ -183,9 +185,8 @@ def test_the_stub_actually_shadows_the_installed_core(tmp_path):
     assert str(root) in got["pin"], got
 
 
-def test_the_stub_derives_its_version_the_real_way(tmp_path):
-    """The stub is only worth trusting if its version comes out of seal.json and
-    CORE_REVISION, like the shipped package's does."""
+def test_the_stub_declares_its_python_version_independently(tmp_path):
+    """The version must come from the real version module, independently of its seal."""
     root = stub_core(tmp_path, with_seal=True, version="19.2.0")
     code = textwrap.dedent(f"""
         import sys

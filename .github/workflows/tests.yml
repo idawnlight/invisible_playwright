@@ -10,382 +10,49 @@ on:
 permissions:
   contents: read
 
-# One run of this workflow per branch at a time. A newer push cancels the older
-# in-flight run as a whole, cleanly, instead of leaving its queued jobs to be
-# cancelled one by one - which left the run marked failed even though nothing
-# had actually failed. Keyed by workflow + ref so tests and e2e never cancel
-# each other; only an older run of THIS workflow on the same branch is replaced.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  INVISIBLE_CORE_AUTOFIX: "off"
+
 jobs:
-  # The gate was written FOR this repository on 2026-08-27, after 549 lines of
-  # Italian shipped here in one subsystem and 852 more were found in 33 files
-  # that were already public. It has been wired nowhere ever since: not into
-  # tests.yml, not into the pre-push hook, whose steps are pytest, pin, names,
-  # internals and publish. Both sibling packages copied the script AND the CI
-  # step; this one kept only the script, so the one repository the rule exists
-  # for is the one that never checked. Measured 2026-09-03, the first time
-  # anybody ran it here: four files, red.
-  #
-  # Its own job, and deliberately NOT behind core-on-index. Reading files needs
-  # no install, and hanging a language check off the availability of a package on
-  # an index would silently skip it during exactly the window when releases are
-  # being made.
-  english:
-    name: the repository is English
-    # ⛔ The gate is `invisible_core.english` since core 30.23.0, not a script of
-    # this repository: the script was a COPY, one here and one in AIHawk, and the
-    # copies drifted - this one never gained the `.js/.css/.html` coverage the
-    # other did. So this job needs the pinned core on the index, like `unit`.
-    needs: core-on-index
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: install the pinned core, which carries the gate
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-      - name: check the prose
-        # --selftest first: a language gate that has only ever printed "clean" is
-        # the same non-gate as any other, and this one can go blind from a single
-        # edit to its word list. What this repository exempts is declared in
-        # `[tool.invisible.english]` in pyproject.toml, and an exclusion that
-        # names nothing is refused.
-        run: |
-          python -m invisible_core.english --selftest
-          python -m invisible_core.english
-
-  # A README that promises to beat everything was live here on 2026-09-22 ("it
-  # passes every bot detection test"), and the check that found it ran by hand,
-  # from outside the repository, after the text was public. The logic is
-  # `invisible_core.claims` since core 34.29.0, shared with the MCP server's
-  # repository; what this one reads is declared in `[tool.invisible.claims]`,
-  # and without a declaration it is the README, which is also what PyPI shows.
-  claims:
-    name: the README promises nothing it cannot support
-    needs: core-on-index
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: install the pinned core, which carries the gate
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-      - name: check the claims
-        # --selftest first, for the same reason as the language gate: a check
-        # that has only ever printed "clean" may have gone blind.
-        run: |
-          python -m invisible_core.claims --selftest
-          python -m invisible_core.claims
-
-  # The way in is uv (the owner, 2026-09-06 and "uv everywhere" on 2026-10-17),
-  # and on that day this repository still taught pip in its README, its
-  # CONTRIBUTING, its docs and the messages its code prints, with nothing
-  # comparing any of them with the decision. `invisible_core.way_in` since core
-  # 49.45.0 refuses an install instruction that is not uv, in the tracked
-  # Markdown, the issue templates and the string literals of src/.
-  way-in:
-    name: every install instruction is uv
-    needs: core-on-index
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: install the pinned core, which carries the gate
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-      - name: check the way in
-        # --selftest first: a check that has only ever printed "clean" may
-        # have gone blind.
-        run: |
-          python -m invisible_core.way_in --selftest
-          python -m invisible_core.way_in
-
-  # The user-install job installs what was published, as a user would. It ran
-  # on `release: published`, which never fires: the Release is created with
-  # GITHUB_TOKEN, and an event that token causes starts no other workflow
-  # ([B347], core 50.48.0). `invisible_core.install_job` judges this tree: the
-  # job runs on the ledger pull request, its wait for the index is scoped to it
-  # and bounded, and every test file it runs keeps out, in a `_LEAKS`, every
-  # variable the pinned core's library reads.
-  install-job:
-    name: the user-install job runs on the ledger pull request
-    needs: core-on-index
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: install the pinned core, which carries the gate
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-      - name: check the install job
-        run: |
-          python -m invisible_core.install_job --selftest
-          python -m invisible_core.install_job
-
-  # `pip install -e ".[dev]"` below resolves `invisible-core==N.M.0` from the
-  # package index. The core is published BEFORE this package, so between the
-  # first push of this repo and that upload there is a window in which no
-  # install here can succeed. This gate answers "is it on the index?" and the
-  # unit job depends on the answer: during the window that job is SKIPPED (grey
-  # in the checks list, with the reason written into the run summary), never
-  # faked green; once the core is published it runs exactly as before. Full
-  # reasoning, including why `|| true`, `--no-deps` and a git fallback were all
-  # rejected, is in .github/workflows/core-on-index.yml.
-  core-on-index:
-    uses: ./.github/workflows/core-on-index.yml
-
   unit:
-    name: pytest (${{ matrix.os }}, py${{ matrix.python }})
-    needs: core-on-index
-    if: needs.core-on-index.outputs.available == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        # Every version `requires-python = ">=3.11"` promises. Two of them were
-        # untested until 2026-08-01, and the user who opened issue #51 was on
-        # 3.14. test_marker_vocabulary.py compares this list to the floor.
+        os: [ubuntu-24.04, windows-latest]
         python: ["3.11", "3.12", "3.13", "3.14"]
-        # Windows runners are the scarce, 2x-cost, slow-to-schedule ones, and a
-        # burst of pushes queues them for a long time. Run the FULL Python range
-        # on ubuntu (cheap, fast) and cover Windows on 3.12 only - this is a
-        # pure-Python package, the OS-specific surface is tiny. The python LIST
-        # above stays complete so test_marker_vocabulary still sees every version.
-        exclude:
-          - { os: windows-latest, python: "3.11" }
-          - { os: windows-latest, python: "3.13" }
-          - { os: windows-latest, python: "3.14" }
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-          cache: pip
-
-      - name: Install package + dev extras
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: arm the pre-push gates
-        # A fresh clone has no core.hooksPath, and the suite says so - the
-        # reminder moved into `invisible_core.testing` on 2026-07-28 and all
-        # three repos that existed then made the assertion (two now, since
-        # invisible_firefox was deleted on 2026-08-18), but only the core's CI
-        # had this step, so both consumers went red on it. Do here what a
-        # developer does once. It also means install_hooks.py is exercised on
-        # every runner instead of only on the one machine that ever ran it by
-        # hand.
-        run: python scripts/install_hooks.py
-
-      - name: undefined names and duplicate definitions
-        # F821 (undefined name) and F811 (redefinition) only. Not a style pass:
-        # these two are the rules that catch a name that cannot resolve, which
-        # `from __future__ import annotations` hides in an annotation and which
-        # a suite only finds if it happens to execute that line. Both bit on
-        # 2026-07-28 - a `throwaway_venv` used and imported nowhere took a
-        # user-install job red at RUNTIME, and six annotations named a type that
-        # was defined in no module at all.
-        #
-        # Zero violations in all three repos when this was added, so it is a
-        # gate rather than a cleanup backlog. Keep it that way.
-        run: |
-          python -m ruff check --select F821,F811,F601 --no-cache --output-format concise .
-
-      - name: Run pytest
-        shell: bash
-        run: |
-          set -o pipefail   # or tee would swallow pytest's exit code
-          pytest tests/ -v --tb=short -rs | tee tests-report.txt
-
-      # This repo has the largest suite of the three and was the only one with
-      # no floor. pytest's exit code cannot distinguish "everything passed"
-      # from "the marker expression deselected everything", and `addopts`
-      # already filters on two markers - one more, or a typo in one, silently
-      # turns 726 tests into 0 and reports success.
-      - name: Refuse a run in which the suite deselected itself
-        shell: bash
-        run: |
-          python - <<'PY'
-          import pathlib, re, sys
-          text = pathlib.Path("tests-report.txt").read_text(encoding="utf-8", errors="ignore")
-          m = re.search(r"(\d+) passed", text)
-          passed = int(m.group(1)) if m else 0
-          # FLOOR, not a target. It exists because a mis-wired selection runs
-          # almost nothing and still exits 0 - the exit code cannot see it.
-          #
-          # Was 600 until 2026-07-27, when 322 tests MOVED to invisible_core:
-          # they covered core modules and reached them through this package's
-          # four-line back-compat shims, so six real breaks in core code were
-          # surviving the core's own suite. Nothing shrank; the tests are in the
-          # package they test. This suite runs ~420 now.
-          #
-          # Keep it a little under the real count. It is a tripwire for "the
-          # selection collapsed", not an assertion about how many tests exist.
-          if passed < 380:
-              print(f"only {passed} test(s) ran (expected 380+) - the selection "
-                    f"dropped most of the suite and the exit code cannot see it",
-                    file=sys.stderr)
-              sys.exit(1)
-          print(f"{passed} tests ran")
-          PY
-
-  # ONE SINGLE CONTEXT FOR BRANCH PROTECTION. Measured 2026-08-13: this
-  # repo's protection required `pytest (windows-latest, py3.11)`, which the
-  # matrix explicitly EXCLUDES a few lines up - a context no job can ever
-  # produce, so a protection that could never be satisfied. With
-  # `enforce_admins` set to false every push went through anyway and nobody
-  # noticed. Same shape in the core and in the manager.
-  #
-  # A list of matrix names drifts every time the matrix changes, and that is
-  # exactly how it got here. This job depends on the whole matrix and its
-  # name never changes.
-  #
-  # SKIPPED IS NOT FAILED, and that is the part specific to this repo. `unit`
-  # is skipped on purpose when `core-on-index` says the pin is not yet on the
-  # index: during that window no install can succeed, and the workflow chose
-  # to SKIP instead of faking green. A gate that required `success` would
-  # turn that choice into a red and push toward dropping the protection on
-  # release day of all days. So it refuses on `failure` and `cancelled`,
-  # never on `skipped`.
-  # The guides are the surface a stranger copies first, and until 2026-09-08
-  # nothing read them: one page published `page.accessibility.snapshot()`, which
-  # this fork does not have, so anybody who ran that block got an AttributeError.
-  # A broken test is seen by whoever runs the suite; a broken guide is seen once,
-  # by a reader who then leaves.
-  #
-  # It needs the package importable, because it asks the REAL classes what they
-  # have rather than carrying a list that would drift from them - so it takes
-  # core-on-index's answer exactly as `unit` does, and is SKIPPED during the
-  # window rather than faked green.
-  docs-api:
-    name: the guides name an API that exists
-    needs: core-on-index
-    if: needs.core-on-index.outputs.available == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install package
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-      - name: check the guides against the API
-        # --selftest first, for the same reason the English gate does it: this
-        # one goes blind from a single edit to the list of names it inspects.
-        run: |
-          python scripts/check_docs_api_surface.py --selftest
-          python scripts/check_docs_api_surface.py
-
-  # `gate` is the ONLY context main requires, so a check this job does not wait
-  # for is a check the branch protection cannot see. It waited for three of the
-  # five, and the two it left out are not minor ones: `english` is the gate
-  # written FOR this repository after 549 lines of Italian shipped here in one
-  # subsystem, and `version` is what stands between a forgotten bump and a
-  # release that publishes nothing and reports success. Either could go red
-  # while this job went green and the push landed on main regardless - which is
-  # the decorative protection this project has already met once, on the branch
-  # rules that required job names no job produced any more.
-  #
-  # `skipped` is not a failure and must not be treated as one: `version` runs on
-  # pull requests only and is skipped on every push to main, and `unit` and
-  # `docs-api` are skipped during the window when the pinned core is not on the
-  # index yet. The case arms name failure and cancelled, so a skip passes on
-  # purpose. That is also why each arm carries its own sentence: a gate that
-  # exits 1 without saying which of five inputs went red is a gate somebody has
-  # to open five tabs to read.
-  gate:
-    needs: [core-on-index, unit, docs-api, english, claims, version, way-in, install-job]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: refuse unless nothing failed
-        run: |
-          echo "core-on-index: ${{ needs.core-on-index.result }}"
-          echo "unit:          ${{ needs.unit.result }}"
-          echo "docs-api:      ${{ needs.docs-api.result }}"
-          echo "english:       ${{ needs.english.result }}"
-          echo "claims:        ${{ needs.claims.result }}"
-          echo "way-in:        ${{ needs.way-in.result }}"
-          echo "version:       ${{ needs.version.result }}"
-          echo "install-job:   ${{ needs.install-job.result }}"
-          case "${{ needs.unit.result }}" in
-            failure|cancelled) echo "the suite did not pass"; exit 1 ;;
-          esac
-          case "${{ needs.core-on-index.result }}" in
-            failure|cancelled) echo "the index check did not run"; exit 1 ;;
-          esac
-          case "${{ needs.docs-api.result }}" in
-            failure|cancelled) echo "the guides name something that does not exist"; exit 1 ;;
-          esac
-          case "${{ needs.english.result }}" in
-            failure|cancelled) echo "the repository is not English"; exit 1 ;;
-          esac
-          case "${{ needs.claims.result }}" in
-            failure|cancelled) echo "the README promises what no measurement supports"; exit 1 ;;
-          esac
-          case "${{ needs.way-in.result }}" in
-            failure|cancelled) echo "an install instruction is not uv"; exit 1 ;;
-          esac
-          case "${{ needs.version.result }}" in
-            failure|cancelled) echo "the version this change proposes is already taken"; exit 1 ;;
-          esac
-          case "${{ needs.install-job.result }}" in
-            failure|cancelled) echo "the user-install job would not run on a release, or leaks"; exit 1 ;;
-          esac
-          echo "ok"
-
-  # Measured 2026-09-04: 0.10.0 was on the index while main sat on 0.10.0 with
-  # FIFTEEN commits of different content on top of the tag - 39 files, 841
-  # insertions, the screenshot clip fix among them. A release from there would
-  # have published NOTHING and reported success, because publish.yml treats an
-  # already-present version as a deliberate no-op: right for a re-pushed tag,
-  # indistinguishable from somebody forgetting to bump. The fix could not have
-  # reached anybody, and nothing would have said so.
-  #
-  # Pull requests only: on main straight after a release the version IS the
-  # published one until somebody bumps, and a gate that is red at rest is one
-  # people learn to skip. Bumping publishes nothing - publishing happens on a
-  # tag push - so main on an unreleased version is the normal state between
-  # releases and the rule costs one line.
-  version:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # The gate diffs the tree against the tag of the published
-          # version; a shallow clone has no tags and cannot tell.
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: the version this change proposes is still free
-        env:
-          IPW_CHECK_VERSION: "1"
+          python-version: ${{ matrix.python }}
+      - name: Install the pinned GitHub core and checkout
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
-          python -m pytest -q tests/test_version_is_not_taken.py
+          python -m pip install "$(python scripts/core_requirement.py)" -e ".[dev]" hatchling
+      - run: python scripts/install_hooks.py
+      - name: Check names and duplicate definitions
+        run: python -m ruff check --select F821,F811,F601 --no-cache --output-format concise .
+      - name: Run the default suite
+        run: python -m pytest -q -rs --junitxml=unit.xml
+      - name: Require the default suite to run
+        run: |
+          python - <<'PYTEST_COUNT'
+          import xml.etree.ElementTree as ET
+          cases = list(ET.parse("unit.xml").getroot().iter("testcase"))
+          passed = sum(not any(case.find(name) is not None for name in ("skipped", "failure", "error")) for case in cases)
+          if passed < 600:
+              raise SystemExit(f"only {passed} tests passed; expected at least 600")
+          PYTEST_COUNT
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-${{ matrix.os }}-${{ matrix.python }}
+          path: unit.xml

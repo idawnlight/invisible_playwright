@@ -48,11 +48,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The install below resolves `invisible-core==N.M.0` from the package index,
-  # and the core is published BEFORE this package. This gate answers whether it
-  # is on the index yet; during that window the e2e job is SKIPPED with the
-  # reason in the run summary rather than faked green, and once the core is up
-  # it runs unchanged. See .github/workflows/core-on-index.yml.
+  # Keep the reusable workflow name for callers; it checks the exact Git tag.
   core-on-index:
     uses: ./.github/workflows/core-on-index.yml
 
@@ -70,7 +66,7 @@ jobs:
       - name: Install wrapper + test deps (+ Playwright ONLY as a system tool)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[dev]"
+          python -m pip install "$(python scripts/core_requirement.py)" ".[dev]"
           # ⛔ The playwright package is NO LONGER a product dependency: the
           # client lives in invisible_playwright._pw and the driver in _driver. It
           # is installed here for ONE thing only, the `playwright install-deps
@@ -89,7 +85,13 @@ jobs:
           sudo apt-get install -y xvfb
           sudo "$(which python)" -m playwright install-deps firefox
       - name: Fetch the published firefox binary
-        run: echo "FF=$(python -m invisible_playwright fetch | tail -1)" >> "$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          fetch_output="$(python -m invisible_playwright fetch)"
+          printf '%s\n' "$fetch_output"
+          binary="$(printf '%s\n' "$fetch_output" | tail -n 1)"
+          test -f "$binary"
+          echo "FF=$binary" >> "$GITHUB_ENV"
       - name: The protocol mirror agrees with the engine it is pinned to
         # `invisible_core.juggler.protocol` is generated from the Protocol.js INSIDE the
         # shipped binary, and nothing used to tie the two together after a pin

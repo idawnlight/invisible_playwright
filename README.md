@@ -1,7 +1,8 @@
 # InvisiblePlaywright on Firefox 159
 
-This branch pairs Firefox 159.0 with `invisible_core 159.49.0` and
-`invisible_playwright 0.43.1.dev0`. The vendored Playwright Python client is 1.61.
+This fork pairs Firefox 159.0 (`firefox-159.0-r1`) with
+`invisible_core 159.49.1` and `invisible_playwright 0.43.1`.
+The bundled Playwright Python client is 1.61.
 
 The engine implements session identity and geometry, language and timezone
 propagation, bundled fonts, graphics and media declarations, Juggler execution
@@ -9,69 +10,55 @@ worlds, native input, network interception and proxy routing.
 
 ## Install
 
-Use the paired local build.
+Supported platforms: **Linux x86_64**;
+Python **3.11+** and Git are required. The Firefox download is approximately
+233 MiB (245 MB) and is cached after its first download.
 
-Build the paired engine checkout with `./fork/build.sh`. Install the paired
-Python checkouts into one environment:
+Install both Python packages from their GitHub tags:
 
-```sh
-uv venv
-uv pip install -e /path/to/invisible_core -e /path/to/invisible_playwright
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install \
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.1" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.1"
 ```
 
-To install from GitHub tags or commits, specify both Python sources:
-
-```sh
-uv pip install \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@<core-tag>" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@<wrapper-tag>"
-```
-
-The selected core must build the version this wrapper declares. These two
-packages can be used directly from Git without publishing them to PyPI.
-
-Pass the executable from that build explicitly. Its version, BuildID and source
-commit are recorded in the core's generated local seal:
+Use [the installation guide](docs/installation.md) for Linux system dependencies,
+Xvfb, cache settings, and preloaded builds. Firefox downloads automatically from
+[this fork's GitHub Release](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-159.0-r1)
+on first launch:
 
 ```python
 from invisible_playwright import InvisiblePlaywright
 
-with InvisiblePlaywright(
-    binary_path="/path/to/workspace/build/obj-firefox-stable-159/dist/firefox/firefox",
-    seed=42,
-    headless=True,
-    locale="en-GB",
-    timezone="Europe/Berlin",
-) as browser:
+with InvisiblePlaywright(seed=42, headless=True) as browser:
     page = browser.new_page()
     page.goto("https://example.com/")
     print(page.title())
 ```
 
-## Repository and release pairing
+You can prefetch the browser and inspect the installed versions:
 
-The three repositories have separate responsibilities:
+```bash
+python -m invisible_playwright fetch
+python -m invisible_playwright version
+```
+
+On Linux, `headless=True` starts Xvfb automatically. A local build can be passed
+through `binary_path`; details are in the installation guide.
+
+## Repositories
 
 | Repository | Owns |
 | --- | --- |
-| Firefox engine | Native declarations, fonts, Juggler and platform builds |
-| invisible_core | Profile generation, prefs, protocol client, seal and downloads |
-| invisible_playwright | Playwright API, vendored client and Python server |
+| [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native declarations, fonts, Juggler and platform builds |
+| [invisible_core](https://github.com/idawnlight/invisible_core) | Profile generation, prefs, protocol client, release record and downloads |
+| [invisible_playwright](https://github.com/idawnlight/invisible_playwright) | Playwright API, bundled client and Python server |
 
 The engine maintains Firefox 159 on `release/159`; core and wrapper each use
-`main`. Firefox is built separately from the Python packages. A built archive
-can be distributed directly, or uploaded with a release seal to GitHub
-Releases for automatic download. The current engine tree provides local build
-tooling; its fork release workflow is still to be implemented.
-
-`INVISIBLE_FIREFOX_RELEASE_REPOSITORY=owner/repository` selects the engine's
-GitHub release repository. Generate the seal from the built archives before
-publishing a release, then update the exact core dependency in this package.
-
-The `fetch` CLI command downloads an engine named by a published seal.
-`version` prints the wrapper, core and engine versions. `invisible-core doctor`
-reports the package and engine pair. This local build is selected through
-`binary_path`.
+`main`. Firefox is built and distributed separately from the Python packages.
 
 ## Tests
 
@@ -81,5 +68,5 @@ serial timing passes. The source contracts read the native commit in the seal.
 
 ## Licenses
 
-The wrapper's original code is MIT. Its vendored Playwright client is Apache-2.0.
+The wrapper's original code is MIT. Its bundled Playwright client is Apache-2.0.
 Firefox and the native changes use the licenses recorded in the engine tree.

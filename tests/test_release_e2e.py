@@ -1,74 +1,24 @@
-"""The install path a stranger takes, driven end to end.
+"""Execute the fork's README install block and first-launch example.
 
-The README's install block for this system, run as written: uv from its own
-installer, a project `uv init` made, `uv add invisible-playwright` FROM THE
-INDEX, the engine downloaded from the live GitHub release, and then a real
-browser launched against a real URL. Slow and network-bound, so marked `e2e`
-and excluded by default:
-
-    pytest tests/test_release_e2e.py -m e2e -o addopts="" -v
-
-Run by `.github/workflows/user-install.yml` on ubuntu AND windows, daily and on
-release. `INVPW_E2E_SOURCE=git` (with `INVPW_E2E_REV`) reaches an unpublished
-commit instead - a pre-release check, not the default.
-
-TWO THINGS THIS FILE USED TO GET WRONG, both kept in the tests that fixed them:
-
-  it installed from a GIT URL. That was nobody's install path after 2026-07-26,
-    and a git install never resolves `invisible-core==X.Y.Z`, so the pin - the
-    part most likely to break a release - was outside what this covered;
-  it then installed a blessed `playwright==<pin>` by hand, which REPAIRS the
-    venv. If the declared range resolves to a client the shipped Juggler cannot
-    speak, that line turns the suite green while every fresh install is broken.
-
-And the launch test was skipped on Windows for a reason that was false -
-"headless launch requires a display server". It does not on Windows, where
-`headless=True` keeps the real rendering pipeline and creates the browser on
-a hidden Win32 desktop. The primary target was the one platform this never ran
-on. It runs there now.
-
-The cache is a temp dir per run (`INVISIBLE_PLAYWRIGHT_CACHE_DIR`), so these
-never read or poison the developer's real cache - and never pass because
-something was already cached.
+The harness imports only stdlib and pytest. Both Python packages are installed
+from the two Git references written in README.md, into a new non-editable venv.
+Browser downloads use a separate cache, with no local seal or executable passed
+by the caller. Run explicitly with ``-m e2e -o addopts=`` after publishing the
+README's Git references and engine release.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-# The variables that must NOT cross into a venv this file builds.
-#
-# A venv inherits the environment, and these two walk straight through it into
-# the thing under test. Measured 2026-08-11:
-#
-#   PYTHONPATH           pointing at the workbench sources makes the venv import
-#                        the workbench core instead of the installed one. 5
-#                        failures here and 2 in test_upgrade_e2e.py on Linux,
-#                        every one of them "requires invisible-core==18.13.0 /
-#                        installed 18.14.0". The product was not involved.
-#   INVISIBLE_SEAL_FILE  pointing at a LOCAL seal makes the four tests that
-#                        download the published release fail with "the active
-#                        seal is a LOCAL seal with no published assets". 4
-#                        failures, on Windows AND Linux, that went away by
-#                        re-running the same file without it: 9 of 9 passed.
-#   PYTHONHOME           same mechanism as PYTHONPATH and worse - it redirects
-#                        the standard library, so the venv python is broken
-#                        before it runs a line. Not measured here; added because
-#                        it cannot be right and would be unreadable if it hit.
-#
-# Sixteen failures in one day, none of them the product. And the dangerous
-# direction is the other one: a GREEN that comes from an environment no user
-# has. These tests are the only thing that checks the install path, so their
-# verdict must not depend on the shell that launched them.
-# A copy of `invisible_core.install_job.LEAKS` (the interpreter's variables
-# and every variable the core's library reads), which this file cannot
-# import; the core's install_job gate checks that it covers it ([B349]).
 _LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
           "INVISIBLE_PLAYWRIGHT_ENGINE_DIR", "INVISIBLE_FIREFOX_RELEASE_REPOSITORY",
           "INVISIBLE_PLAYWRIGHT_CACHE_DIR",
@@ -81,744 +31,281 @@ _LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
 
 
 def _clean_env(base=None):
-    """The environment to pass to a subprocess, without the variables that leak.
-
-    Also returns what it removed, so the error message can say so: a variable
-    removed silently is the same class of defect as one inherited silently,
-    just with the sign flipped.
-    """
     env = dict(os.environ if base is None else base)
-    removed = [k for k in _LEAKS if k in env]
-    for k in removed:
-        env.pop(k, None)
+    removed = [key for key in _LEAKS if key in env]
+    for key in removed:
+        env.pop(key, None)
     return env, removed
 
 
-# ── venv mechanics, LOCAL ON PURPOSE ────────────────────────────────────────
-# These three live in `invisible_core.testing` and every other suite that
-# shares the core imports them from there - three repos when this was written,
-# two (this package and invisible_core) since invisible_firefox was deleted on
-# 2026-08-18. NOT this file. The job that runs it installs pytest on the
-# runner and nothing else, deliberately: what is being tested is what a
-# stranger gets from the index, and a second copy of anything on the runner's
-# path would mean the assertions read the wrong one.
-#
-# So `from invisible_core.testing import ...` here is a COLLECTION error -
-# ModuleNotFoundError, whole job red, nothing tested. It happened on every leg
-# of all three repos on 2026-07-28, the day the helpers were shared, and it
-# passes on any development machine because an editable install is always on
-# the path. The core's suite now parses these files and refuses the import, so
-# the rule does not depend on this comment being read.
 def _run(cmd, *, timeout: int = 600, check: bool = True, env=None, cwd=None):
-    # `env=None` used to mean INHERIT, which is exactly the defect. Now the
-    # default is the cleaned environment; passing `env=` explicitly still gets
-    # it cleaned, because a caller building an environment almost always
-    # starts from `os.environ`.
     env, removed = _clean_env(env)
-    r = subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
-                       timeout=timeout, env=env,
-                       cwd=str(cwd) if cwd is not None else None)
-    if check and r.returncode != 0:
-        note = ""
-        if removed:
-            note = ("\n--- environment ---\nremoved before launching: {}\n"
-                    "(these are the variables that would enter the venv and make it "
-                    "measure something other than what a user gets)"
-                    .format(", ".join(removed)))
+    result = subprocess.run([str(part) for part in cmd], capture_output=True,
+                            text=True, timeout=timeout, env=env,
+                            cwd=str(cwd) if cwd is not None else None)
+    if check and result.returncode != 0:
         raise AssertionError(
-            "{} exited {}\n--- stdout ---\n{}\n--- stderr ---\n{}{}".format(
-                " ".join(str(c) for c in cmd), r.returncode,
-                r.stdout[-3000:], r.stderr[-3000:], note))
-    return r
+            f"{cmd!r} exited {result.returncode}\n--- stdout ---\n"
+            f"{result.stdout[-3000:]}\n--- stderr ---\n{result.stderr[-3000:]}"
+            f"\nremoved inherited overrides: {removed}")
+    return result
 
 
 def _venv_python(venv_dir):
-    bindir = "Scripts" if os.name == "nt" else "bin"
-    name = "python.exe" if os.name == "nt" else "python"
+    bindir, name = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
     return Path(venv_dir) / bindir / name
-
-
-# ── the README's install block, LOCAL ON PURPOSE for the reason above ────────
-# The way in is uv (the owner, 2026-09-06; "uv everywhere", 2026-10-17), and the
-# README carries it as one complete block per system. This file RUNS that block,
-# read from the README, so the install it tests is the one a person copies and
-# cannot drift from it: until 2026-10-17 it ran `pip install` while the README
-# had been told to say uv.
-README = Path(__file__).resolve().parents[1] / "README.md"
-DIST = "invisible-playwright"
-_INSTALLER = {"nt": "astral.sh/uv/install.ps1", "posix": "astral.sh/uv/install.sh"}
-
-
-def readme_install_block() -> list:
-    """The lines of the README's install block for this system: the code block
-    that runs uv's own installer for it."""
-    marker = _INSTALLER[os.name]
-    text = README.read_text(encoding="utf-8")
-    for body in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):
-        if marker in body:
-            return [line for line in body.splitlines() if line.strip()]
-    raise AssertionError(f"README.md has no install block for this system: no "
-                         f"code block runs {marker}")
-
-
-def _home_bin(home: Path) -> Path:
-    return home / ".local" / "bin"
-
-
-def run_readme_block(lines, *, cwd: Path, home: Path, env: dict):
-    """Run the block the way its reader does - PowerShell on Windows, bash on
-    Linux - stopping at the first line that fails.
-
-    `home` stands in for the reader's home, so uv's installer lands in a
-    directory this run owns and the block's own PATH line finds it there; on
-    Windows `UV_NO_MODIFY_PATH` keeps it out of the registry. The lines are the
-    README's, unchanged: what is set here is the environment around them."""
-    env = dict(env)
-    env["UV_INSTALL_DIR"] = str(_home_bin(home))
-    # A cached index answer would hide a forgotten publish, which is what
-    # `--no-cache-dir` did for the pip version of this file.
-    env["UV_NO_CACHE"] = "1"
-    if os.name == "nt":
-        env["USERPROFILE"] = str(home)
-        env["UV_NO_MODIFY_PATH"] = "1"
-        # A native command's failure does not stop a PowerShell script, so each
-        # line is followed by the check a reader's eyes would make.
-        script = cwd / "install.ps1"
-        script.write_text("".join(f"{line}\nif ($LASTEXITCODE) {{ exit $LASTEXITCODE }}\n"
-                                  for line in lines), encoding="utf-8")
-        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
-    else:
-        env["HOME"] = str(home)
-        script = cwd / "install.sh"
-        script.write_text("set -eo pipefail\n" + "\n".join(lines) + "\n", encoding="utf-8")
-        cmd = ["bash", script]
-    return _run(cmd, cwd=cwd, env=env, timeout=1800)
 
 
 run_checked = _run
 venv_python = _venv_python
+README = Path(__file__).resolve().parents[1] / "README.md"
+_VCS_REQUIREMENT = re.compile(
+    r"(invisible[-_](?:core|playwright))\s*@\s*git\+"
+    r"(https://github\.com/[^\s\"']+\.git)@([^\s\"']+)")
 
 
-# NOT imported at module level. This file is collected in an environment that
-# deliberately does NOT have the package installed - the package under test
-# goes into a venv the fixtures build, from the index, and a second copy on the
-# runner's path would mean the assertions read the wrong one. Importing it here
-# made collection fail outright (exit 4, "No module named invisible_playwright")
-# on both CI runners while passing locally, where a checkout is always
-# importable.
-#
-# Reading it from the VENV is also the more honest question: what a user gets
-# is what the installed package says, not what this checkout says.
+def readme_install_block(text=None) -> list[str]:
+    """Select the complete shell block containing both pip Git requirements."""
+    text = README.read_text(encoding="utf-8") if text is None else text
+    candidates = []
+    for body in re.findall(r"```(?:bash|sh)\n(.*?)```", text, re.S):
+        names = {name.replace("_", "-") for name, _, _ in _VCS_REQUIREMENT.findall(body)}
+        if names == {"invisible-core", "invisible-playwright"}:
+            assert re.search(r"python\s+-m\s+pip\s+install\b", body), body
+            assert re.search(r"python3?\s+-m\s+venv\s+\.venv\b", body), body
+            candidates.append([line for line in body.splitlines() if line.strip()])
+    assert len(candidates) == 1, (
+        "README needs exactly one runnable venv/pip block installing both Git references")
+    return candidates[0]
+
+
+def readme_git_requirements(lines=None) -> dict:
+    lines = readme_install_block() if lines is None else lines
+    found = _VCS_REQUIREMENT.findall("\n".join(lines))
+    requirements = {name.replace("_", "-"): {"url": url, "ref": ref}
+                    for name, url, ref in found}
+    assert len(found) == 2 and set(requirements) == {"invisible-core", "invisible-playwright"}
+    return requirements
+
+
+def readme_browser_example() -> str:
+    examples = re.findall(r"```python\n(.*?)```", README.read_text(encoding="utf-8"), re.S)
+    assert examples, "README has no Python first-launch example"
+    example = examples[0]
+    assert "InvisiblePlaywright" in example
+    assert "binary_path" not in example, "the first-launch example must select the default release"
+    return example
+
+
+def readme_engine_release() -> tuple[str, str]:
+    matches = re.findall(r"https://github\.com/([^\s/)]+/[^\s/)]+)/releases/tag/([^\s)]+)",
+                         README.read_text(encoding="utf-8"))
+    assert len(set(matches)) == 1, "README must identify one default engine release"
+    return matches[0]
+
+
+def run_readme_block(lines, *, cwd: Path, env: dict):
+    """Execute the documented Linux shell commands without changing their text."""
+    env = dict(env, PIP_NO_CACHE_DIR="1", PIP_DISABLE_PIP_VERSION_CHECK="1",
+               PYTHONNOUSERSITE="1")
+    script = cwd / "install.sh"
+    script.write_text("set -eo pipefail\n" + "\n".join(lines) + "\n", encoding="utf-8")
+    return _run(["bash", script], cwd=cwd, env=env, timeout=1800)
+
+
+def _installed(py: Path) -> dict:
+    script = """
+import importlib, importlib.metadata, json, platform
+out = {"python": platform.python_version(), "packages": {}}
+for name in ["invisible_core", "invisible_playwright"]:
+    module = importlib.import_module(name)
+    dist = importlib.metadata.distribution(name)
+    out["packages"][name.replace("_", "-")] = {
+        "version": dist.version, "path": module.__file__,
+        "direct_url": json.loads(dist.read_text("direct_url.json")),
+        "requires": dist.requires, "python": dist.metadata.get("Requires-Python"),
+    }
+print(json.dumps(out))
+"""
+    return json.loads(_run([py, "-I", "-c", script], timeout=60).stdout.splitlines()[-1])
+
+
+def _installed_seal(py: Path) -> dict:
+    script = ("import invisible_core, json; from pathlib import Path; "
+              "print(Path(invisible_core.__file__).with_name('seal.json').read_text())")
+    return json.loads(_run([py, "-I", "-c", script], timeout=60).stdout)
+
+
 def _upstream_version(py: Path) -> str:
-    # `_clean_env()` and not the inherited environment: this is the read that
-    # decides which COPY of the package answers, and it is exactly the one
-    # `PYTHONPATH` redirects to the workbench sources.
-    out = subprocess.run(
-        [str(py), "-c",
-         "from invisible_playwright.constants import FIREFOX_UPSTREAM_VERSION as v; print(v)"],
-        capture_output=True, text=True, timeout=60, env=_clean_env()[0])
-    assert out.returncode == 0, (
-        "could not read FIREFOX_UPSTREAM_VERSION from the installed package: "
-        + (out.stdout or "") + " " + (out.stderr or ""))
-    return out.stdout.strip().splitlines()[-1]
-
-REPO_URL = "https://github.com/feder-cr/invisible_playwright.git"
-REV = os.environ.get("INVPW_E2E_REV", "main")
+    return _installed_seal(py)["upstream_version"]
 
 
-# ---------- helpers --------------------------------------------------------- #
-
-
-# ---------- fixtures -------------------------------------------------------- #
-
-
-# The venv mechanics live in `invisible_core.testing`, and they are on the index
-# as of the core release this package's pin now names - the pin moved in the same
-# change, which is the order that was got wrong on 2026-07-28 and is written into
-# CLAUDE.md's pre-push gate: publish the core, move the pin, then use the name.
-#
-# (No version number above, deliberately. A sibling guard,
-# `test_the_expected_core_version_is_written_only_in_pyproject`, forbids a second
-# copy of it anywhere in this repo - and it caught the first draft of this very
-# comment, which is exactly the behaviour it is for.)
-_run = run_checked
-_venv_python = venv_python
+def _remote_commit(url: str, ref: str) -> str:
+    if re.fullmatch(r"[0-9a-f]{40}", ref):
+        return ref
+    result = _run(["git", "ls-remote", url,
+                   f"refs/tags/{ref}", f"refs/tags/{ref}^{{}}", f"refs/heads/{ref}"],
+                  timeout=90)
+    refs = dict(line.split()[::-1] for line in result.stdout.splitlines())
+    commit = (refs.get(f"refs/tags/{ref}^{{}}") or refs.get(f"refs/tags/{ref}")
+              or refs.get(f"refs/heads/{ref}"))
+    assert commit, f"README reference {ref!r} does not exist in {url}"
+    return commit
 
 
 @pytest.fixture(scope="module")
 def workspace() -> Path:
-    """A single temp dir reused across the module so we don't re-create the
-    venv + re-download the 110 MB tarball for every individual test."""
-    root = Path(tempfile.mkdtemp(prefix="invpw-e2e-"))
+    root = Path(tempfile.mkdtemp(prefix="invpw-install-e2e-"))
     yield root
     shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture(scope="module")
-def clean_venv(workspace: Path, isolated_cache_env: dict) -> Path:
-    """The venv the README's install block makes, from the index. Returns its
-    python executable path.
-
-    The block runs once for the module, in `workspace`, with the private cache
-    the tests below share: its last line fetches the engine, so they find it
-    there. `INVPW_E2E_SOURCE=git` swaps the block's `uv add` for the
-    unpublished commit - a pre-release check, not the default, and it is the
-    one line this file changes.
-    """
-    lines = readme_install_block()
-    if os.environ.get("INVPW_E2E_SOURCE", "index") == "git":
-        add = [i for i, line in enumerate(lines) if line.split()[:3] == ["uv", "add", DIST]]
-        assert len(add) == 1, lines
-        lines[add[0]] = f'uv add "{DIST} @ git+{REPO_URL}@{REV}"'
-    home = workspace / "home"
-    home.mkdir(exist_ok=True)
-    run_readme_block(lines, cwd=workspace, home=home, env=isolated_cache_env)
-    cd = [line.split(maxsplit=1)[1] for line in lines if line.split()[:1] == ["cd"]]
-    assert len(cd) == 1, f"the block has to enter its project once: {lines}"
-    py = _venv_python(workspace / cd[0] / ".venv")
-    assert py.exists(), f"the README's block made no venv at {py}"
-    return py
+def isolated_cache_env(workspace: Path) -> dict:
+    # The README currently ships a Linux engine. XDG_CACHE_HOME isolates both
+    # the browser and state while inherited product overrides are removed.
+    return dict(os.environ, XDG_CACHE_HOME=str(workspace / "cache"), PYTHONNOUSERSITE="1")
 
 
 @pytest.fixture(scope="module")
-def isolated_cache_env(workspace: Path) -> dict:
-    """Environment dict pointing the wrapper at a private cache dir so this
-    test never reads or pollutes the developer's real cache."""
-    cache = workspace / "cache"
-    cache.mkdir(exist_ok=True)
-    env = os.environ.copy()
-    env["INVISIBLE_PLAYWRIGHT_CACHE_DIR"] = str(cache)
-    env["XDG_CACHE_HOME"] = str(cache)
-    return env
+def clean_venv(workspace: Path, isolated_cache_env: dict) -> Path:
+    if os.name != "posix" or not sys.platform.startswith("linux"):
+        pytest.skip("the README currently provides a Linux installation and engine")
+    run_readme_block(readme_install_block(), cwd=workspace, env=isolated_cache_env)
+    python = _venv_python(workspace / ".venv")
+    assert python.exists(), "README install block did not create its documented .venv"
+    return python
 
 
-# ---------- tests ----------------------------------------------------------- #
+@pytest.mark.unit
+def test_readme_install_block_selects_both_git_sources():
+    requirements = readme_git_requirements()
+    assert all(value["ref"] for value in requirements.values())
+    assert all(value["url"].startswith("https://github.com/")
+               for value in requirements.values())
+
+
+@pytest.mark.unit
+def test_readme_install_block_rejects_an_index_only_install():
+    text = "```bash\npython3 -m venv .venv\npython -m pip install invisible-playwright\n```"
+    with pytest.raises(AssertionError, match="both Git references"):
+        readme_install_block(text)
 
 
 @pytest.mark.e2e
 def test_clean_install_the_way_a_user_does_it(clean_venv: Path, workspace: Path):
-    """The README's install block, from the index, into a project uv made.
+    from packaging.requirements import Requirement
+    from packaging.specifiers import SpecifierSet
 
-    THIS USED TO INSTALL FROM A GIT URL, and that stopped being anybody's
-    install path on 2026-07-26 when the three packages went to PyPI. A test
-    that exercises a route no user takes cannot fail in the way users fail: the
-    index resolves `invisible-core==X.Y.Z` and a git install does not resolve
-    it at all, so the entire pin mechanism - the thing most likely to break a
-    release - was outside what this file covered.
-
-    Set ``INVPW_E2E_SOURCE=git`` to test an unpublished commit instead; that is
-    a pre-release check, not the default, and it says so in the failure.
-
-    ⛔ AND SO THIS TEST CANNOT SEE A BROKEN WHEEL YOU ARE ABOUT TO PUBLISH.
-    The default target is the string ``invisible-playwright``, i.e. the INDEX:
-    the version ALREADY published. It verifies that the past works - a true and
-    useful question - and for that reason it stays green even when the code
-    being released produces a package that does not import. On 2026-08-26 it
-    was green twice while wheel 0.7.3 was broken: first without
-    ``_pw/_repo_version.py`` (excluded from the wheel by a line in
-    ``.gitignore``, which hatchling respects even for a tracked file), then
-    without ``pyee`` (a transitive of ``playwright``, gone once ``playwright``
-    left the dependencies). CI found both by accident, not a test.
-
-    The PRE-release question - "does the wheel built from the code as it is now
-    install and import?" - is asked by
-    ``tests/gates/wheel_si_importa.py`` in the workbench (row BE of the gate
-    inventory), which builds, installs into an empty venv and imports. It is
-    not here because this whole suite runs on an EDITABLE install of the
-    working tree, where every file exists on disk by definition.
-    """
-    # The install already happened, in the fixture, as the README's lines.
-    #
-    # NOT followed by a manual `pip install playwright==<pin>`. It used to be,
-    # and that line was hiding the thing this test exists to find: if the
-    # declared range resolves to a client the shipped Juggler cannot speak,
-    # installing the blessed pin afterwards repairs the venv and the test goes
-    # green while every real user is broken. What a user gets is what pip
-    # resolves from the declaration, so that is what is asserted.
-    out = _run(
-        [str(clean_venv), "-c",
-         "import invisible_playwright as ip; "
-         "from importlib.metadata import version; "
-         # NOT `version('playwright')`: since the fork that package is no
-         # longer a dependency, so in a clean venv it is NOT THERE and this
-         # line raised PackageNotFoundError. The client version is read from
-         # the vendored client, which is the only one this package actually
-         # uses.
-         "from invisible_playwright._pw._repo_version import version as pw; "
-         "print('OK', ip.__name__, version('invisible-core'), pw)"],
-        timeout=60,
-    )
-    assert "OK invisible_playwright" in out.stdout, out.stdout
-
-    # The installer's own consistency check (a venv uv made has no pip). It is
-    # only meaningful because the core is declared as an exact version rather
-    # than a direct URL: a direct reference carries no version, so there is
-    # nothing here to compare and this reports clean on a broken environment.
-    uv = _home_bin(workspace / "home") / ("uv.exe" if os.name == "nt" else "uv")
-    _run([str(uv), "pip", "check", "--python", str(clean_venv)], timeout=120)
-
-    # The block's project floor is the package's: a README asking `uv init`
-    # for a Python older than `requires-python` makes `uv add` fail on every
-    # machine whose default interpreter is that old (measured 2026-10-17: a
-    # project on 3.10 cannot add this package).
-    import tomllib
-    floor = tomllib.loads((README.parent / "pyproject.toml").read_text(
-        encoding="utf-8"))["project"]["requires-python"]
-    init = [line for line in readme_install_block() if line.split()[:2] == ["uv", "init"]]
-    assert len(init) == 1 and f'--python "{floor}"' in init[0], (init, floor)
+    installed = _installed(clean_venv)
+    for name, expected in readme_git_requirements().items():
+        package = installed["packages"][name]
+        assert Path(package["path"]).is_relative_to(workspace / ".venv"), package
+        direct = package["direct_url"]
+        assert direct["url"] == expected["url"], direct
+        assert direct["vcs_info"]["requested_revision"] == expected["ref"], direct
+        assert direct["vcs_info"]["commit_id"] == _remote_commit(**expected), direct
+        assert installed["python"] in SpecifierSet(package["python"])
+    wrapper = installed["packages"]["invisible-playwright"]
+    core = installed["packages"]["invisible-core"]
+    pin = next(Requirement(value) for value in wrapper["requires"]
+               if Requirement(value).name.replace("_", "-") == "invisible-core")
+    assert str(pin.specifier) == f"=={core['version']}", (pin, core)
+    _run([clean_venv, "-m", "pip", "check"], timeout=120)
 
 
 @pytest.mark.e2e
-def test_the_resolved_playwright_is_inside_the_range_the_package_declares(
-        clean_venv: Path):
-    """What pip resolves, not what we would have chosen.
-
-    The wrapper declares a bounded range because 1.61 added a protocol field an
-    older Juggler rejects. A range whose upper end drifts past what the shipped
-    binary speaks breaks `new_context` for every fresh install, and the only
-    place that shows up is here - the developer's own environment has the
-    blessed pin in it already.
-    """
-    from packaging.requirements import Requirement
+def test_the_resolved_playwright_is_inside_the_range_the_package_declares(clean_venv: Path):
+    script = ("from invisible_playwright._pw._repo_version import version; "
+              "from invisible_core.seal import active_seal; s = active_seal(); "
+              "print(version); print(s.playwright_min); print(s.playwright_max)")
+    vendored, low, high = _run([clean_venv, "-I", "-c", script]).stdout.strip().splitlines()[-3:]
     from packaging.version import Version
-
-    # ⛔ THE QUESTION CHANGED WITH THE FORK, and the old one could no longer be
-    # asked. Until 2026-08-26 this test read `version('playwright')` and
-    # compared it against the `playwright>=...` declared in pyproject. Since
-    # the client is vendored, `playwright` is NO LONGER a dependency: in a
-    # clean venv that package does not exist and the line raised
-    # PackageNotFoundError, and the declaration to compare against is gone too.
-    #
-    # But the constraint has not disappeared, it moved: the SEAL carries the
-    # range of clients that binary was tested against, and the version to
-    # compare is that of the VENDORED client. This is exactly what
-    # `_engine.assert_playwright_range()` does on every import; here it is
-    # verified from the outside, in a real venv, that the two numbers agree -
-    # because a client outside the range kills `new_context` for every fresh
-    # install.
-    got = _run([str(clean_venv), "-c",
-                "from invisible_playwright._pw._repo_version import version; "
-                "from invisible_core.seal import active_seal; "
-                "s = active_seal(); "
-                "print(version); print(s.playwright_min); print(s.playwright_max)"],
-               timeout=60)
-    lines = got.stdout.strip().splitlines()
-    vendored, lo, hi = lines[0].strip(), lines[1].strip(), lines[2].strip()
-
-    def _t(v: str):
-        parts = []
-        for p in v.split(".")[:3]:
-            digits = "".join(c for c in p if c.isdigit())
-            parts.append(int(digits or 0))
-        return tuple(parts + [0] * (3 - len(parts)))
-
-    assert _t(lo) <= _t(vendored) <= _t(hi), (
-        f"the vendored client is {vendored}, outside the range the seal "
-        f"declares for this engine ({lo} .. {hi}). The Juggler protocol is a "
-        f"closed world: an untested client kills every session at context "
-        f"creation.")
+    assert Version(low) <= Version(vendored) <= Version(high), (vendored, low, high)
 
 
 @pytest.mark.e2e
 def test_version_command_reports_wrapper_and_binary(clean_venv: Path):
-    """`python -m invisible_playwright --version` runs and reports both the
-    wrapper version and the BINARY_VERSION it'll try to fetch."""
-    out = _run(
-        [str(clean_venv), "-m", "invisible_playwright", "--version"],
-        timeout=30,
-    )
-    text = out.stdout + out.stderr
-    assert "firefox-" in text, f"BINARY_VERSION not reported: {text!r}"
+    result = _run([clean_venv, "-m", "invisible_playwright", "version"], timeout=30)
+    assert readme_engine_release()[1] in result.stdout, result.stdout
+    assert _upstream_version(clean_venv) in result.stdout, result.stdout
 
 
 @pytest.mark.e2e
 def test_fetch_against_live_release(clean_venv: Path, isolated_cache_env: dict):
-    """Hit the LIVE GitHub release: download tarball + checksums.txt, parse,
-    SHA256-verify, extract. This is the regression sentinel for #15.
-
-    If checksums.txt is shipped in `*`-prefixed (binary) format and the parser
-    keeps the `*` in the key, this raises
-        RuntimeError: no SHA256 for {asset} in checksums.txt
-    """
-    out = _run(
-        # NOT `fetch --force`: that flag went with four of the six subcommands
-        # in 0.5.0, and this line kept it, so every run of this file exited 2 on
-        # "unrecognized arguments" while the default suite stayed green - the test
-        # is e2e-marked, so only the two workflows that actually run it saw the
-        # red. One stale argument, three red workflows.
-        #
-        # Nothing is lost by dropping it. `fetch` verifies every cached tree
-        # against the seal on every run, which is what --force was for, and this
-        # test builds a fresh venv with an isolated cache root, so there is no
-        # warm tree to force past.
-        [str(clean_venv), "-m", "invisible_playwright", "fetch"],
-        env=isolated_cache_env,
-        timeout=900,  # 110 MB download + extract on slow connections
-    )
-    output = out.stdout + out.stderr
-    # Anti-regression for #15: this exact string would surface if the parser
-    # broke again. Spell it out so a future failure is grep-able to the issue.
-    assert "no SHA256 for" not in output, (
-        "Issue #15 regression: parser couldn't find SHA for the asset.\n"
-        f"Output:\n{output[-2000:]}"
-    )
-    assert "SHA256 mismatch" not in output, (
-        "Tarball SHA doesn't match the published checksums.txt - "
-        "either the upload was corrupted or the release was re-packed "
-        "without updating checksums.txt."
-    )
+    result = _run([clean_venv, "-m", "invisible_playwright", "fetch"],
+                  env=isolated_cache_env, timeout=1800)
+    binary = Path(result.stdout.strip().splitlines()[-1])
+    assert binary.is_file(), result.stdout
+    assert "SHA256 mismatch" not in result.stderr
 
 
 @pytest.mark.e2e
 def test_binary_executes_after_fetch(clean_venv: Path, isolated_cache_env: dict):
-    """After fetch, the binary cache contains a launchable Firefox."""
-    out = _run(
-        [str(clean_venv), "-c",
-         "from invisible_playwright.download import ensure_binary; "
-         "p = ensure_binary(); print('BINARY', p)"],
-        env=isolated_cache_env,
-        timeout=60,
-    )
-    binary_line = [l for l in out.stdout.splitlines() if l.startswith("BINARY ")]
-    assert binary_line, f"ensure_binary() didn't print path: {out.stdout!r}"
-    binary_path = Path(binary_line[0].split(" ", 1)[1])
-    assert binary_path.exists(), f"binary missing: {binary_path}"
-
-    # `firefox --version` exit code is enough; output format differs across
-    # platforms (Win shows nothing on stdout, Linux prints to stdout).
-    # On Linux invoke via WSL when running from Windows.
-    if os.name == "nt" and binary_path.suffix == "":
-        # Linux binary path on Windows host - skip launch, the previous
-        # ensure_binary() already proved cache landed correctly.
-        pytest.skip("Cross-platform binary launch from Windows requires WSL.")
-    # `_clean_env()` here too, and not because Firefox reads `PYTHONPATH`: it
-    # does not. Because this way there is not a single subprocess in this file
-    # launched with the inherited environment, so there is no exception to
-    # remember and no example to copy from. It costs nothing.
-    r = subprocess.run([str(binary_path), "--version"],
-                       capture_output=True, text=True, timeout=30,
-                       env=_clean_env()[0])
-    text = (r.stdout + r.stderr).lower()
-    upstream = _upstream_version(clean_venv)
-    assert "firefox" in text and upstream in text, (
-        f"binary --version didn't report Firefox {upstream}: "
-        f"rc={r.returncode} out={r.stdout!r} err={r.stderr!r}"
-    )
+    result = _run([clean_venv, "-I", "-c",
+                   "from invisible_core import ensure_binary; print(ensure_binary())"],
+                  env=isolated_cache_env, timeout=1800)
+    binary = Path(result.stdout.strip().splitlines()[-1])
+    result = _run([binary, "--version"], env=isolated_cache_env, timeout=30)
+    assert result.returncode == 0
+    assert _upstream_version(clean_venv) in result.stdout + result.stderr
 
 
 @pytest.mark.e2e
-def test_playwright_launch_against_real_site(clean_venv: Path,
+def test_playwright_launch_against_real_site(clean_venv: Path, workspace: Path,
                                              isolated_cache_env: dict):
-    """Full stack: launch the patched Firefox via the wrapper, navigate to a
-    real URL, evaluate JS. Catches Juggler protocol drift, profile-generation
-    bugs, locale handling regressions, prefs typos.
-
-    NO LONGER SKIPPED ON WINDOWS, and the reason it was is worth recording:
-    the skip said "headless launch path requires display server". That is not
-    true on Windows and never was - `headless=True` there keeps the real
-    rendering pipeline and creates the browser on a hidden Win32 desktop
-    (`CreateDesktop` + `STARTUPINFO.lpDesktop`), so no display server is
-    involved. Linux is the platform that needs one, and it gets Xvfb.
-
-    So the primary target was the one platform this never ran on, for a stated
-    reason that was false. The two most recent defects in this package were
-    Windows-only by construction - firefox.exe is a launcher stub that spawns
-    the real browser and exits - and neither could have been caught here.
-    """
-
-    script = (
-        "from invisible_playwright import InvisiblePlaywright\n"
-        "with InvisiblePlaywright(headless=True, seed=42) as browser:\n"
-        "    ctx = browser.new_context()\n"
-        "    page = ctx.new_page()\n"
-        "    page.goto('https://example.com', timeout=30000)\n"
-        "    title = page.title()\n"
-        "    ua = page.evaluate('navigator.userAgent')\n"
-        "    print('TITLE=' + title)\n"
-        "    print('UA=' + ua)\n"
-    )
-    out = _run([str(clean_venv), "-c", script],
-               env=isolated_cache_env, timeout=180)
-    assert "TITLE=Example Domain" in out.stdout, (
-        f"page.title() didn't return expected text:\n{out.stdout[-1000:]}"
-    )
-    major = _upstream_version(clean_venv).split(".")[0]
-    assert "UA=" in out.stdout and f"Firefox/{major}" in out.stdout, (
-        f"navigator.userAgent doesn't report Firefox/{major} - UA spoofing "
-        f"regression?\n{out.stdout[-1000:]}"
-    )
-
-
-# ---------- meta: verify the test markers themselves work ------------------- #
+    # Execute the README example with a new cache, even if fetch ran earlier.
+    cache = workspace / "first-launch-cache"
+    assert not cache.exists()
+    env = dict(isolated_cache_env, XDG_CACHE_HOME=str(cache))
+    script = workspace / "readme-smoke.py"
+    script.write_text(readme_browser_example(), encoding="utf-8")
+    result = _run([clean_venv, "-I", script], env=env, timeout=1800)
+    assert "Example Domain" in result.stdout, result.stdout
+    assert cache.is_dir(), "first launch did not create its isolated cache"
+    cached = _run([clean_venv, "-I", "-c",
+                   "from invisible_core import ensure_binary; print(ensure_binary())"],
+                  env=env, timeout=60)
+    binary = Path(cached.stdout.strip().splitlines()[-1])
+    assert binary.is_file() and binary.is_relative_to(cache), binary
 
 
 @pytest.mark.e2e
 def test_e2e_marker_is_excluded_by_default():
-    """Sanity check on pyproject.toml's `addopts = '-m not e2e'` - this test
-    only runs when `-m e2e` is passed explicitly. If you're reading this in
-    a normal pytest run, the addopts filter is broken."""
     assert True
 
 
-# ── PyPI and GitHub Releases must not drift apart ──────
-
 @pytest.mark.e2e
-def test_the_published_version_has_a_github_release():
-    """EVERY version on the index needs a tag and a release carrying it.
-
-    Added 2026-07-26, when the three packages had been on PyPI for a day with
-    ZERO tags and ZERO releases between them. Not cosmetic: the release page is
-    where a reader looks for what changed, `git describe` has nothing to say,
-    and there is no commit anybody can point at as "this is the source of the
-    version you have".
-
-    IT CHECKED ONE VERSION UNTIL 2026-08-02. It read `info.version` - the latest
-    - so the moment a release was published without its page, the next release
-    made the omission invisible: the check moved on to the new version and the
-    old gap stayed behind it. Measured that day: ELEVEN published versions across
-    the three packages had no release, and eight had no tag at all, three of them
-    published AFTER the backfill this test was written to protect. The docstring
-    said "every version" from the first line while the code checked one, which is
-    the same defect this project found three times in two days - a claim written
-    beside the code rather than from it.
-
-    It now walks the whole index. That is one API call per version, ~36 across
-    the three packages, and it runs in the install-e2e job rather than the unit
-    suite for exactly that reason.
-
-    NO VENV, deliberately. The first version of this took `clean_venv` and read
-    the version out of the installed package, which made it depend on ANOTHER
-    test in the same file having installed it first - it passed alone in the one
-    repository whose fixture installs, and failed in the two whose fixture does
-    not. A test whose result depends on what ran before it is not measuring what
-    it claims. Both facts here are public: the index says which versions exist,
-    and the releases API says whether each has one.
-
-    One-directional on purpose. A release for a version not yet on the index is
-    a normal intermediate state during a publish; an index version with no
-    release is the thing that gets forgotten, because nothing downstream breaks.
-
-    Yanked versions are skipped: a yanked release is one the project has
-    withdrawn, and demanding a release page for something nobody should install
-    would be asking for the opposite of what the yank said.
-    """
-    import json
-    import os
-    import urllib.error
+def test_the_published_version_has_a_github_release(clean_venv: Path):
+    """The engine release named by the README serves every sealed asset."""
+    import urllib.parse
     import urllib.request
 
-    with urllib.request.urlopen(
-            "https://pypi.org/pypi/invisible-playwright/json", timeout=30) as resp:
-        index = json.load(resp)["releases"]
-
-    live = sorted((version for version, files in index.items()
-                   if files and not all(f.get("yanked") for f in files)),
-                  key=lambda v: tuple(int(p) for p in v.split(".")))
-    assert live, "the index serves no usable version of invisible-playwright"
-
-    # Authenticated when a token happens to be around, which on a GitHub runner
-    # it always is. Unauthenticated the API allows 60 calls an hour PER IP, and
-    # this walk wants one per version across three repositories: measured
-    # 2026-08-02, the walk hit 403 on its eleventh call. The token is optional,
-    # never required, and never printed.
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    repository, tag = readme_engine_release()
+    seal = _installed_seal(clean_venv)
+    assert seal["tag"] == tag, (seal["tag"], tag)
     headers = {"Accept": "application/vnd.github+json"}
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-
-    missing, drafts, empty = [], [], []
-    checked = 0
-    cut_short = None
-    for version in live:
-        url = ("https://api.github.com/repos/feder-cr/invisible_playwright"
-                   f"/releases/tags/v{version}")
-        try:
-            request = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(request, timeout=30) as resp:
-                payload = json.load(resp)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                missing.append(version)
-                checked += 1
-                continue
-            if exc.code in (403, 429):
-                # NOT an unconditional skip. The first version of this walk
-                # skipped here, which threw away every violation already in
-                # hand: the mutation that deleted an OLD release passed, because
-                # a rate-limit two versions later abandoned the whole test. A
-                # gate that discards its own findings on an unrelated error is
-                # worse than no gate, because it reports PASS.
-                cut_short = (version, exc.code)
-                break
-            raise
-        checked += 1
-        if payload.get("draft") is not False:
-            drafts.append(version)
-        if not (payload.get("body") or "").strip():
-            empty.append(version)
-
-    problems = []
-    # The LEDGER is the fourth record, and it costs no API call: it is a file in
-    # this repository. `version_gate check` compares it to the index too, but
-    # only on a release - so a version published outside the gate stays invisible
-    # until the NEXT release is refused by it, which is how the gap from
-    # 2026-08-02 was found. Here it surfaces on every run of this job.
-    ledger_path = Path(__file__).resolve().parents[1] / "PUBLISHED.json"
-    recorded = {}
-    if ledger_path.is_file():
-        recorded = {e["version"]: e for e in
-                    json.loads(ledger_path.read_text(encoding="utf-8"))["released"]}
-
-    # ⛔ THE VERSION THIS TREE DECLARES IS EXEMPT, and only that one.
-    #
-    # The ledger cannot land on main together with the publish: publish.yml
-    # publishes to PyPI and THEN tries to push PUBLISHED.json, but main is
-    # protected and the direct push is always refused, by construction. The
-    # entry ends up on a branch ledger/<version> whose PR stays blocked on its
-    # own ([B136]), so between the publish and the manual merge the index has
-    # the version and the ledger does not. Without this line the case is RED on
-    # a release that succeeded, and it is the FOURTH occurrence of the same
-    # shape found on 2026-08-18: a check written by looking at steady state
-    # that turns red exactly when it matters.
-    #
-    # The exemption does not open a permanent hole, and the reason is that it
-    # closes itself. If that ledger branch is never merged, at the NEXT release
-    # the version left behind is no longer the one the tree declares: it falls
-    # into unrecorded and the case goes red again. It is the same pattern the
-    # comment above describes for version_gate - a publish outside the gate
-    # stays invisible until the release after it, which refuses it.
-    import tomllib
-    in_flight = tomllib.loads(
-        (Path(__file__).resolve().parents[1] / "pyproject.toml")
-        .read_text(encoding="utf-8"))["project"]["version"]
-
-    unrecorded = [v for v in live if recorded and v not in recorded and v != in_flight]
-    thin = {v: [k for k in ("published_at", "requires_dist", "wheel_filename",
-                            "sdist_filename", "wheel", "sdist")
-                if k not in recorded[v]]
-            for v in live if v in recorded}
-    thin = {v: missing for v, missing in thin.items() if missing}
-
-    if unrecorded:
-        problems.append(
-            f"on the index and NOT in PUBLISHED.json: {unrecorded}. Those were "
-            f"published outside the gate, so nothing records what shipped under "
-            f"them; back-fill from the artifacts the index serves, never from the "
-            f"tree, which has moved on")
-    if thin:
-        problems.append(f"ledger entries missing fields: {thin}")
-
-    if missing:
-        problems.append(
-            f"on the index with NO release: {missing}. Create each at the commit "
-            f"that built that version - not at HEAD, which has moved on. PyPI's "
-            f"upload_time and the commit carrying the version are how to find it")
-    if drafts:
-        problems.append(f"still a DRAFT, so nobody can see it: {drafts}")
-    if empty:
-        problems.append(f"empty body, which is a tag with extra steps: {empty}")
-
-    assert not problems, (
-        f"invisible-playwright has {len(live)} usable versions on the index, {checked} were "
-        f"checked, and " + "; ".join(problems))
-
-    if cut_short:
-        version, code = cut_short
-        if checked == 0:
-            # "Green because it never ran" is the shape this project met three
-            # times in two days. A skip that reads "all clean so far" after
-            # checking NOTHING is that shape wearing a pass.
-            pytest.skip(f"GitHub API answered {code} on the FIRST call, so NONE "
-                        f"of {len(live)} versions were checked and this proves "
-                        f"nothing. Set GITHUB_TOKEN to raise the rate limit")
-        pytest.skip(f"GitHub API answered {code} at v{version} after {checked} of "
-                    f"{len(live)} versions, clean up to there. Set GITHUB_TOKEN to "
-                    f"raise the rate limit")
+    url = f"https://api.github.com/repos/{repository}/releases/tags/{urllib.parse.quote(tag, safe='')}"
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30) as response:
+        release = json.load(response)
+    assert release["draft"] is False and release["tag_name"] == tag
+    assets = {asset["name"]: asset for asset in release["assets"]}
+    assert seal["assets"], "the installed core has no downloadable engine assets"
+    for name, expected in seal["assets"].items():
+        assert name in assets, f"{name} is absent from {repository} release {tag}"
+        assert assets[name]["size"] == expected["size"], (name, assets[name], expected)
+        digest = assets[name].get("digest")
+        if digest:
+            assert digest == f"sha256:{expected['sha256']}", (name, digest)
 
 
 @pytest.mark.e2e
-def test_the_changelog_documents_every_version_it_claims_to_cover():
-    """A changelog that stops four releases ago is worse than none.
-
-    Found 2026-08-02 with the file sitting at [0.4.7] while 0.4.8, 0.4.9, 0.5.0
-    and 0.6.0 were on the index - and 0.5.0 is the release that cut the CLI from
-    six commands to two, which is the single most breaking change this package
-    has shipped. A reader upgrading across it had nothing to read.
-
-    This is the sibling of the release-page walk above and the same defect
-    shape: a record that is written by hand, consulted by users, and gated by
-    nothing drifts silently, because nothing downstream breaks when it does.
-
-    Bounded from BELOW by the file itself. The changelog does not reach back to
-    the first release and does not need to; what it must not do is stop short of
-    the present. So the rule is: every version on the index at or above the
-    oldest one documented must have a heading, and no heading may name a version
-    the index has never served.
-
-    Dates are compared too, because a heading dated by the person writing it
-    rather than by the upload is a small lie that a reader can check: this file
-    dated 0.6.0 a day late on its first reconstruction, and PyPI is the record
-    that settles it.
-    """
-    import json
-    import re
-    import urllib.request
-
-    changelog = (Path(__file__).resolve().parents[1] / "CHANGELOG.md").read_text(
-        encoding="utf-8")
-    documented = {m.group(1): m.group(2) for m in re.finditer(
-        r"(?m)^##\s*\[(\d+\.\d+\.\d+)\]\s*-\s*(\d{4}-\d{2}-\d{2})\s*$", changelog)}
-    assert documented, "no `## [X.Y.Z] - YYYY-MM-DD` heading found at all"
-
-    with urllib.request.urlopen(
-            "https://pypi.org/pypi/invisible-playwright/json", timeout=30) as resp:
-        releases = json.load(resp)["releases"]
-    published = {v: min(f["upload_time_iso_8601"] for f in files)[:10]
-                 for v, files in releases.items() if files}
-
-    def key(v):
-        return tuple(int(p) for p in v.split("."))
-
-    floor = min(documented, key=key)
-    expected = {v for v in published if key(v) >= key(floor)}
-
-    # A documented version the index never served is not automatically wrong:
-    # this package had nine releases on GitHub before it went to PyPI on
-    # 2026-07-26, and their entries are real history. Only a heading ABOVE the
-    # first published version can be an invention - below it, the index simply
-    # has nothing to say. The first draft of this gate flagged all fifteen.
-    first_published = min(published, key=key)
-
-    # The version THIS tree declares is the release IN FLIGHT, not an
-    # invention. Without this line the gate made a green release PR impossible:
-    # the changelog entry has to sit in the commit that bumps the version, the
-    # index does not serve it yet, and the gate called it invented. Measured on
-    # 2026-08-18 on PR #80, where it was the ONLY red left and no sequence of
-    # steps could avoid it. Removing the entry to silence the gate would have
-    # recreated exactly the hole this gate exists to prevent, and which had
-    # already left 0.7.1 without an entry for a day.
-    # Every OTHER documented and never-published version remains an error, and
-    # dates are still compared: when the release lands, its date must match the
-    # upload's, same as every other one.
-    import tomllib
-    in_flight = tomllib.loads(
-        (Path(__file__).resolve().parents[1] / "pyproject.toml")
-        .read_text(encoding="utf-8"))["project"]["version"]
-
-    missing = sorted(expected - set(documented), key=key)
-    invented = sorted((v for v in set(documented) - set(published)
-                       if key(v) > key(first_published) and v != in_flight), key=key)
-    misdated = sorted((v, documented[v], published[v]) for v in
-                      set(documented) & set(published) if documented[v] != published[v])
-
-    problems = []
-    if missing:
-        problems.append(
-            f"published and undocumented: {missing}. The changelog starts at "
-            f"{floor}, so everything from there up is in scope")
-    if invented:
-        problems.append(f"documented and never published: {invented}")
-    if misdated:
-        problems.append("dated differently from the upload: " + ", ".join(
-            f"{v} says {said} the index says {real}" for v, said, real in misdated))
-    assert not problems, "CHANGELOG.md: " + "; ".join(problems)
+def test_the_changelog_documents_every_version_it_claims_to_cover(clean_venv: Path):
+    """The installed Git-tag version has a dated entry in this checkout."""
+    version = _installed(clean_venv)["packages"]["invisible-playwright"]["version"]
+    changelog = (README.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert re.search(rf"(?m)^##\s*\[{re.escape(version)}\]\s*-\s*\d{{4}}-\d{{2}}-\d{{2}}\s*$",
+                     changelog), f"CHANGELOG.md has no dated entry for {version}"
