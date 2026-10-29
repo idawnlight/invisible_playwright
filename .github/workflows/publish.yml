@@ -54,6 +54,18 @@ jobs:
         run: python -m playwright install-deps firefox
       - name: Download the released engine and exercise the public API
         run: python scripts/release_smoke.py
+      - name: Verify screenshot scaling and cropping
+        run: |
+          export INVPW_BINARY_PATH="$(python -c 'from invisible_core import ensure_binary; print(ensure_binary())')"
+          python -m pytest tests/test_screenshot_looks_where_you_are.py -m e2e \
+            -o addopts= -p no:invisible_core.testing.world -v -rs --junitxml=screenshot.xml
+          python - <<'SCREENSHOT_TESTS'
+          import xml.etree.ElementTree as ET
+          cases = list(ET.parse("screenshot.xml").getroot().iter("testcase"))
+          assert len(cases) >= 9, f"only {len(cases)} screenshot tests ran"
+          assert not any(case.find(status) is not None
+                         for case in cases for status in ("skipped", "failure", "error"))
+          SCREENSHOT_TESTS
       - name: Build and verify the release artifacts
         run: python -m invisible_core.github_release --project-root . --tag "$RELEASE_TAG" --outdir dist
       - uses: actions/upload-artifact@v4

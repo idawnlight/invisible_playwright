@@ -7,9 +7,9 @@ nav_order: 1
 
 # Installation
 
-This guide installs `invisible_playwright 0.43.2`, `invisible_core 159.49.2`,
+This guide installs `invisible_playwright 0.43.3`, `invisible_core 159.49.2`,
 and Firefox 159.0 from the `firefox-159.0-r1` engine release. The Python tags
-are `v0.43.2` and `v159.49.2`.
+are `v0.43.3` and `v159.49.2`.
 
 Supported platforms: **Linux x86_64**. Use Python **3.11 or newer** and Git.
 
@@ -38,7 +38,7 @@ python3 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.2" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.2"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.3"
 ```
 
 The wrapper requires `invisible-core==159.49.2`; supplying both references
@@ -120,10 +120,10 @@ the same Python/platform, copy it with the browser archive, then install from it
 ```bash
 python -m pip wheel --wheel-dir wheelhouse \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.2" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.2"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.3"
 # On the destination machine:
 python -m pip install --no-index --find-links wheelhouse \
-  invisible-core==159.49.2 invisible-playwright==0.43.2
+  invisible-core==159.49.2 invisible-playwright==0.43.3
 ```
 
 ## Update

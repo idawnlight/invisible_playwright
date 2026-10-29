@@ -1,7 +1,7 @@
 # InvisiblePlaywright on Firefox 159
 
 This fork pairs Firefox 159.0 (`firefox-159.0-r1`) with
-`invisible_core 159.49.2` and `invisible_playwright 0.43.2`.
+`invisible_core 159.49.2` and `invisible_playwright 0.43.3`.
 The bundled Playwright Python client is 1.61.
 
 The engine implements session identity and geometry, language and timezone
@@ -22,7 +22,7 @@ python3 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.2" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.2"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.3"
 ```
 
 Use [the installation guide](docs/installation.md) for Linux system dependencies,

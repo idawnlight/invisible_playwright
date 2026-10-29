@@ -3249,7 +3249,7 @@ class PageDispatcher(Dispatcher):
                         else "image/png",
             "clip": clip,
             "quality": params.get("quality"),
-            "omitDeviceScaleFactor": False,
+            "omitDeviceScaleFactor": params.get("scale") == "css",
         }), timeout=self.frame._timeout(params)) or {}
         # ⛔ BASE64 IN, BASE64 OUT. The client decodes it; decoding here and
         # handing back bytes puts a str() of a bytes object in the answer.

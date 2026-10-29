@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.43.3] - 2026-10-29
+
+- Honor `page.screenshot(scale="css")` by producing one image pixel per CSS pixel.
+- Preserve device-pixel output for `scale="device"` and the default, with clip coordinates in CSS pixels.
+
 ## [0.43.2] - 2026-10-29
 
 - Pair the Git installation with invisible-core 159.49.2 and Firefox 159.0-r1.

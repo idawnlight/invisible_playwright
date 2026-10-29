@@ -172,7 +172,7 @@ def shots(tmp_path_factory, firefox_binary):
     srv, url = _serve()
     try:
         with InvisiblePlaywright(seed=4242, binary_path=firefox_binary,
-                                 headless=True) as browser:
+                                 headless=True, locale="en-US", timezone="UTC") as browser:
             page = browser.new_context(
                 viewport={"width": 800, "height": 600}).new_page()
             page.goto(url, wait_until="load", timeout=30_000)
@@ -201,6 +201,57 @@ def shots(tmp_path_factory, firefox_binary):
             yield out, tall, wide, landed, dpr
     finally:
         srv.shutdown()
+
+
+@pytest.fixture(scope="module")
+def scale_shots(tmp_path_factory, firefox_binary):
+    from invisible_playwright import InvisiblePlaywright
+
+    out = tmp_path_factory.mktemp("scale-shots")
+    clip = {"x": 40, "y": 30, "width": 408, "height": 342}
+    srv, url = _serve()
+    try:
+        with InvisiblePlaywright(seed=42, pin={"screen.dpr": 1.5},
+                                 binary_path=firefox_binary, headless=True,
+                                 locale="en-US", timezone="UTC") as browser:
+            page = browser.new_context(
+                viewport={"width": 800, "height": 600}).new_page()
+            page.goto(url, wait_until="load", timeout=30_000)
+            assert page.evaluate("() => window.devicePixelRatio") == 1.5
+            page.evaluate("""clip => {
+                for (const [left, color] of [[clip.x, '#c00'],
+                        [clip.x + clip.width - 16, '#0a0']]) {
+                    const marker = document.createElement('div');
+                    Object.assign(marker.style, {
+                        position: 'absolute', left: `${left}px`, top: `${clip.y}px`,
+                        width: '16px', height: '16px', background: color,
+                    });
+                    document.body.appendChild(marker);
+                }
+            }""", clip)
+            for name, options in (("css", {"scale": "css"}),
+                                  ("device", {"scale": "device"}),
+                                  ("omitted", {})):
+                page.screenshot(path=str(out / (name + ".png")), clip=clip, **options)
+        return out
+    finally:
+        srv.shutdown()
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("scale,image_scale", [
+    pytest.param("css", 1, id="css"),
+    pytest.param("device", 1.5, id="device"),
+    pytest.param("omitted", 1.5, id="omitted"),
+])
+def test_screenshot_scale_respects_css_clip(scale_shots, scale, image_scale):
+    path = scale_shots / (scale + ".png")
+    assert _size(path) == _px(image_scale, 408, 342)
+    left, right, y = _px(image_scale, 8, 400, 8)
+    row = _first_rows(path, y + 1)[y]
+    assert row[left] == RED
+    assert row[right] == GREEN
+    assert row[_px(image_scale, 204)[0]] == (255, 255, 255)
 
 
 @pytest.mark.e2e
