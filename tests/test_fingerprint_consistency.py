@@ -146,7 +146,7 @@ def _worker_navigator_dict(page, props):
                 worker.onmessage = (e) => resolve(e.data);
                 worker.onerror = (e) => reject(new Error(e.message));
                 worker.postMessage(props);
-                setTimeout(() => reject(new Error('worker timeout')), 5000);
+                setTimeout(() => reject(new Error('worker timeout')), 30000);
             });
             return result;
         } finally {
@@ -351,21 +351,51 @@ def test_audio_offline_context_deterministic(page):
 @pytest.mark.e2e
 def test_webgl_getParameter_deterministic(page):
     """WebGL parameters must not drift across reads."""
-    ok = _ev(page, """() => {
+    res = _ev(page, """() => {
+        const norm = v => (ArrayBuffer.isView(v) ? Array.from(v) : v);
         const c = document.createElement('canvas');
+        // The browser's own reason for a context it could not create (the event carries it; the page only
+        // sees null otherwise). A null seen once in 31 runs of the e2e on a loaded runner said 'gl null' and
+        // nothing else, which cannot be told from a missing GL, a refused library, an allocation that failed.
+        const errors = [];
+        c.addEventListener('webglcontextcreationerror', e => errors.push(e.statusMessage || ''), false);
         const gl = c.getContext('webgl');
-        if (!gl) return false;
+        if (!gl) {
+            const c2 = document.createElement('canvas');
+            c2.addEventListener('webglcontextcreationerror', e => errors.push('webgl2: ' + (e.statusMessage || '')), false);
+            return {ok: false, reason: 'gl null', errors,
+                    webgl2: !!c2.getContext('webgl2')};
+        }
+        if (gl.isContextLost()) {
+            return {ok: false, reason: 'context lost'};
+        }
+        const names = ['MAX_TEXTURE_SIZE', 'MAX_VIEWPORT_DIMS',
+                       'MAX_RENDERBUFFER_SIZE', 'MAX_VERTEX_ATTRIBS'];
         const params = [gl.MAX_TEXTURE_SIZE, gl.MAX_VIEWPORT_DIMS,
-                       gl.MAX_RENDERBUFFER_SIZE, gl.MAX_VERTEX_ATTRIBS];
-        const ref = JSON.stringify(params.map(p => gl.getParameter(p)));
+                        gl.MAX_RENDERBUFFER_SIZE, gl.MAX_VERTEX_ATTRIBS];
+        const read = () => params.map(p => norm(gl.getParameter(p)));
+        const ref = read();
+        const refJson = JSON.stringify(ref);
         for (let i = 0; i < 50; i++) {
-            if (JSON.stringify(params.map(p => gl.getParameter(p))) !== ref) {
-                return false;
+            const cur = read();
+            if (JSON.stringify(cur) !== refJson) {
+                if (gl.isContextLost()) {
+                    return {ok: false, reason: 'context lost', round: i + 1};
+                }
+                const k = cur.findIndex(
+                    (v, j) => JSON.stringify(v) !== JSON.stringify(ref[j]));
+                return {ok: false, reason: 'drift', round: i + 1,
+                        param: names[k], first: cur[k], ref: ref[k]};
             }
         }
-        return true;
+        return {ok: true};
     }""")
-    assert ok
+    assert res["ok"], (
+        f"WebGL getParameter check failed: reason={res.get('reason')!r} "
+        f"webgl2={res.get('webgl2')!r} errors={res.get('errors')!r} round={res.get('round')!r} "
+        f"param={res.get('param')!r} first={res.get('first')!r} "
+        f"ref={res.get('ref')!r}"
+    )
 
 
 # ===========================================================================

@@ -94,7 +94,7 @@ def test_every_request_of_a_session_carries_the_retail_accept_language(firefox_b
                                  headless=True) as browser:
             page = browser.new_page()
             page.goto(url)
-            page.wait_for_function("document.title === 'done'", timeout=15_000)
+            page.wait_for_function("document.title === 'done'", timeout=30_000)
             languages = page.evaluate("[...navigator.languages]")
     finally:
         srv.close()

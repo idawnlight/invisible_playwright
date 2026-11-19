@@ -5,10 +5,8 @@ beside these moved to `invisible_core/tests/test_config_defaults.py` on
 2026-07-27: they exercised core code, reached through a four-line shim, in a
 suite belonging to a package on a different release cadence.
 
-What remains is genuinely about this package, and it is stated the way it should
-always have been - against `invisible_core` directly, not against
-`invisible_playwright.config`, which is an alias of it and so compares a thing
-with itself.
+What remains is genuinely about this package, and it is stated against
+`invisible_core` directly.
 """
 from __future__ import annotations
 

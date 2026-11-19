@@ -33,7 +33,7 @@ READ = """() => new Promise(resolve => {
   if (read().length) return resolve(read());
   speechSynthesis.addEventListener('voiceschanged', () => resolve(read()),
                                    {once: true});
-  setTimeout(() => resolve(read()), 5000);
+  setTimeout(() => resolve(read()), 30000);
 })"""
 
 

@@ -1,8 +1,7 @@
 """Every route from a chosen path to a spawned Firefox goes through here.
 
-``binary_path=`` (and ``INVPW_BINARY_PATH``, which the test suite and the e2e
-scripts turn into ``binary_path=``) never reaches ``ensure_binary()``, so none
-of the download-side checks run on that route. The guard therefore sits on the
+``binary_path=`` never reaches ``ensure_binary()``, so none of the download-side
+checks run on that route. The guard therefore sits on the
 resolved executable, not inside the fetcher.
 """
 from __future__ import annotations
@@ -20,12 +19,9 @@ def resolve_executable(binary_path: Optional[Union[str, Path]]) -> Path:
     """``binary_path=`` skips the download path entirely, so the guard sits on the
     resolved executable rather than inside the fetcher.
 
-    ⛔ This used to say "binary_path= and INVPW_BINARY_PATH", and the second half
-    was false: nothing here reads that variable. It is translated into
-    ``binary_path=`` by the test scripts and by ``run_e2e.py``, so it is a
-    convention of this repo's harness and not a feature of the library. Corrected
-    2026-08-14 - a docstring that promises an env var the code never reads sends
-    the reader looking for a bug in the wrong function.
+    ⛔ Nothing here reads ``INVPW_BINARY_PATH``. It is a convention of this
+    repo's harness (the test fixtures and ``run_e2e.py`` turn it into
+    ``binary_path=``), not a feature of the library.
 
     Driving an engine the packaged seal does not describe is done with
     ``binary_path=`` plus ``INVISIBLE_SEAL_FILE`` pointing at a seal generated for

@@ -36,11 +36,16 @@ from invisible_core.juggler.connection import EventListeners
 from invisible_playwright._juggler.server import BrowserDispatcher, Server
 
 from _servers import LocalServer
+from _browser_census import closes_with_the_test
 
 SEED = 106
 
 
 class _Connection(EventListeners):
+    def __init__(self):
+        super().__init__()
+        closes_with_the_test(self)
+
     def startup_send(self, method, params=None):
         return self.send(method, params, timeout=None)
 
@@ -231,8 +236,9 @@ def test_two_tabs_of_one_session_are_typed_with_two_rhythms(firefox_binary, page
     assert _distance(plans[0], plans[1]) > 2 * 1600
 
     seen = []
+    # The US keyboard, named: the persona's keyboard follows the session's language, which the runner's address decides.
     with InvisiblePlaywright(seed=SEED, binary_path=firefox_binary,
-                             headless=True) as browser:
+                             headless=True, locale="en-US") as browser:
         pages = [browser.new_page(), browser.new_page()]
         for p in pages:
             p.goto(page_url)

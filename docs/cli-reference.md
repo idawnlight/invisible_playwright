@@ -24,7 +24,7 @@ absolute path as the final line on stdout.
 
 - By default (`INVPW_BACKEND` unset or `firefox`), `fetch` verifies every cached
   Firefox tree against the seal shipped in `invisible-core`, reports any stale
-  tree on stderr, and downloads `firefox-160.0-r1` if needed:
+  tree on stderr, and downloads `firefox-160.0-r2` if needed:
 
 ```bash
 FIREFOX_BIN="$(invisible-playwright fetch)"
@@ -44,9 +44,9 @@ check with zero network traffic.
 ## `version`
 
 ```text
-invisible_playwright 0.44.0
-invisible_core       160.49.0   (declared: ==160.49.0)
-engine               firefox-160.0-r1  Firefox 160.0  build 20261119071042
+invisible_playwright 0.55.0
+invisible_core       160.76.0   (declared: ==160.76.0)
+engine               firefox-160.0-r2  Firefox 160.0  build 20261119104835
 seal                 bc41cacd8e68  [.../invisible_core/seal.json]
 chromium_engine      chromium-157.0.8103.78-r1  Chromium 157.0.8103.78
 engines              /home/you/.cache/invisible-playwright

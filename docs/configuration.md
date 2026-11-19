@@ -82,6 +82,15 @@ Window, Worker, ICU, and HTTP headers. On Chromium, the launcher sets process `T
 `localtime_r` (`document.lastModified`) agree. See
 [timezone and proxy mismatch](timezone-proxy-mismatch.md).
 
+## Session options (`preload_newtab`, `udp_stun_servers`, `binary_path`)
+
+- `preload_newtab=False`: disables Firefox's privileged `about:newtab` background
+  preloading process when set explicitly (`None` leaves Firefox's default untouched).
+- `udp_stun_servers`: custom STUN server list used when probing UDP proxy egress on
+  Firefox sessions.
+- `binary_path`: pass an explicit local Firefox or Chromium executable path directly to
+  `InvisiblePlaywright(binary_path=...)` or `launch_server(binary_path=...)`.
+
 ## Environment variables
 
 Both engines download on first use, verify their SHA256 against the bundled seal, and
@@ -93,11 +102,12 @@ reuse the verified cache on later runs. Every variable below is optional:
 | `INVISIBLE_PLAYWRIGHT_CACHE_DIR` | Relocate the Firefox engine and shared state cache (GeoIP database, font manifest); defaults to `~/.cache/invisible-playwright` |
 | `INVISIBLE_PLAYWRIGHT_ENGINE_DIR` | Separate read-only Firefox engine store from writable state directory |
 | `INVISIBLE_CHROMIUM_CACHE_DIR` | Relocate the cached Chromium release directory; defaults to `~/.cache/invisible-chromium` |
-| `INVPW_BINARY_PATH` | Point Firefox at an existing binary and skip downloading |
-| `INVPW_CHROMIUM_BINARY_PATH` | Point Chromium at an existing `chrome` binary and skip downloading |
+| `INVPW_CHROMIUM_BINARY_PATH` | Point Chromium at an existing `chrome` binary and skip downloading (for Firefox, pass `binary_path=`) |
 | `STEALTHFOX_GITHUB_TOKEN` | Authenticate GitHub API/Release requests on rate-limited corporate or CI networks |
 | `INVISIBLE_PLAYWRIGHT_SKEW=allow` | Allow running against a Playwright version outside the seal's tested range |
-| `INVPW_CURSOR_ENGINE` | Cursor trajectory planner: `python` (default), `binary`, or `off` |
+| `INVPW_CURSOR_ENGINE` | Cursor trajectory planner: `python` (default) or `off` |
+| `INVPW_MALLOC_TRIM` | Set to `0` on Linux to disable automatic `malloc_trim` after garbage collection |
+| `INVPW_GC_LIMITS` | Override server protocol object registry GC caps (for example `Request=10000,Response=10000,Route=10000`) |
 | `INVISIBLE_DOWNLOAD_DEADLINE` | Maximum seconds allowed for a single engine download (default `1800`; `0` disables the upper bound) |
 
 ```bash
@@ -110,7 +120,7 @@ export INVISIBLE_CHROMIUM_CACHE_DIR=/mnt/engines/chromium
 Per-socket timeouts only bound silence between packets, not slow transfers. Checking an
 overall transfer deadline between chunks prevents a stalled connection from hanging CI
 or a headless launch indefinitely, while the `1800` second default accommodates links
-down to ~140 KB/s for the ~236-245 MB browser archives.
+down to ~155 KB/s for the ~236-280 MB browser archives.
 
 ## Next
 

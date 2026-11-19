@@ -52,7 +52,7 @@ def page(firefox_binary):
 
 
 def _settled_on_next(page):
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + 30
     while page.title() != "next":
         assert time.monotonic() < deadline, "the page never reached /next"
         time.sleep(0.05)
@@ -103,5 +103,5 @@ def test_a_read_declared_free_of_effects_answers_from_the_page_that_replaced_it(
 def test_wait_for_function_goes_on_through_a_navigation(page, site):
     page.goto(site)
     page.evaluate("setTimeout(() => { location.href = '/next'; }, 300)")
-    page.wait_for_function("document.title === 'next'", timeout=15_000)
+    page.wait_for_function("document.title === 'next'", timeout=30_000)
     assert page.title() == "next"

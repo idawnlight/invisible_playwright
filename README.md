@@ -3,7 +3,8 @@
 `invisible_playwright` is the unified Python Playwright entrypoint for two
 native stealth browser engines:
 
-- **`backend="firefox"` (default)**: Firefox 160.0 (`firefox-160.0-r1`),
+- **`backend="firefox"` (default)**: Firefox 160.0
+  ([`firefox-160.0-r2`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r2)),
   declaring a coherent Windows 10/11 desktop persona on Linux through native
   Gecko declarations, 119 bundled Windows fonts, and isolated Juggler worlds.
 - **`backend="chromium"`**: Chromium 157.0.8103.78
@@ -12,14 +13,14 @@ native stealth browser engines:
   `llvmpipe` WebGL1/2 parameters while driving `--remote-debugging-pipe` with
   `navigator.webdriver === false` and zero `Runtime.enable` leaks.
 
-This release pairs `invisible_core 160.49.0` with `invisible_playwright 0.44.0`
+This release pairs `invisible_core 160.76.0` with `invisible_playwright 0.55.0`
 and bundles the Playwright Python 1.61 client (both `sync_api` and `async_api`).
 
 ## Install
 
 Supported platforms: **Linux x86_64**;
 Python **3.11+** and Git are required. The Firefox archive is approximately
-245 MB and the Chromium archive is approximately 236 MB; each engine is
+280 MB (and the Chromium archive is similarly sized); each engine is
 downloaded on first use, verified against its pinned SHA256, and cached locally.
 
 Install both Python packages from their GitHub tags:
@@ -29,8 +30,8 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.49.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.44.0"
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.76.0" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.55.0"
 ```
 
 See [the installation guide](docs/installation.md) for Ubuntu/Linux system
@@ -64,6 +65,47 @@ The async API (`invisible_playwright.async_api.InvisiblePlaywright`) accepts
 the exact same arguments and can even run both engines concurrently in one
 event loop; see [Quickstart](docs/quickstart.md) and
 [Configuration](docs/configuration.md).
+
+### Serving one browser to many clients
+
+`launch_server()` (and `launch_server_async()`) serves one stealth Firefox or
+Chromium browser over a WebSocket to any Playwright client (Python, Node.js,
+Java, .NET, Go). Install the WebSocket extra with `pip install "websockets>=13"`
+or `uv add "invisible-playwright[remote]"`:
+
+```python
+# server.py
+from invisible_playwright import launch_server
+
+with launch_server(seed=42, headless=True, backend="firefox") as server:
+    print(server.ws_endpoint)          # ws://127.0.0.1:<port>/<secret>
+    input("serving, press Enter to stop")
+```
+
+```python
+# client.py: any Playwright client; pass p.chromium.connect(...) when backend="chromium"
+import sys
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.firefox.connect(sys.argv[1])
+    page = browser.new_page()
+    page.goto("https://example.com")
+    print(page.title())
+    browser.close()
+```
+
+Closing a client connection leaves the shared browser running; the browser
+belongs to the server and shuts down on `server.close()` (or when exiting the
+`with` block).
+
+### Built-in Playwright capabilities across both backends
+
+Both `backend="firefox"` and `backend="chromium"` support `Locator.screenshot()`
+and `ElementHandle.screenshot()` (including `scale="css"` and child frames),
+`page.expose_function()` / `context.expose_function()` with zero extra
+main-world globals, `context.set_offline()`, downloads (`page.expect_download()`),
+dialogs, popups, `preload_newtab`, and server-side Bezier pointer humanization.
 
 ## CLI
 
@@ -100,7 +142,7 @@ passed via `binary_path`.
 | --- | --- |
 | [invisible_playwright](https://github.com/idawnlight/invisible_playwright) | **User entrypoint**: Playwright sync/async API, bundled client, and dual-engine Juggler/CDP server |
 | [invisible_core](https://github.com/idawnlight/invisible_core) | Profile generation, GeoIP/timezone resolution, humanized motion/typing, Juggler client, and release verification |
-| [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native Gecko 160 declarations, bundled Windows fonts, Juggler worlds, and `firefox-160.0-r1` builds |
+| [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native Gecko 160 declarations, bundled Windows fonts, Juggler worlds, and `firefox-160.0-r2` builds |
 | [Chromium patches](https://github.com/idawnlight/chromium_antidetect_patch) | Native Chromium 157 hardware/WebGL normalization, CDP/V8 stealth patches, and `chromium-157.0.8103.78-r1` builds |
 
 The native repositories maintain Firefox 160 on `release/160` and Chromium 157

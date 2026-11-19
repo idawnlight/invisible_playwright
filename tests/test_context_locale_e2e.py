@@ -137,14 +137,14 @@ def test_a_context_locale_reaches_navigator_intl_and_the_header(firefox_binary):
                                  timezone="Europe/Rome") as browser:
             ctx = browser.new_context()
             page = ctx.new_page()
-            page.goto(base + "/echo", wait_until="load", timeout=20_000)
+            page.goto(base + "/echo", wait_until="load", timeout=30_000)
             assert _read(page) == _expected("it-IT"), (
                 "the default context must keep the launch locale's full list")
             ctx.close()
 
             ctx = browser.new_context(locale="de-DE")
             page = ctx.new_page()
-            page.goto(base + "/echo", wait_until="load", timeout=20_000)
+            page.goto(base + "/echo", wait_until="load", timeout=30_000)
             assert _read(page) == _expected("de-DE"), (
                 "new_context(locale='de-DE') inside an it-IT session")
             want = {"languages": _expected("de-DE")["languages"], "intl": "de-DE"}
@@ -154,11 +154,11 @@ def test_a_context_locale_reaches_navigator_intl_and_the_header(firefox_binary):
 
             # A page the site opens belongs to the same context and speaks
             # its language from its first request.
-            page.goto(base + "/opener", wait_until="load", timeout=20_000)
-            with ctx.expect_page(timeout=15_000) as info:
+            page.goto(base + "/opener", wait_until="load", timeout=30_000)
+            with ctx.expect_page(timeout=30_000) as info:
                 page.click("#pop")
             popup = info.value
-            popup.wait_for_load_state("load", timeout=10_000)
+            popup.wait_for_load_state("load", timeout=30_000)
             assert _read(popup) == _expected("de-DE"), "the popup of a de-DE context"
             ctx.close()
     finally:

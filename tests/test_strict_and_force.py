@@ -383,7 +383,7 @@ def test_force_turns_a_refusal_into_an_attempt(firefox_binary):
         assert page.evaluate("window.__o || 0") == 0, (
             "the refused click still reached the page")
 
-        page.click("#b", force=True, timeout=5000)
+        page.click("#b", force=True, timeout=30_000)
         assert page.evaluate("window.__o || 0") == 1, (
             "force did not dispatch the event, so the option still means "
             "nothing to a caller")

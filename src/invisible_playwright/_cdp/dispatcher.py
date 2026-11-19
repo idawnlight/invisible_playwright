@@ -1,12 +1,15 @@
 """Playwright `BrowserType` dispatcher for the Chromium CDP pipe backend."""
 from __future__ import annotations
 
+import os
 from typing import Any, Dict
 
 from invisible_core import parse_proxy
 from invisible_core.juggler import SessionFiles
+from invisible_core.juggler.keyboard import KEYBOARD_LAYOUT_PREF, profiles_pref
 
 from .._juggler._marshal import _caller_timeout
+from .._juggler._reaped import SessionRemoval
 from .._juggler.dispatcher import Dispatcher, ProtocolException
 from .bridge import CDPBridgeConnection
 from .engine import detect_needs_no_sandbox
@@ -14,6 +17,7 @@ from .engine import detect_needs_no_sandbox
 
 class ChromiumBrowserTypeDispatcher(Dispatcher):
     TYPE = "BrowserType"
+    browser_class: Any = None
     METHODS = {
         "launch": "op_launch",
         "launchPersistentContext": "op_launch_persistent",
@@ -49,6 +53,7 @@ class ChromiumBrowserTypeDispatcher(Dispatcher):
         from .._juggler.server import (
             BrowserDispatcher,
             _launch_environment,
+            session_draws_pointer,
             take_session_motion,
         )
         from .engine import resolve_chromium_executable
@@ -61,11 +66,17 @@ class ChromiumBrowserTypeDispatcher(Dispatcher):
             params.get("userDataDir"),
             _launch_environment(params.get("env")),
         )
-        self.server.after_shutdown(files.remove)
+        session_token = getattr(getattr(files, "token", None), "value", "")
+        removal = SessionRemoval(files.remove, session_token)
+        self.server.note_session_token(session_token)
+        self.server.after_shutdown(removal.after_shutdown)
         env, profile = files.env, files.profile
 
-        _, session_seed, motion_budget_s = take_session_motion(
-            params.get("firefoxUserPrefs") or {}
+        launch_prefs = dict(params.get("firefoxUserPrefs") or {})
+        pointer_draws = session_draws_pointer(launch_prefs)
+        prefs, session_seed, motion_budget_s = take_session_motion(launch_prefs)
+        keyboard_layout = prefs.pop(KEYBOARD_LAYOUT_PREF, None) or profiles_pref(
+            prefs.get("intl.accept_languages") or ""
         )
         ready = _caller_timeout(params, default_ms=60000)
 
@@ -95,9 +106,9 @@ class ChromiumBrowserTypeDispatcher(Dispatcher):
             persistent=bool(params.get("_persistent")),
             no_sandbox=no_sandbox,
         )
-        self.server.on_shutdown(conn.close)
+        self.server.on_shutdown(lambda: removal.close(conn))
         try:
-            browser = BrowserDispatcher(
+            browser = (self.browser_class or BrowserDispatcher)(
                 self.server,
                 self,
                 conn,
@@ -105,9 +116,12 @@ class ChromiumBrowserTypeDispatcher(Dispatcher):
                 session_seed=session_seed,
                 motion_budget_s=motion_budget_s,
                 service_workers_enabled=True,
+                layout=keyboard_layout,
+                pointer_draws=pointer_draws,
                 browser_name="chromium",
             )
         except BaseException:
             conn.close()
             raise
+        browser.engine_dir = os.path.dirname(str(executable))
         return {"browser": browser.channel}

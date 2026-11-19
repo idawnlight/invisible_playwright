@@ -17,7 +17,6 @@ from __future__ import annotations
 import http.server
 import socket
 import threading
-import time
 
 import pytest
 
@@ -55,24 +54,28 @@ def _serve():
 @pytest.mark.e2e
 def test_goto_returns_on_the_page_that_replaced_itself_from_script(firefox_binary):
     from invisible_playwright import InvisiblePlaywright
+    from invisible_playwright.sync_api import Error
 
     srv, url = _serve()
     try:
         with InvisiblePlaywright(seed=4243, binary_path=firefox_binary,
                                  headless=True) as browser:
             page = browser.new_context().new_page()
-            started = time.monotonic()
-            response = page.goto(url, wait_until="load", timeout=20_000)
-            took = time.monotonic() - started
-            assert took < 10, (
-                "goto took %.1fs on a page that redirects itself before load: "
-                "it waited for the navigation the script replaced ([B228])" % took)
+            # The goto's own timeout is the detector of [B228]: a goto that
+            # waits for the navigation the script replaced never returns on its
+            # own and ends at the timeout, with an error. No narrower number.
+            try:
+                response = page.goto(url, wait_until="load", timeout=30_000)
+            except Error as e:
+                pytest.fail("goto did not return on a page that redirects itself "
+                            "before load: it waited for the navigation the script "
+                            "replaced ([B228]): %s" % e.message)
             assert page.url == url + "landed", page.url
             assert page.title() == "landed", page.title()
             assert response is not None and response.status == 200, response
 
             # and an ordinary goto after it still waits for ITS OWN document
-            page.goto(url + "landed?again", wait_until="load", timeout=20_000)
+            page.goto(url + "landed?again", wait_until="load", timeout=30_000)
             assert page.url.endswith("landed?again"), page.url
     finally:
         srv.shutdown()

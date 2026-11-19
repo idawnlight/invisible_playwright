@@ -1,4 +1,6 @@
 """Frame identity must travel with every selector and handle."""
+import threading
+from collections import OrderedDict
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -31,7 +33,13 @@ def page():
     page.injected = Mock()
     page.actions = Mock()
     page._frames = {}
+    page._told_attached = set()
+    page._frames_lock = __import__("threading").RLock()
+    page._announce_lock = threading.RLock()
+    page._announced = True
+    page._said_before_announcement = []
     page._navigation_requests = {}
+    page._announced_closed = False
     Dispatcher.__init__(page, server, context)
     page.frame = FrameDispatcher(server, page, "main")
     for fid, parent in (("main", None), ("payment", "main"), ("widget", "payment")):
@@ -162,6 +170,10 @@ def test_adopt_is_one_wire_call_for_both_crossings(element, into, expected):
     injected.session = "session"
     injected.contexts = {("widget", UTILITY_WORLD): "widget-utility",
                          ("payment", UTILITY_WORLD): "payment-utility"}
+    # What __init__ gives it: the world waits sleep on it (invisible-core 58).
+    injected._contexts_changed = threading.Condition()
+    # And the frames the engine said are detached, which the wait for a world reads (invisible-core 62).
+    injected._gone = OrderedDict()
     assert injected.adopt("widget", element, into=into) == "adopted"
     assert sent == [("Page.adoptNode", expected)]
 
@@ -173,8 +185,15 @@ def test_resolve_selector_returns_child_channel_and_tail(page):
     }
 
 
+def _commit(page, params):
+    """A commit as the page hears it: from the lifecycle's announcement,
+    which is where its `navigated` is sent from (`_on_lifecycle`)."""
+    page._hear_lifecycle()
+    page.lifecycle._on_event("Page.navigationCommitted", params)
+
+
 def test_navigation_updates_url_and_clears_old_load_states(page):
-    page._on_juggler_event("Page.navigationCommitted", {
+    _commit(page, {
         "frameId": "widget", "url": "http://localhost/new", "name": "widget",
     })
     widget = page.frame_for("widget")
@@ -198,7 +217,7 @@ def test_navigation_updates_url_and_clears_old_load_states(page):
 
 def test_goto_does_not_overwrite_a_later_navigation_with_its_snapshot(page):
     def goto(*args, **kwargs):
-        page._on_juggler_event("Page.navigationCommitted", {
+        _commit(page, {
             "frameId": "main", "url": "http://localhost/latest", "name": "",
         })
         return {"navigationId": "earlier", "url": "http://localhost/earlier"}

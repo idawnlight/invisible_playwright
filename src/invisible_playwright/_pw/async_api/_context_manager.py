@@ -29,9 +29,7 @@ class PlaywrightContextManager:
     async def __aenter__(self) -> AsyncPlaywright:
         loop = asyncio.get_running_loop()
         # MODIFIED by invisible_playwright: the transport is the in-process
-        # server, from `make_transport`. The Node driver was removed on
-        # 2026-08-28, and `INVPW_TRANSPORT=driver` is refused with a message
-        # that says so - see `_juggler/transport.py`.
+        # server, from `make_transport` (`_juggler/transport.py`).
         transport = make_transport(loop)
         self._connection = Connection(
             None,
@@ -39,12 +37,6 @@ class PlaywrightContextManager:
             transport,
             loop,
         )
-        # MODIFIED by invisible_playwright: the one bridge between the two
-        # object graphs. See the sync entry point's `_context_manager.py` for
-        # why - this is the same line, needed for the same reason, on the
-        # other facade.
-        transport.bind_impl_objects(self._connection._objects,
-                                   self._connection.deliver_event)
         loop.create_task(self._connection.run())
         playwright_future = self._connection.playwright_future
 

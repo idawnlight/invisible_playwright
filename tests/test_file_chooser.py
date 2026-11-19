@@ -32,6 +32,7 @@ import pytest
 from invisible_playwright import InvisiblePlaywright
 
 from _servers import LocalServer
+from _waits import wait_until
 
 PAGE = b"""<!DOCTYPE html><html><body>
 <input id="f" type="file">
@@ -59,6 +60,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *a):
         pass
+
+
+def _change_heard(page):
+    """Until the page has written its `change` (`#out` is empty until then), with a deadline far beyond a healthy run:
+    a machine's speed is not the verdict. What it wrote is then judged by the caller's assertion."""
+    assert wait_until(lambda: page.inner_text("#out") != "", 30, lambda: page.wait_for_timeout(100)), (
+        "the page never saw a `change` event; #out is %r" % page.inner_text("#out"))
 
 
 @pytest.fixture
@@ -98,7 +106,7 @@ def test_expect_file_chooser_receives_the_event(firefox_binary, local_page):
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary) as browser:
         page = browser.new_page()
         page.goto(local_page, wait_until="load")
-        with page.expect_file_chooser(timeout=15000) as info:
+        with page.expect_file_chooser(timeout=30000) as info:
             page.click("#b")
         chooser = info.value
         # is_multiple is a METHOD on this client, not a property.
@@ -127,10 +135,10 @@ def test_the_chosen_files_arrive_at_the_page(firefox_binary, local_page,
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary) as browser:
         page = browser.new_page()
         page.goto(local_page, wait_until="load")
-        with page.expect_file_chooser(timeout=15000) as info:
+        with page.expect_file_chooser(timeout=30000) as info:
             page.click("#b")
         info.value.set_files(sample_file)
-        page.wait_for_timeout(400)
+        _change_heard(page)
         assert "sample.txt" in page.inner_text("#out")
 
 
@@ -151,7 +159,7 @@ def test_without_interception_the_file_inputs_remain_normal(firefox_binary,
         page = browser.new_page()
         page.goto(local_page, wait_until="load")
         page.set_input_files("#f", sample_file)
-        page.wait_for_timeout(300)
+        _change_heard(page)
         assert "sample.txt" in page.inner_text("#out")
 
 
@@ -170,10 +178,10 @@ def test_a_hidden_input_takes_files_through_its_chooser(firefox_binary,
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary) as browser:
         page = browser.new_page()
         page.goto(local_page, wait_until="load")
-        with page.expect_file_chooser(timeout=15000) as info:
+        with page.expect_file_chooser(timeout=30000) as info:
             page.click("#hb")
-        info.value.set_files(sample_file, timeout=5000)
-        page.wait_for_timeout(400)
+        info.value.set_files(sample_file, timeout=30000)
+        _change_heard(page)
         assert page.inner_text("#out") == "change:h:sample.txt"
 
 
@@ -185,6 +193,6 @@ def test_a_hidden_input_takes_files_by_selector(firefox_binary, local_page,
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary) as browser:
         page = browser.new_page()
         page.goto(local_page, wait_until="load")
-        page.set_input_files("#h", sample_file, timeout=5000)
-        page.wait_for_timeout(300)
+        page.set_input_files("#h", sample_file, timeout=30000)
+        _change_heard(page)
         assert page.inner_text("#out") == "change:h:sample.txt"

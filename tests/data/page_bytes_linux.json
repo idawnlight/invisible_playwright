@@ -1,0 +1,409 @@
+{
+ "os": "linux",
+ "source": "GitHub Actions run 43661728392 (workflow page-bytes-reference-hunt, runner image ubuntu24 20261111.370.1), wrapper commit 455d5619e5, invisible-core 64.71.0, engine firefox-64_159.0_20261114003728, seed 42, locale en-US, timezone Europe/Rome, headless=True; 2 launches, every key below is equal in all of them. `pngs`: the PNG keys, compared on their length and decoded pixels because every PNG carries a per-launch chunk.",
+ "keys": {
+  "c2d.composite.getImageData": {
+   "h": "df65ebe03bf31",
+   "n": 131072
+  },
+  "c2d.composite.jpeg": {
+   "h": "1c1b75006c5984",
+   "n": 11535
+  },
+  "c2d.composite.webp": {
+   "h": "182ab2238ae6c0",
+   "n": 5431
+  },
+  "c2d.gradtext.getImageData": {
+   "h": "ba9fb4487cdea",
+   "n": 352800
+  },
+  "c2d.image.getImageData": {
+   "h": "8218d41a1794c",
+   "n": 76800
+  },
+  "c2d.image.jpeg": {
+   "h": "125de65c968e30",
+   "n": 7315
+  },
+  "c2d.image.webp": {
+   "h": "26ea5dc80f98c",
+   "n": 5659
+  },
+  "c2d.measure": {
+   "h": "14a71ef40cb01c",
+   "n": 9488
+  },
+  "c2d.offscreen.getImageData": {
+   "h": "5a93b1c32ab60",
+   "n": 51200
+  },
+  "c2d.scale.high.getImageData": {
+   "h": "10d3beda5ba224",
+   "n": 114400
+  },
+  "c2d.scale.low.getImageData": {
+   "h": "10d3beda5ba224",
+   "n": 114400
+  },
+  "c2d.scale.medium.getImageData": {
+   "h": "10d3beda5ba224",
+   "n": 114400
+  },
+  "c2d.scale.off.getImageData": {
+   "h": "c673134829639",
+   "n": 114400
+  },
+  "c2d.shapes.getImageData": {
+   "h": "18fe9a0f7336da",
+   "n": 163840
+  },
+  "c2d.shapes.jpeg": {
+   "h": "18d82802030ab3",
+   "n": 6975
+  },
+  "c2d.shapes.webp": {
+   "h": "1ec9fa4e39f8de",
+   "n": 3287
+  },
+  "c2d.text.getImageData": {
+   "h": "e141df45718e",
+   "n": 856960
+  },
+  "c2d.text.jpeg": {
+   "h": "23b24c30781ee",
+   "n": 41751
+  },
+  "c2d.text.webp": {
+   "h": "1b0cc3c21c4f0f",
+   "n": 26215
+  },
+  "dom.fonts_check": {
+   "s": "[[\"16px sans-serif\",true],[\"20px serif\",true],[\"18px monospace\",true],[\"bold 16px Arial\",true],[\"italic 15px 'Segoe UI'\",true],[\"16px 'Times New Roman'\",true],[\"16px Calibri\",true],[\"14px Consolas\",true],[\"16px Verdana\",true],[\"16px Tahoma\",true],[\"17px Georgia\",true],[\"16px 'Segoe UI Emoji'\",true],[\"16px 'Microsoft YaHei'\",true],[\"16px 'Yu Gothic'\",true]]"
+  },
+  "dom.paragraphs": {
+   "s": "[[\"16px sans-serif\",200,21],[\"15px 'Times New Roman'\",200,20],[\"14px Consolas\",200,19]]"
+  },
+  "dom.span_boxes": {
+   "h": "1435dcc5a321d6",
+   "n": 5864
+  },
+  "dom.system_colors": {
+   "s": "[[\"Canvas\",\"rgb(255, 255, 255)\"],[\"CanvasText\",\"rgb(0, 0, 0)\"],[\"ButtonFace\",\"rgb(233, 233, 237)\"],[\"ButtonText\",\"rgb(0, 0, 0)\"],[\"ButtonBorder\",\"rgb(129, 127, 132)\"],[\"Field\",\"rgb(255, 255, 255)\"],[\"FieldText\",\"rgb(0, 0, 0)\"],[\"Highlight\",\"rgb(0, 120, 215)\"],[\"HighlightText\",\"rgb(255, 255, 255)\"],[\"GrayText\",\"rgb(109, 109, 109)\"],[\"LinkText\",\"rgb(0, 0, 238)\"],[\"VisitedText\",\"rgb(85, 26, 139)\"],[\"ActiveText\",\"rgb(238, 0, 0)\"],[\"Mark\",\"rgb(255, 255, 0)\"],[\"MarkText\",\"rgb(0, 0, 0)\"],[\"AccentColor\",\"rgb(0, 96, 223)\"],[\"AccentColorText\",\"rgb(255, 255, 255)\"],[\"SelectedItem\",\"rgb(0, 120, 215)\"],[\"SelectedItemText\",\"rgb(255, 255, 255)\"]]"
+  },
+  "env.dpr": {
+   "s": "1"
+  },
+  "env.hw": {
+   "s": "8"
+  },
+  "env.lang": {
+   "s": "[\"en-US\",\"en\"]"
+  },
+  "env.mq": {
+   "s": "[true,false,false,false,false,false,false]"
+  },
+  "env.oscpu": {
+   "s": "Windows NT 10.0; Win64; x64"
+  },
+  "env.platform": {
+   "s": "Win32"
+  },
+  "env.screen": {
+   "s": "[1920,1080,1920,1032,24,24]"
+  },
+  "env.ua": {
+   "s": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:159.0) Gecko/20100101 Firefox/159.0"
+  },
+  "gl1.anisotropy": {
+   "s": "16"
+  },
+  "gl1.antialias.false.readPixels": {
+   "h": "abed055e93fb8",
+   "n": 36864
+  },
+  "gl1.antialias.false.samples": {
+   "s": "0"
+  },
+  "gl1.antialias.true.readPixels": {
+   "h": "155744fc8af4b9",
+   "n": 36864
+  },
+  "gl1.antialias.true.samples": {
+   "s": "4"
+  },
+  "gl1.attributes": {
+   "s": "{\"alpha\":true,\"antialias\":true,\"depth\":true,\"failIfMajorPerformanceCaveat\":false,\"powerPreference\":\"default\",\"premultipliedAlpha\":true,\"preserveDrawingBuffer\":true,\"stencil\":false}"
+  },
+  "gl1.blend.readPixels": {
+   "h": "cfef8e9072c0c",
+   "n": 16384
+  },
+  "gl1.depth_stencil.readPixels": {
+   "h": "eaa3d5d41cfb",
+   "n": 16384
+  },
+  "gl1.extension_objects": {
+   "s": "[[\"ANGLE_instanced_arrays\",4],[\"EXT_blend_minmax\",2],[\"EXT_clip_control\",7],[\"EXT_color_buffer_half_float\",4],[\"EXT_depth_clamp\",1],[\"EXT_float_blend\",0],[\"EXT_frag_depth\",0],[\"EXT_polygon_offset_clamp\",2],[\"EXT_shader_texture_lod\",0],[\"EXT_sRGB\",4],[\"EXT_texture_compression_bptc\",4],[\"EXT_texture_compression_rgtc\",4],[\"EXT_texture_filter_anisotropic\",2],[\"EXT_texture_mirror_clamp_to_edge\",1],[\"OES_element_index_uint\",0],[\"OES_fbo_render_mipmap\",0],[\"OES_standard_derivatives\",1],[\"OES_texture_float\",0],[\"OES_texture_float_linear\",0],[\"OES_texture_half_float\",1],[\"OES_texture_half_float_linear\",0],[\"OES_vertex_array_object\",5],[\"WEBGL_color_buffer_float\",4],[\"WEBGL_compressed_texture_s3tc\",4],[\"WEBGL_compressed_texture_s3tc_srgb\",4],[\"WEBGL_debug_renderer_info\",2],[\"WEBGL_debug_shaders\",1],[\"WEBGL_depth_texture\",1],[\"WEBGL_draw_buffers\",35],[\"WEBGL_lose_context\",2],[\"WEBGL_provoking_vertex\",4]]"
+  },
+  "gl1.extensions": {
+   "s": "[\"ANGLE_instanced_arrays\",\"EXT_blend_minmax\",\"EXT_clip_control\",\"EXT_color_buffer_half_float\",\"EXT_depth_clamp\",\"EXT_float_blend\",\"EXT_frag_depth\",\"EXT_polygon_offset_clamp\",\"EXT_shader_texture_lod\",\"EXT_sRGB\",\"EXT_texture_compression_bptc\",\"EXT_texture_compression_rgtc\",\"EXT_texture_filter_anisotropic\",\"EXT_texture_mirror_clamp_to_edge\",\"OES_element_index_uint\",\"OES_fbo_render_mipmap\",\"OES_standard_derivatives\",\"OES_texture_float\",\"OES_texture_float_linear\",\"OES_texture_half_float\",\"OES_texture_half_float_linear\",\"OES_vertex_array_object\",\"WEBGL_color_buffer_float\",\"WEBGL_compressed_texture_s3tc\",\"WEBGL_compressed_texture_s3tc_srgb\",\"WEBGL_debug_renderer_info\",\"WEBGL_debug_shaders\",\"WEBGL_depth_texture\",\"WEBGL_draw_buffers\",\"WEBGL_lose_context\",\"WEBGL_provoking_vertex\"]"
+  },
+  "gl1.lines_points.readPixels": {
+   "h": "1841f80a258941",
+   "n": 16384
+  },
+  "gl1.math.highp.readPixels": {
+   "h": "14f93cecd95f86",
+   "n": 16384
+  },
+  "gl1.math.mediump.readPixels": {
+   "h": "14f93cecd95f86",
+   "n": 16384
+  },
+  "gl1.params": {
+   "s": "{\"VERSION\":\"WebGL 1.0\",\"SHADING_LANGUAGE_VERSION\":\"WebGL GLSL ES 1.0\",\"VENDOR\":\"Mozilla\",\"RENDERER\":\"ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar\",\"MAX_TEXTURE_SIZE\":16384,\"MAX_CUBE_MAP_TEXTURE_SIZE\":16384,\"MAX_RENDERBUFFER_SIZE\":16384,\"MAX_VIEWPORT_DIMS\":[32767,32767],\"ALIASED_LINE_WIDTH_RANGE\":[1,1],\"ALIASED_POINT_SIZE_RANGE\":[1,1024],\"MAX_VERTEX_ATTRIBS\":16,\"MAX_VARYING_VECTORS\":30,\"MAX_COMBINED_TEXTURE_IMAGE_UNITS\":32,\"MAX_VERTEX_TEXTURE_IMAGE_UNITS\":16,\"MAX_TEXTURE_IMAGE_UNITS\":16,\"MAX_VERTEX_UNIFORM_VECTORS\":4096,\"MAX_FRAGMENT_UNIFORM_VECTORS\":1024,\"RED_BITS\":8,\"GREEN_BITS\":8,\"BLUE_BITS\":8,\"ALPHA_BITS\":8,\"DEPTH_BITS\":24,\"STENCIL_BITS\":0,\"SAMPLES\":4,\"SAMPLE_BUFFERS\":1,\"SUBPIXEL_BITS\":4}"
+  },
+  "gl1.precision": {
+   "s": "[[\"VERTEX_SHADER\",\"LOW_FLOAT\",127,127,23],[\"VERTEX_SHADER\",\"MEDIUM_FLOAT\",127,127,23],[\"VERTEX_SHADER\",\"HIGH_FLOAT\",127,127,23],[\"VERTEX_SHADER\",\"LOW_INT\",31,30,0],[\"VERTEX_SHADER\",\"MEDIUM_INT\",31,30,0],[\"VERTEX_SHADER\",\"HIGH_INT\",31,30,0],[\"FRAGMENT_SHADER\",\"LOW_FLOAT\",127,127,23],[\"FRAGMENT_SHADER\",\"MEDIUM_FLOAT\",127,127,23],[\"FRAGMENT_SHADER\",\"HIGH_FLOAT\",127,127,23],[\"FRAGMENT_SHADER\",\"LOW_INT\",31,30,0],[\"FRAGMENT_SHADER\",\"MEDIUM_INT\",31,30,0],[\"FRAGMENT_SHADER\",\"HIGH_INT\",31,30,0]]"
+  },
+  "gl1.texture.linear.readPixels": {
+   "h": "5fdcdb999f3e0",
+   "n": 16384
+  },
+  "gl1.texture.mip.readPixels": {
+   "h": "5fdcdb999f3e0",
+   "n": 16384
+  },
+  "gl1.texture.nearest.readPixels": {
+   "h": "160f810aa6835f",
+   "n": 16384
+  },
+  "gl1.triangle.drawImage": {
+   "h": "81a61d733e561",
+   "n": 36864
+  },
+  "gl1.triangle.readPixels": {
+   "h": "12bb7ce7d2f21",
+   "n": 36864
+  },
+  "gl1.triangle.toDataURL_jpeg": {
+   "s": "data:image/jpeg;base64,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"
+  },
+  "gl1.unmasked": {
+   "s": "[\"Google Inc. (Intel)\",\"ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar\"]"
+  },
+  "gl2.anisotropy": {
+   "s": "16"
+  },
+  "gl2.antialias.false.readPixels": {
+   "h": "abed055e93fb8",
+   "n": 36864
+  },
+  "gl2.antialias.false.samples": {
+   "s": "0"
+  },
+  "gl2.antialias.true.readPixels": {
+   "h": "155744fc8af4b9",
+   "n": 36864
+  },
+  "gl2.antialias.true.samples": {
+   "s": "4"
+  },
+  "gl2.attributes": {
+   "s": "{\"alpha\":true,\"antialias\":true,\"depth\":true,\"failIfMajorPerformanceCaveat\":false,\"powerPreference\":\"default\",\"premultipliedAlpha\":true,\"preserveDrawingBuffer\":true,\"stencil\":false}"
+  },
+  "gl2.blend.readPixels": {
+   "h": "cfef8e9072c0c",
+   "n": 16384
+  },
+  "gl2.depth_stencil.readPixels": {
+   "h": "eaa3d5d41cfb",
+   "n": 16384
+  },
+  "gl2.extension_objects": {
+   "s": "[[\"EXT_clip_control\",7],[\"EXT_color_buffer_float\",0],[\"EXT_depth_clamp\",1],[\"EXT_float_blend\",0],[\"EXT_polygon_offset_clamp\",2],[\"EXT_texture_compression_bptc\",4],[\"EXT_texture_compression_rgtc\",4],[\"EXT_texture_filter_anisotropic\",2],[\"EXT_texture_mirror_clamp_to_edge\",1],[\"EXT_texture_norm16\",8],[\"OES_draw_buffers_indexed\",7],[\"OES_texture_float_linear\",0],[\"OVR_multiview2\",5],[\"WEBGL_compressed_texture_s3tc\",4],[\"WEBGL_compressed_texture_s3tc_srgb\",4],[\"WEBGL_debug_renderer_info\",2],[\"WEBGL_debug_shaders\",1],[\"WEBGL_lose_context\",2],[\"WEBGL_provoking_vertex\",4]]"
+  },
+  "gl2.extensions": {
+   "s": "[\"EXT_clip_control\",\"EXT_color_buffer_float\",\"EXT_depth_clamp\",\"EXT_float_blend\",\"EXT_polygon_offset_clamp\",\"EXT_texture_compression_bptc\",\"EXT_texture_compression_rgtc\",\"EXT_texture_filter_anisotropic\",\"EXT_texture_mirror_clamp_to_edge\",\"EXT_texture_norm16\",\"OES_draw_buffers_indexed\",\"OES_texture_float_linear\",\"OVR_multiview2\",\"WEBGL_compressed_texture_s3tc\",\"WEBGL_compressed_texture_s3tc_srgb\",\"WEBGL_debug_renderer_info\",\"WEBGL_debug_shaders\",\"WEBGL_lose_context\",\"WEBGL_provoking_vertex\"]"
+  },
+  "gl2.float_target.readPixels": {
+   "h": "1ba8f4b0bbe2d8",
+   "n": 16384
+  },
+  "gl2.lines_points.readPixels": {
+   "h": "1841f80a258941",
+   "n": 16384
+  },
+  "gl2.math.highp.readPixels": {
+   "h": "14f93cecd95f86",
+   "n": 16384
+  },
+  "gl2.math.mediump.readPixels": {
+   "h": "14f93cecd95f86",
+   "n": 16384
+  },
+  "gl2.msaa_resolve.readPixels": {
+   "h": "1a2cbef856e591",
+   "n": 16384
+  },
+  "gl2.params": {
+   "s": "{\"VERSION\":\"WebGL 2.0\",\"SHADING_LANGUAGE_VERSION\":\"WebGL GLSL ES 3.00\",\"VENDOR\":\"Mozilla\",\"RENDERER\":\"ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar\",\"MAX_TEXTURE_SIZE\":16384,\"MAX_CUBE_MAP_TEXTURE_SIZE\":16384,\"MAX_RENDERBUFFER_SIZE\":16384,\"MAX_VIEWPORT_DIMS\":[32767,32767],\"ALIASED_LINE_WIDTH_RANGE\":[1,1],\"ALIASED_POINT_SIZE_RANGE\":[1,1024],\"MAX_VERTEX_ATTRIBS\":16,\"MAX_VARYING_VECTORS\":30,\"MAX_COMBINED_TEXTURE_IMAGE_UNITS\":32,\"MAX_VERTEX_TEXTURE_IMAGE_UNITS\":16,\"MAX_TEXTURE_IMAGE_UNITS\":16,\"MAX_VERTEX_UNIFORM_VECTORS\":4096,\"MAX_FRAGMENT_UNIFORM_VECTORS\":1024,\"RED_BITS\":8,\"GREEN_BITS\":8,\"BLUE_BITS\":8,\"ALPHA_BITS\":8,\"DEPTH_BITS\":24,\"STENCIL_BITS\":0,\"SAMPLES\":4,\"SAMPLE_BUFFERS\":1,\"SUBPIXEL_BITS\":4,\"MAX_3D_TEXTURE_SIZE\":2048,\"MAX_ARRAY_TEXTURE_LAYERS\":2048,\"MAX_COLOR_ATTACHMENTS\":8,\"MAX_DRAW_BUFFERS\":8,\"MAX_ELEMENTS_INDICES\":2147483647,\"MAX_ELEMENTS_VERTICES\":2147483647,\"MAX_FRAGMENT_INPUT_COMPONENTS\":120,\"MAX_FRAGMENT_UNIFORM_BLOCKS\":12,\"MAX_FRAGMENT_UNIFORM_COMPONENTS\":4096,\"MAX_PROGRAM_TEXEL_OFFSET\":7,\"MAX_SAMPLES\":8,\"MAX_SERVER_WAIT_TIMEOUT\":0,\"MAX_TEXTURE_LOD_BIAS\":2,\"MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS\":120,\"MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS\":4,\"MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS\":4,\"MAX_UNIFORM_BLOCK_SIZE\":65536,\"MAX_UNIFORM_BUFFER_BINDINGS\":24,\"MAX_VARYING_COMPONENTS\":120,\"MAX_VERTEX_OUTPUT_COMPONENTS\":120,\"MAX_VERTEX_UNIFORM_BLOCKS\":12,\"MAX_VERTEX_UNIFORM_COMPONENTS\":16384,\"MIN_PROGRAM_TEXEL_OFFSET\":-8,\"MAX_COMBINED_UNIFORM_BLOCKS\":24,\"MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS\":200704,\"MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS\":212992,\"UNIFORM_BUFFER_OFFSET_ALIGNMENT\":256}"
+  },
+  "gl2.precision": {
+   "s": "[[\"VERTEX_SHADER\",\"LOW_FLOAT\",127,127,23],[\"VERTEX_SHADER\",\"MEDIUM_FLOAT\",127,127,23],[\"VERTEX_SHADER\",\"HIGH_FLOAT\",127,127,23],[\"VERTEX_SHADER\",\"LOW_INT\",31,30,0],[\"VERTEX_SHADER\",\"MEDIUM_INT\",31,30,0],[\"VERTEX_SHADER\",\"HIGH_INT\",31,30,0],[\"FRAGMENT_SHADER\",\"LOW_FLOAT\",127,127,23],[\"FRAGMENT_SHADER\",\"MEDIUM_FLOAT\",127,127,23],[\"FRAGMENT_SHADER\",\"HIGH_FLOAT\",127,127,23],[\"FRAGMENT_SHADER\",\"LOW_INT\",31,30,0],[\"FRAGMENT_SHADER\",\"MEDIUM_INT\",31,30,0],[\"FRAGMENT_SHADER\",\"HIGH_INT\",31,30,0]]"
+  },
+  "gl2.texture.linear.readPixels": {
+   "h": "5fdcdb999f3e0",
+   "n": 16384
+  },
+  "gl2.texture.mip.readPixels": {
+   "h": "5fdcdb999f3e0",
+   "n": 16384
+  },
+  "gl2.texture.nearest.readPixels": {
+   "h": "160f810aa6835f",
+   "n": 16384
+  },
+  "gl2.triangle.drawImage": {
+   "h": "81a61d733e561",
+   "n": 36864
+  },
+  "gl2.triangle.readPixels": {
+   "h": "12bb7ce7d2f21",
+   "n": 36864
+  },
+  "gl2.triangle.toDataURL_jpeg": {
+   "s": "data:image/jpeg;base64,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"
+  },
+  "gl2.unmasked": {
+   "s": "[\"Google Inc. (Intel)\",\"ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar\"]"
+  },
+  "gpu.webgpu.features": {
+   "s": "{\"depth-clip-control\":true,\"depth32float-stencil8\":true,\"texture-compression-bc\":true,\"texture-compression-bc-sliced-3d\":true,\"texture-compression-etc2\":false,\"texture-compression-astc\":false,\"texture-compression-astc-sliced-3d\":false,\"timestamp-query\":true,\"indirect-first-instance\":true,\"shader-f16\":true,\"rg11b10ufloat-renderable\":true,\"bgra8unorm-storage\":true,\"float32-filterable\":true,\"float32-blendable\":true,\"clip-distances\":false,\"dual-source-blending\":true,\"subgroups\":false}"
+  },
+  "gpu.webgpu.info": {
+   "s": "{\"vendor\":\"\",\"architecture\":\"\",\"device\":\"\",\"description\":\"\"}"
+  },
+  "gpu.webgpu.limits": {
+   "s": "{\"maxTextureDimension1D\":16384,\"maxTextureDimension2D\":16384,\"maxTextureDimension3D\":2048,\"maxTextureArrayLayers\":2048,\"maxBindGroups\":8,\"maxBindGroupsPlusVertexBuffers\":24,\"maxBindingsPerBindGroup\":4294967295,\"maxDynamicUniformBuffersPerPipelineLayout\":8,\"maxDynamicStorageBuffersPerPipelineLayout\":4,\"maxSampledTexturesPerShaderStage\":64,\"maxSamplersPerShaderStage\":64,\"maxStorageBuffersPerShaderStage\":64,\"maxStorageTexturesPerShaderStage\":64,\"maxUniformBuffersPerShaderStage\":64,\"maxUniformBufferBindingSize\":65536,\"maxStorageBufferBindingSize\":2147483644,\"minUniformBufferOffsetAlignment\":256,\"minStorageBufferOffsetAlignment\":32,\"maxVertexBuffers\":16,\"maxBufferSize\":2147483644,\"maxVertexAttributes\":30,\"maxVertexBufferArrayStride\":2048,\"maxInterStageShaderVariables\":31,\"maxColorAttachments\":8,\"maxColorAttachmentBytesPerSample\":128,\"maxComputeWorkgroupStorageSize\":32768,\"maxComputeInvocationsPerWorkgroup\":1024,\"maxComputeWorkgroupSizeX\":1024,\"maxComputeWorkgroupSizeY\":1024,\"maxComputeWorkgroupSizeZ\":64,\"maxComputeWorkgroupsPerDimension\":65535}"
+  },
+  "worker.webgl": {
+   "s": "{\"vendor\":\"Mozilla\",\"renderer\":\"ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar\",\"unmasked\":[\"Google Inc. (Intel)\",\"ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar\"],\"exts\":[\"ANGLE_instanced_arrays\",\"EXT_blend_minmax\",\"EXT_clip_control\",\"EXT_color_buffer_half_float\",\"EXT_depth_clamp\",\"EXT_float_blend\",\"EXT_frag_depth\",\"EXT_polygon_offset_clamp\",\"EXT_shader_texture_lod\",\"EXT_sRGB\",\"EXT_texture_compression_bptc\",\"EXT_texture_compression_rgtc\",\"EXT_texture_filter_anisotropic\",\"EXT_texture_mirror_clamp_to_edge\",\"OES_element_index_uint\",\"OES_fbo_render_mipmap\",\"OES_standard_derivatives\",\"OES_texture_float\",\"OES_texture_float_linear\",\"OES_texture_half_float\",\"OES_texture_half_float_linear\",\"OES_vertex_array_object\",\"WEBGL_color_buffer_float\",\"WEBGL_compressed_texture_s3tc\",\"WEBGL_compressed_texture_s3tc_srgb\",\"WEBGL_debug_renderer_info\",\"WEBGL_debug_shaders\",\"WEBGL_depth_texture\",\"WEBGL_draw_buffers\",\"WEBGL_lose_context\",\"WEBGL_provoking_vertex\"],\"px\":[64,128,191,255,64,128,191,255,64,128,191,255,64,128,191,255]}"
+  }
+ },
+ "pngs": {
+  "c2d.composite.png": {
+   "n": 2414,
+   "w": 256,
+   "h": 128,
+   "ct": 6,
+   "sha256": "fb585f18240eb1a787a5b146d6332a0376dae76f8c8716e99f68fbbf9eff905e"
+  },
+  "c2d.composite.toBlob": {
+   "n": 1794,
+   "w": 256,
+   "h": 128,
+   "ct": 6,
+   "sha256": "fb585f18240eb1a787a5b146d6332a0376dae76f8c8716e99f68fbbf9eff905e"
+  },
+  "c2d.gradtext.png": {
+   "n": 56850,
+   "w": 420,
+   "h": 210,
+   "ct": 6,
+   "sha256": "a294763c6eca0c9178d09052cfaa5ac92932d8cf32909f31bbb387810d473310"
+  },
+  "c2d.image.png": {
+   "n": 19502,
+   "w": 160,
+   "h": 120,
+   "ct": 6,
+   "sha256": "51bc3789f2e238dfbf8899eb7a965a4f04d3e0e7f2246b1bd3cfdc9597bd2a77"
+  },
+  "c2d.image.toBlob": {
+   "n": 14610,
+   "w": 160,
+   "h": 120,
+   "ct": 6,
+   "sha256": "51bc3789f2e238dfbf8899eb7a965a4f04d3e0e7f2246b1bd3cfdc9597bd2a77"
+  },
+  "c2d.offscreen.convertToBlob": {
+   "n": 2687,
+   "w": 160,
+   "h": 80,
+   "ct": 6,
+   "sha256": "38b7fa4aa1d61a5bae5b92e8b9216ff61ce4d4a8d15cc0fa6d8a8c8441a3fdb8"
+  },
+  "c2d.scale.high.png": {
+   "n": 47314,
+   "w": 220,
+   "h": 130,
+   "ct": 6,
+   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21"
+  },
+  "c2d.scale.low.png": {
+   "n": 47314,
+   "w": 220,
+   "h": 130,
+   "ct": 6,
+   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21"
+  },
+  "c2d.scale.medium.png": {
+   "n": 47314,
+   "w": 220,
+   "h": 130,
+   "ct": 6,
+   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21"
+  },
+  "c2d.scale.off.png": {
+   "n": 20890,
+   "w": 220,
+   "h": 130,
+   "ct": 6,
+   "sha256": "c28700e28636d69dfe9bf293fadebae1fdf970949ac90147836ab1837065f46d"
+  },
+  "c2d.shapes.png": {
+   "n": 19226,
+   "w": 256,
+   "h": 160,
+   "ct": 6,
+   "sha256": "89ee57c100f4682099bd3a5f2de56c5b31091dae253bd7e3db4f254fb8b9e6a3"
+  },
+  "c2d.shapes.toBlob": {
+   "n": 14402,
+   "w": 256,
+   "h": 160,
+   "ct": 6,
+   "sha256": "89ee57c100f4682099bd3a5f2de56c5b31091dae253bd7e3db4f254fb8b9e6a3"
+  },
+  "c2d.text.png": {
+   "n": 51610,
+   "w": 520,
+   "h": 412,
+   "ct": 6,
+   "sha256": "1c56511f78721be0423bbcef100bf7b52e9997da498bd1f771d0d8348a791d3b"
+  },
+  "c2d.text.toBlob": {
+   "n": 38691,
+   "w": 520,
+   "h": 412,
+   "ct": 6,
+   "sha256": "1c56511f78721be0423bbcef100bf7b52e9997da498bd1f771d0d8348a791d3b"
+  },
+  "gl1.triangle.toDataURL": {
+   "n": 7470,
+   "w": 96,
+   "h": 96,
+   "ct": 6,
+   "sha256": "3f24afcf21a411e18ef9256e558a30ec589bbb51923fedf485cd0e6a2dcd9919"
+  },
+  "gl2.triangle.toDataURL": {
+   "n": 7470,
+   "w": 96,
+   "h": 96,
+   "ct": 6,
+   "sha256": "3f24afcf21a411e18ef9256e558a30ec589bbb51923fedf485cd0e6a2dcd9919"
+  }
+ }
+}

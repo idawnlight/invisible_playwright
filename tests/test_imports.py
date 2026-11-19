@@ -38,13 +38,8 @@ def test_async_class_is_distinct_from_sync():
 
 
 @pytest.mark.parametrize("name", [
-    "constants",
-    "download",
-    "prefs",
     "launcher",
     "cli",
-    "_proxy",
-    "_fpforge",
 ])
 def test_submodule_importable(name):
     importlib.import_module(f"invisible_playwright.{name}")

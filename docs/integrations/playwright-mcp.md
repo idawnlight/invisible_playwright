@@ -1,6 +1,6 @@
 ---
 title: "Using invisible_playwright with Microsoft's Playwright MCP"
-description: "There is a server for this engine, inside AIHawk: uvx aihawk. This page is for people already committed to Microsoft's playwright-mcp, and says exactly what that route costs."
+description: "There is a server for this engine: uvx invisible-playwright-mcp. This page is for people already committed to Microsoft's playwright-mcp, and says exactly what that route costs."
 parent: "Integrations"
 nav_order: 7
 ---
@@ -8,13 +8,12 @@ nav_order: 7
 # Using invisible_playwright with Microsoft's Playwright MCP
 
 **There is a server for this engine:**
-[`aihawk`](https://github.com/feder-cr/AIHawk/wiki/mcp-server),
-shipped inside AIHawk.
+[`invisible-playwright-mcp`](https://github.com/oss-invisible/playwright_mcp/wiki/mcp-server).
 One line, and it carries the seeded profile and the humanised pointer that the
 route on this page cannot:
 
 ```bash
-claude mcp add stealth -- uvx aihawk
+claude mcp add stealth -- uvx invisible-playwright-mcp
 ```
 
 This page is for the other case: you are already committed to Microsoft's
@@ -36,7 +35,7 @@ uv add invisible-playwright
 uv run python -c "from invisible_playwright import ensure_binary; print(ensure_binary())"
 ```
 
-Run them in a uv project; [the README's install steps](https://github.com/feder-cr/invisible_playwright#install) create one.
+Run them in a uv project; [the README's install steps](https://github.com/oss-invisible/playwright#install) create one.
 
 The second command downloads the patched Firefox on first run, caches it, and prints
 the path. Give that path to the MCP server:
@@ -122,8 +121,8 @@ knowing before you trust the session.
 ## Short answers to the questions that lead here
 
 **Is there an MCP server for this project?** Yes:
-[`aihawk`](https://github.com/feder-cr/AIHawk/wiki/mcp-server),
-`uvx aihawk`. It launches through the engine, so the seeded
+[`invisible-playwright-mcp`](https://github.com/oss-invisible/playwright_mcp/wiki/mcp-server),
+`uvx invisible-playwright-mcp`. It launches through the engine, so the seeded
 profile and the humanised pointer come with it.
 
 Microsoft's own `playwright-mcp` also accepts `--browser firefox` together with

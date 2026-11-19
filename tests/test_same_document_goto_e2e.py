@@ -46,10 +46,10 @@ def test_goto_to_a_fragment_answers_with_the_new_url(firefox_binary):
         with InvisiblePlaywright(seed=4246, binary_path=firefox_binary,
                                  headless=True) as browser:
             page = browser.new_context().new_page()
-            first = page.goto(url, timeout=20_000)
+            first = page.goto(url, timeout=30_000)
             assert first is not None and first.status == 200
             for fragment in ("#sec", "#other", "#other"):
-                response = page.goto(url + fragment, timeout=10_000)
+                response = page.goto(url + fragment, timeout=30_000)
                 assert response is None, response
                 assert page.url == url + fragment, (fragment, page.url)
     finally:

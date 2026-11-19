@@ -6,27 +6,43 @@ consent iframe was completely unreachable from Playwright in 0.1.7 -
 threw cross-origin SOP errors, and ``frame_locator().click()`` timed
 out.
 
-Root cause was a missing pref. FF150 ships with
-``fission.webContentIsolationStrategy=1`` (IsolateEverything), which
-site-isolates cross-origin iframes into separate webIsolated content
-processes even when ``fission.autostart=False``. The Juggler code paths
-inherited from the FF146 era assume same-process iframes. The wrapper's
-``_BASELINE`` now pins the pref to 0 (IsolateNothing).
+Root cause was that the Juggler code paths inherited from the FF146 era
+assumed same-process iframes, while the engine site-isolated cross-origin
+iframes into separate webIsolated content processes. The baseline then
+pinned ``fission.webContentIsolationStrategy`` to 0 (IsolateNothing) and
+kept ``fission.autostart`` off, so every iframe lived in the process of
+its page.
+
+firefox-62 reaches a frame in another process like any other, so the
+baseline now runs Fission the way retail Firefox does on desktop:
+``fission.webContentIsolationStrategy=1`` (IsolateEverything, one content
+process per site), ``fission.autostart=True`` and four isolated content
+processes. ``fission.autostart.session`` is written by the parent at
+startup and is not declared.
 
 These tests exist so a future Firefox upgrade or a fingerprint A/B
-that flips this pref by accident cannot ship without a red CI signal.
+that flips these prefs by accident cannot ship without a red CI signal.
+The prefs belong to ``invisible_core.prefs._BASELINE``: the unit layer
+needs an ``invisible-core`` that declares them.
 
 Layers:
-  * ``unit`` - ``_BASELINE`` contains the pref with the right value. No browser.
-  * ``e2e``  - launch the real binary against a LOCAL HTTP harness on
-              ``127.0.0.1`` (two ports = two SOP origins) and verify the
-              four protocol operations that regressed: frame URL tracking,
-              ``handle.content_frame()``, ``frame.evaluate()``, and
-              ``frame_locator(...).locator(...)`` element resolution.
+  * ``unit`` - ``_BASELINE`` contains the prefs with the right values. No browser.
+  * ``e2e``  - launch the real binary against a LOCAL HTTP harness and
+              verify the four protocol operations that regressed: frame URL
+              tracking, ``handle.content_frame()``, ``frame.evaluate()``, and
+              ``frame_locator(...).locator(...)`` element resolution. The page
+              is served from ``127.0.0.1`` and its iframes from ``localhost``:
+              two hosts are two SITES, so at strategy 1 each iframe runs in a
+              content process of its own. (Two ports of one host would be one
+              site, and those iframes would stay in the process of the page.)
+              ``test_the_iframe_runs_in_another_process`` proves it from
+              inside the pages, so this file cannot fall back to the process
+              of the page unnoticed. The bench with its own hosts and
+              process counts is ``test_fission_strategy1_bench.py``.
 
 The e2e tests run entirely offline. They never call out to a real site;
-the cross-origin shape is reproduced with two local HTTP servers on
-random free ports.
+the cross-site shape is reproduced with two local HTTP servers on random
+free ports, reached by two names of the loopback interface.
 """
 from __future__ import annotations
 
@@ -39,6 +55,8 @@ import pytest
 from invisible_core._fpforge import generate_profile
 from invisible_core.prefs import _BASELINE, translate_profile_to_prefs
 
+from _waits import wait_until
+
 
 # ────────────────────────────────────────────────────────────────────
 # Unit layer - fast, no browser, runs on every CI
@@ -46,51 +64,53 @@ from invisible_core.prefs import _BASELINE, translate_profile_to_prefs
 
 
 @pytest.mark.unit
-def test_baseline_pins_web_content_isolation_strategy_to_zero():
+def test_baseline_pins_web_content_isolation_strategy_to_one():
     """Regression sentinel.
 
-    ``fission.webContentIsolationStrategy`` MUST be 0 (IsolateNothing).
-    The FF150 default is 1 (IsolateEverything), which site-isolates
-    cross-origin iframes into separate webIsolated content processes
-    and breaks Playwright frame tracking from the parent process.
+    ``fission.webContentIsolationStrategy`` MUST be 1 (IsolateEverything):
+    one content process per site, as retail Firefox on desktop. The
+    Juggler of firefox-62 reaches an iframe of another process like any
+    other; strategy 0 (IsolateNothing) put every iframe in the process of
+    its page and is no longer the baseline.
     """
-    assert _BASELINE["fission.webContentIsolationStrategy"] == 0, (
-        "fission.webContentIsolationStrategy must be 0 (IsolateNothing). "
-        "If you bumped it for an A/B, cross-origin iframes will appear "
-        "in page.frames with empty URLs and content_frame() will return "
-        "None - see the changelog entry that introduced this test."
+    assert _BASELINE["fission.webContentIsolationStrategy"] == 1, (
+        "fission.webContentIsolationStrategy must be 1 (IsolateEverything). "
+        "With 0, a cross-site iframe shares the process of its page, "
+        "which no retail Firefox on desktop does."
     )
 
 
 @pytest.mark.unit
-def test_baseline_keeps_fission_autostart_off():
-    """Belt for the suspenders above. All three prefs are required."""
-    assert _BASELINE["fission.autostart"] is False
-    assert _BASELINE["fission.autostart.session"] is False
-    assert _BASELINE["dom.ipc.processCount.webIsolated"] == 1
+def test_baseline_runs_fission_with_four_isolated_processes():
+    """Belt for the suspenders above. All three prefs go together."""
+    assert _BASELINE["fission.autostart"] is True
+    # The parent writes `fission.autostart.session` at startup (nsAppRunner):
+    # declaring it would be overwritten, so the baseline must not carry it.
+    assert "fission.autostart.session" not in _BASELINE
+    assert _BASELINE["dom.ipc.processCount.webIsolated"] == 4
 
 
 @pytest.mark.unit
 def test_translated_profile_propagates_isolation_strategy():
-    """The fix must survive translate_profile_to_prefs, not just live in _BASELINE."""
+    """The strategy must survive translate_profile_to_prefs, not just live in _BASELINE."""
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, timezone="America/New_York")
-    assert prefs["fission.webContentIsolationStrategy"] == 0
+    assert prefs["fission.webContentIsolationStrategy"] == 1
 
 
 @pytest.mark.unit
 def test_extra_prefs_override_can_break_isolation_only_explicitly():
     """If a caller wants to A/B isolation, they have to set it explicitly.
-    The wrapper does not silently flip it back on.
+    The wrapper does not silently flip it back off.
     """
     p = generate_profile(seed=42)
     prefs_default = translate_profile_to_prefs(p, timezone="America/New_York")
-    assert prefs_default["fission.webContentIsolationStrategy"] == 0
+    assert prefs_default["fission.webContentIsolationStrategy"] == 1
 
     prefs_ab = translate_profile_to_prefs(
-        p, timezone="America/New_York", extra_prefs={"fission.webContentIsolationStrategy": 1}
+        p, timezone="America/New_York", extra_prefs={"fission.webContentIsolationStrategy": 0}
     )
-    assert prefs_ab["fission.webContentIsolationStrategy"] == 1
+    assert prefs_ab["fission.webContentIsolationStrategy"] == 0
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -154,12 +174,13 @@ def _serve(payload: bytes) -> tuple[ThreadingHTTPServer, int]:
 
 @pytest.fixture
 def cross_origin_harness():
-    """Spin up TWO local HTTP servers on different localhost ports.
+    """Spin up TWO local HTTP servers: the page on ``127.0.0.1``, the iframes on ``localhost``.
 
-    Two ports = two distinct origins under SOP (same host, different port
-    → different origin). The parent page on port A embeds an iframe with
-    src pointing at port B. Same cross-origin browsing-context shape as
-    a parent-page-plus-third-party-iframe layout, fully offline.
+    Two hosts = two SITES (and two origins under SOP). The parent page
+    embeds iframes with src pointing at the other host, which at strategy 1
+    puts them in another content process. Same cross-site browsing-context
+    shape as a parent-page-plus-third-party-iframe layout, fully offline.
+    The servers listen on 127.0.0.1 and the child is named ``localhost``.
     """
     # The CHILD goes up first, because the parent's markup has to name the
     # child's port and there is no longer a way to learn that number without
@@ -172,27 +193,56 @@ def cross_origin_harness():
     sb, pb = _serve(child_html)
     parent_html = f"""<!doctype html><html><head><title>parent</title></head><body>
 <h1>parent</h1>
-<iframe id="ifr_plain"   src="http://127.0.0.1:{pb}/child"            width="300" height="120"></iframe>
-<iframe id="ifr_sandbox" src="http://127.0.0.1:{pb}/child"            width="300" height="120"
+<iframe id="ifr_plain"   src="http://localhost:{pb}/child"            width="300" height="120"></iframe>
+<iframe id="ifr_sandbox" src="http://localhost:{pb}/child"            width="300" height="120"
         sandbox="allow-scripts allow-same-origin"></iframe>
-<iframe id="ifr_titled"  src="http://127.0.0.1:{pb}/child"            width="300" height="120"
+<iframe id="ifr_titled"  src="http://localhost:{pb}/child"            width="300" height="120"
         title="cross-origin titled iframe"></iframe>
 </body></html>""".encode("utf-8")
     sa, pa = _serve(parent_html)
     try:
-        yield {"parent_url": f"http://127.0.0.1:{pa}/", "child_origin": f"http://127.0.0.1:{pb}"}
+        yield {"parent_url": f"http://127.0.0.1:{pa}/", "child_origin": f"http://localhost:{pb}"}
     finally:
         sa.shutdown()
         sb.shutdown()
 
 
 @pytest.mark.e2e
+def test_the_iframe_runs_in_another_process(firefox_binary, cross_origin_harness):
+    """The harness of this file really crosses a process: a spin in the iframe does not stall the page.
+
+    The iframe spins for 600 ms and the page times a 10 ms timer; the timer
+    stalls only when both share a content process. Without this, a harness
+    that went back to two ports of one host would keep every test below green
+    while testing a same-process iframe.
+    """
+    from _fission_frames import assert_other_process
+    from invisible_playwright import InvisiblePlaywright
+
+    with InvisiblePlaywright(seed=42, binary_path=firefox_binary, humanize=False) as browser:
+        page = browser.new_context().new_page()
+        # ⛔ `load`, NOT `domcontentloaded`. The `domcontentloaded` of a page says nothing about its frames: the
+        # frame of another site is listed as soon as it is attached, and its url is the one of its navigation,
+        # which commits in the frame's own process, usually AFTER the page's domcontentloaded. Read straight after
+        # a `domcontentloaded` goto the url was empty in 26 reads of 30 on firefox-62 (stock Playwright Firefox,
+        # whose frames commit in the process of the page, had it 30 of 30). After the `load` of the page the url
+        # was there 30 of 30 on both, with no wait: that is what is asserted here, so a `goto` that returns
+        # with a cross-site frame still without its url fails this test.
+        page.goto(cross_origin_harness["parent_url"], wait_until="load", timeout=30_000)
+        page.wait_for_selector("iframe#ifr_plain", timeout=30_000)
+        frame = page.query_selector("iframe#ifr_plain").content_frame()
+        assert frame is not None and cross_origin_harness["child_origin"] in frame.url, (
+            f"after the load of the page the iframe of the other site has url {getattr(frame, 'url', None)!r}")
+        assert_other_process(page.main_frame, frame)
+
+
+@pytest.mark.e2e
 def test_cross_origin_iframe_url_appears_in_page_frames(firefox_binary, cross_origin_harness):
     """``page.frames`` must list the cross-origin iframe with its real URL.
 
-    Before the pref fix, the URL came back as '' because the navigation
-    observer for the iframe fired in a different content process than
-    the parent's FrameTree was registered in.
+    Before the fix of issue #20, the URL came back as '' because the
+    navigation observer for the iframe fired in a different content process
+    than the parent's FrameTree was registered in.
     """
     from invisible_playwright import InvisiblePlaywright
 
@@ -200,7 +250,7 @@ def test_cross_origin_iframe_url_appears_in_page_frames(firefox_binary, cross_or
         ctx = browser.new_context()
         page = ctx.new_page()
         page.goto(cross_origin_harness["parent_url"], wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_selector("iframe#ifr_plain", timeout=10_000)
+        page.wait_for_selector("iframe#ifr_plain", timeout=30_000)
 
         # ⛔ WAIT FOR THE CONDITION, NOT FOR A DURATION. This was
         # `wait_for_timeout(500)`, and that measured the machine rather than
@@ -238,6 +288,18 @@ def test_cross_origin_iframe_url_appears_in_page_frames(firefox_binary, cross_or
         )
 
 
+def _child_frame_of(page, handle, child_origin):
+    """The frame of an iframe handle once it has NAVIGATED to the child origin (a frame of another process is attached
+    before it has an address), or whatever it is when the deadline of 30 s, far beyond a healthy run, passes: the
+    caller's assertions then say what was wrong. A condition is waited for, not a duration."""
+    def navigated():
+        frame = handle.content_frame()
+        return frame is not None and child_origin in (frame.url or "")
+
+    wait_until(navigated, 30, lambda: page.wait_for_timeout(100))
+    return handle.content_frame()
+
+
 @pytest.mark.e2e
 def test_cross_origin_iframe_content_frame_resolves(firefox_binary, cross_origin_harness):
     """``handle.content_frame()`` must return a Frame (not None) for every
@@ -249,13 +311,12 @@ def test_cross_origin_iframe_content_frame_resolves(firefox_binary, cross_origin
         ctx = browser.new_context()
         page = ctx.new_page()
         page.goto(cross_origin_harness["parent_url"], wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_selector("iframe#ifr_plain", timeout=10_000)
-        page.wait_for_timeout(500)
+        page.wait_for_selector("iframe#ifr_plain", timeout=30_000)
 
         for sel in ("iframe#ifr_plain", "iframe#ifr_sandbox", "iframe#ifr_titled"):
             handle = page.query_selector(sel)
             assert handle is not None, f"{sel!r} not found in DOM"
-            cf = handle.content_frame()
+            cf = _child_frame_of(page, handle, cross_origin_harness["child_origin"])
             assert cf is not None, f"{sel!r}: content_frame() returned None"
             assert cross_origin_harness["child_origin"] in (cf.url or ""), (
                 f"{sel!r}: content_frame().url = {cf.url!r}, "
@@ -276,10 +337,9 @@ def test_cross_origin_iframe_evaluate_returns_real_values(firefox_binary, cross_
         ctx = browser.new_context()
         page = ctx.new_page()
         page.goto(cross_origin_harness["parent_url"], wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_selector("iframe#ifr_plain", timeout=10_000)
-        page.wait_for_timeout(500)
+        page.wait_for_selector("iframe#ifr_plain", timeout=30_000)
 
-        cf = page.query_selector("iframe#ifr_plain").content_frame()
+        cf = _child_frame_of(page, page.query_selector("iframe#ifr_plain"), cross_origin_harness["child_origin"])
         assert cf is not None
         href = cf.evaluate("() => location.href")
         assert cross_origin_harness["child_origin"] in href
@@ -298,8 +358,12 @@ def test_cross_origin_iframe_frame_locator_resolves_button(firefox_binary, cross
         ctx = browser.new_context()
         page = ctx.new_page()
         page.goto(cross_origin_harness["parent_url"], wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_selector("iframe#ifr_plain", timeout=10_000)
+        page.wait_for_selector("iframe#ifr_plain", timeout=30_000)
 
+        # count() does not wait (Playwright's own semantics): the iframe ELEMENT is in the parent, but its cross-origin document,
+        # in a process of its own, can load later on a loaded runner (Windows CI of 13/11, run 43383366904: 0 elements). Wait for
+        # the button first, as a script that counts it would.
+        page.frame_locator("iframe#ifr_plain").locator("button#ok").wait_for(timeout=30_000)
         for selector in ("button#ok", "button.btn-primary"):
             cnt = page.frame_locator("iframe#ifr_plain").locator(selector).count()
             assert cnt == 1, f"locator({selector!r}) found {cnt} elements (expected 1)"
@@ -320,11 +384,13 @@ def test_cross_origin_iframe_dispatch_event_click_works(firefox_binary, cross_or
         ctx = browser.new_context()
         page = ctx.new_page()
         page.goto(cross_origin_harness["parent_url"], wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_selector("iframe#ifr_plain", timeout=10_000)
+        page.wait_for_selector("iframe#ifr_plain", timeout=30_000)
 
-        page.frame_locator("iframe#ifr_plain").locator("button#ok").dispatch_event(
-            "click", timeout=4_000
-        )
+        # the button of a document in another process can come later on a loaded runner: wait for it as a script would
+        # (Windows CI of 13/11, run 43383366904: "found 0 elements"), then act, both with a deadline of 30 s
+        button = page.frame_locator("iframe#ifr_plain").locator("button#ok")
+        button.wait_for(timeout=30_000)
+        button.dispatch_event("click", timeout=30_000)
         cf = page.query_selector("iframe#ifr_plain").content_frame()
         assert cf.evaluate("() => document.title") == "clicked"
 
@@ -424,8 +490,10 @@ def test_the_geometry_invariant_holds_inside_a_nested_frame(firefox_binary):
             # 2. and the relationship holds on the events received IN THERE
             frame = page.frame_locator("#f")
             page.frames[1].evaluate("() => { window.__ev = []; }")
-            frame.locator("#g").hover(timeout=10000)
-            page.wait_for_timeout(400)
+            frame.locator("#g").hover(timeout=30000)
+            # until the frame has heard the pointer (its events come from another process, after the hover returned)
+            wait_until(lambda: page.frames[1].evaluate("() => window.__ev.length") > 0, 30,
+                       lambda: page.wait_for_timeout(100))
             ev = page.frames[1].evaluate("() => window.__ev")
             inner = page.frames[1].evaluate("() => window.__inner()")
             assert ev, "no event received in the iframe: coverage absent, and this is NOT a pass"

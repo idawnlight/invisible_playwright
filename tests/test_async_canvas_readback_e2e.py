@@ -59,16 +59,6 @@ window.readbackCase = async function({contextName, alpha, premultipliedAlpha, pa
     ctx.drawImage(source, 0, 0, width, height);
     return Array.from(ctx.getImageData(0, 0, width, height).data);
   }
-  async function bounded(promise, operation) {
-    let timer;
-    try {
-      return await Promise.race([promise, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(operation + ' did not complete')), 20000);
-      })]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
   draw();
   const direct = new Uint8Array(width * height * 4);
   gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, direct);
@@ -102,7 +92,7 @@ window.readbackCase = async function({contextName, alpha, premultipliedAlpha, pa
       error: gl.getError(),
     });
   }
-  let stream, video, redrawTimer;
+  let stream, video, active = true;
   try {
     state('before');
     result.drawImage = pixels(canvas);
@@ -118,26 +108,29 @@ window.readbackCase = async function({contextName, alpha, premultipliedAlpha, pa
       draw();
       gl.bindFramebuffer(gl.FRAMEBUFFER, sentinelFB);
     };
-    // These Firefox versions do not expose track.requestFrame. Keep the
-    // canvas changing so captureStream delivers new frames to the video.
-    redrawTimer = setInterval(redraw, 30);
+    const pump = () => {
+      if (!active) return;
+      redraw();
+      requestAnimationFrame(pump);
+    };
+    requestAnimationFrame(pump);
     const playing = video.play();
     redraw();
-    await bounded(playing, 'video.play');
+    await playing;
     result.video = {width: video.videoWidth, height: video.videoHeight};
     result.frames.push(pixels(video));
     state('initial-video-frame');
     for (let n = 0; n < 3; n++) {
       const presented = new Promise(resolve => video.requestVideoFrameCallback(resolve));
       redraw();
-      await bounded(presented, 'video frame');
+      await presented;
       result.frames.push(pixels(video));
       state('video-frame-' + n);
     }
     state('after-capture');
     return result;
   } finally {
-    clearInterval(redrawTimer);
+    active = false;
     if (stream) stream.getTracks().forEach(track => track.stop());
     if (video) video.remove();
     if (sentinelPBO) {

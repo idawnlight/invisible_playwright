@@ -55,29 +55,31 @@ _WORKER = r"""(urls) => {
 #: same security check before anything is read, so what can differ is the
 #: answer, and the answer is compared.
 _CHANNELS = r"""async (url) => {
-  const settle = (p, ms = 3000) => Promise.race([p, new Promise(r => setTimeout(() => r("no answer"), ms))]);
-  const out = {};
-  out.worker = await settle(new Promise(r => {
+  // Every channel is asked at once and each has 30 s to answer: "no answer" is a channel that stays silent, and the deadline is the wait's, far beyond any
+  // healthy run. A name that is nowhere answers every channel (an error, a throw, a rejection), so no silence is waited for when the engine's file looks like it.
+  const settle = (p, ms = 30000) => Promise.race([p, new Promise(r => setTimeout(() => r("no answer"), ms))]);
+  const channels = {};
+  channels.worker = new Promise(r => {
     try {
       const w = new Worker(url);
       w.onerror = e => { e.preventDefault(); r("error event: " + (e.message || "")); };
       w.onmessage = () => r("message");
     } catch (e) { r("throws " + e.name); }
-  }));
-  out.module_worker = await settle(new Promise(r => {
+  });
+  channels.module_worker = new Promise(r => {
     try {
       const w = new Worker(url, {type: "module"});
       w.onerror = e => { e.preventDefault(); r("error event: " + (e.message || "")); };
     } catch (e) { r("throws " + e.name); }
-  }));
-  out.shared_worker = await settle(new Promise(r => {
+  });
+  channels.shared_worker = new Promise(r => {
     try {
       const w = new SharedWorker(url);
       w.onerror = e => { e.preventDefault(); r("error event"); };
     } catch (e) { r("throws " + e.name); }
-  }));
-  out.fetch = await settle(fetch(url).then(res => "status " + res.status, e => "rejects " + e.name));
-  out.xhr = await settle(new Promise(r => {
+  });
+  channels.fetch = fetch(url).then(res => "status " + res.status, e => "rejects " + e.name);
+  channels.xhr = new Promise(r => {
     const seen = [];
     try {
       const x = new XMLHttpRequest();
@@ -86,18 +88,22 @@ _CHANNELS = r"""async (url) => {
       x.open("GET", url);
       x.send();
     } catch (e) { r("throws " + e.name); }
-  }));
-  out.import = await settle(import(url).then(() => "loaded", e => "rejects " + e.name));
+  });
+  channels.import = import(url).then(() => "loaded", e => "rejects " + e.name);
   for (const [tag, attr] of [["script", "src"], ["img", "src"], ["link", "href"], ["iframe", "src"]]) {
-    out[tag] = await settle(new Promise(r => {
+    channels[tag] = new Promise(r => {
       const el = document.createElement(tag);
       if (tag === "link") el.rel = "stylesheet";
       el.onload = () => r("load");
       el.onerror = () => r("error");
       el[attr] = url;
       document.body.appendChild(el);
-    }), 1500);
+    });
   }
+  const names = Object.keys(channels);
+  const answers = await Promise.all(names.map(n => settle(channels[n])));
+  const out = {};
+  names.forEach((n, i) => { out[n] = answers[i]; });
   return out;
 }"""
 

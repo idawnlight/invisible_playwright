@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import http.server
 import threading
-import time
 
 import pytest
 
@@ -54,20 +53,19 @@ ROUNDS = 5
 
 def _goto(page, url, **kwargs):
     """`page.goto`, which may answer that the previous page's own redirect won
-    (module docstring). Either answer comes in seconds."""
+    (module docstring). The detector of a navigation that never answers is the timeout of the `goto` itself (each caller passes
+    one): a bound of the test stricter than it only judged the speed of the machine."""
     from invisible_playwright.sync_api import Error
 
-    started = time.monotonic()
     try:
         page.goto(url, **kwargs)
     except Error as e:
         if "NS_BINDING_ABORTED" in str(e):
             # The page's own replace stopped ours: it is where it sent itself.
-            page.wait_for_url("**/landed", timeout=10_000)
+            page.wait_for_url("**/landed", timeout=30_000)
         else:
             assert "is interrupted by another navigation to" in str(e), e
             assert "/landed" in str(e).split("another navigation to")[1], e
-    assert time.monotonic() - started < 10, url
 
 
 def _replace_after_load(ms: int, cross_site: bool) -> bytes:
@@ -77,6 +75,24 @@ def _replace_after_load(ms: int, cross_site: bool) -> bytes:
              "addEventListener('load', () => setTimeout(() => "
              "location.replace(%s), %d))</script></body></html>")
             % (target, ms)).encode()
+
+
+def _replace_without_a_timer(held: bool, cross_site: bool) -> bytes:
+    """The page of a `networkidle` case: it replaces itself with no timer in it, so how fast the machine is cannot
+    decide whether the move comes before the half second of quiet that `networkidle` waits for.
+
+    - ``held`` False: from inside the `load` handler itself, before `load` is even reported;
+    - ``held`` True: when the first bytes of a response the server holds open arrive. That request is in flight until
+      the navigation aborts it, so the network is not quiet for as long as the page has not moved, whatever the load
+      on the machine."""
+    target = ("location.origin.replace('127.0.0.1','localhost')+'/landed'"
+              if cross_site else "'/landed'")
+    if held:
+        script = ("addEventListener('load', () => fetch('/hold').then(r => r.body.getReader().read())"
+                  ".then(() => location.replace(%s)))" % target)
+    else:
+        script = "addEventListener('load', () => location.replace(%s))" % target
+    return ("<!doctype html><html><body><p id=p>first</p><script>%s</script></body></html>" % script).encode()
 
 
 PAGES = {
@@ -89,12 +105,33 @@ PAGES = {
 for _ms in (0, 50, 300):
     PAGES["/r%d" % _ms] = _replace_after_load(_ms, False)
     PAGES["/x%d" % _ms] = _replace_after_load(_ms, True)
+# the networkidle cases: "/ir0" and "/ix0" move inside the load handler, "/ir50" and "/ix50" when the held response
+# starts to arrive (the 0 and the 50 of the names are the cases of the old timers)
+for _name, _held in (("0", False), ("50", True)):
+    PAGES["/ir" + _name] = _replace_without_a_timer(_held, False)
+    PAGES["/ix" + _name] = _replace_without_a_timer(_held, True)
 
 
 @pytest.fixture(scope="module")
 def site():
+    release = threading.Event()
+
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path.split("?")[0] == "/hold":
+                # a response that has begun and does not end: 16 KiB so the first chunk is delivered at once,
+                # then it stays open until the page that asked for it moves away (or the module's teardown)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                try:
+                    self.wfile.write(b"x" * 16384)
+                    self.wfile.flush()
+                except OSError:
+                    return
+                release.wait(60)
+                return
             body = PAGES.get(self.path.split("?")[0], PAGES["/landed"])
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -111,6 +148,7 @@ def site():
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield "http://127.0.0.1:%d" % srv.server_address[1]
+    release.set()
     srv.shutdown()
 
 
@@ -128,7 +166,7 @@ def page(firefox_binary):
 def test_a_read_right_after_goto_answers(page, site, path):
     for i in range(ROUNDS):
         _goto(page, "%s%s?i=%d" % (site, path, i), wait_until="domcontentloaded",
-              timeout=15_000)
+              timeout=30_000)
         # Each read is made at once, while the page may still be moving: none
         # of them may surface the engine's refusal of a vanished world. A count
         # is of the page as it is NOW, and that can be the replacing document
@@ -142,7 +180,7 @@ def test_a_read_right_after_goto_answers(page, site, path):
         texts = ([], ["first"], ["head"], ["landed"])
         assert page.locator("#p").all_inner_texts() in texts
         assert page.locator("#p").all_text_contents() in texts
-        assert page.inner_text("#p", timeout=10_000) in ("first", "head",
+        assert page.inner_text("#p", timeout=30_000) in ("first", "head",
                                                          "landed")
         # The caller's code is NOT a read: it is sent once ([B285]). On a page
         # still moving - `/x50` replaces itself after the read above - it
@@ -158,9 +196,12 @@ def test_a_read_right_after_goto_answers(page, site, path):
 
 @pytest.mark.parametrize("path", ["/r0", "/r50", "/x0", "/x50"])
 def test_networkidle_is_reached_on_the_page_that_replaced_ours(page, site, path):
+    """The page moves with no timer (`_replace_without_a_timer`): `networkidle` promises half a second without
+    network, and that cannot pass before the move however slow the machine is. A `networkidle` that comes back on the
+    first page, or never comes back because the new frame forgot the navigation, is still red."""
     for i in range(ROUNDS):
-        _goto(page, "%s%s?n=%d" % (site, path, i), wait_until="networkidle",
-              timeout=15_000)
+        _goto(page, "%s/i%s?n=%d" % (site, path[1:], i), wait_until="networkidle",
+              timeout=30_000)
         assert page.url.endswith("/landed"), page.url
 
 
@@ -192,7 +233,7 @@ def test_reads_wait_as_playwright_s_do(page, site):
     page.evaluate("setTimeout(() => { const b = document.createElement('b');"
                   " b.id = 'late'; b.textContent = 'late';"
                   " document.body.appendChild(b); }, 500)")
-    assert page.inner_text("#late", timeout=5_000) == "late"
+    assert page.inner_text("#late", timeout=30_000) == "late"
     from invisible_playwright.sync_api import TimeoutError as PlaywrightTimeout
     with pytest.raises(PlaywrightTimeout, match="Timeout 300ms exceeded"):
         page.inner_text("#never", timeout=300)
@@ -205,8 +246,8 @@ def test_expect_reads_the_state_it_names(page, site):
     page.set_content("<input type=checkbox id=c><p id=h hidden>x</p>")
     with pytest.raises(AssertionError):
         expect(page.locator("#c")).to_be_checked(timeout=500)
-    expect(page.locator("#c")).not_to_be_checked(timeout=500)
+    expect(page.locator("#c")).not_to_be_checked(timeout=30_000)
     with pytest.raises(AssertionError):
         expect(page.locator("#h")).to_be_visible(timeout=500)
-    expect(page.locator("#h")).to_be_hidden(timeout=500)
-    expect(page.locator("#missing")).to_be_hidden(timeout=500)
+    expect(page.locator("#h")).to_be_hidden(timeout=30_000)
+    expect(page.locator("#missing")).to_be_hidden(timeout=30_000)

@@ -23,7 +23,7 @@ from invisible_playwright._cdp.cdp_names import (
 pytestmark = pytest.mark.unit
 
 _PATTERN = re.compile(
-    r"""["']((?:Browser|DOM|Emulation|Fetch|Heap|HeapProfiler|Input|Network|Page|Runtime|Storage|Target)\.[a-z]\w*)["']"""
+    r"""["']((?:Browser|DOM|Emulation|Fetch|Heap|HeapProfiler|Input|Inspector|Network|Page|Runtime|Storage|Target)\.[a-z]\w*)["']"""
 )
 
 

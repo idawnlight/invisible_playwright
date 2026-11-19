@@ -22,6 +22,8 @@ import time
 
 import pytest
 
+from _waits import wait_until
+
 PAGE = """<!doctype html><html><body style="margin:0">
 <button id="b" style="width:300px;height:200px">b</button>
 <script>
@@ -62,13 +64,16 @@ def test_each_pointer_call_answers_after_the_page_handled_its_event(firefox_bina
                 "not wait for the page" % (step, took * 1000))
 
 
-@pytest.mark.wall_clock
 @pytest.mark.e2e
 def test_a_click_that_opens_a_dialog_still_answers(firefox_binary):
     """The wait ends when the event's handler opens a dialog: the handler runs
     the dialog inside itself, so the page handles the event only once the
     dialog is closed - and closing it is the caller's business, after the call
-    has answered. Without that end, this click would hang until the bound."""
+    has answered. Without that end, this click would hang until the engine's
+    bound, which is 5 s and an error (`PageHandler._awaitBounded`): the call
+    raises instead of answering. The dialog stays open until the call has
+    returned, so the call can have answered only by the dialog's end of the
+    wait, not because the handler finished; no clock is read."""
     from invisible_playwright import InvisiblePlaywright
 
     with InvisiblePlaywright(seed=4248, binary_path=firefox_binary, headless=True,
@@ -76,11 +81,13 @@ def test_a_click_that_opens_a_dialog_still_answers(firefox_binary):
         page = browser.new_context().new_page()
         page.set_content('<button id="b" style="width:300px;height:200px" '
                          'onclick="alert(1); window.after = true">b</button>')
-        seen = []
-        page.on("dialog", lambda d: (seen.append(d.message), d.dismiss()))
-        started = time.perf_counter()
+        opened = []
+        page.on("dialog", lambda dialog: opened.append(dialog))     # a plain function: the client tags its handlers
+        # raises (the engine's "did not handle ... within 5 s") if the call waited for the handler
         page.mouse.click(150, 100)
-        took = time.perf_counter() - started
-        page.wait_for_function("window.after === true", timeout=5_000)
-        assert seen == ["1"], seen
-        assert took < 4.0, "the click waited %.1f s for a page held by its dialog" % took
+        # the dialog event comes before the reply of the call; the pump only lets a late one be read
+        assert wait_until(lambda: opened, 30, lambda: page.wait_for_timeout(50)), (
+            "the click answered without the dialog having been heard")
+        assert [d.message for d in opened] == ["1"], opened
+        opened[0].dismiss()
+        page.wait_for_function("window.after === true", timeout=30_000)

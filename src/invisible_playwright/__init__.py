@@ -18,8 +18,8 @@ Quickstart:
 ``humanize`` is on by default and needs no new API: the ordinary Playwright
 pointer calls - ``page.click`` / ``page.hover`` / ``locator.click`` /
 ``page.mouse.move`` - move the cursor along a path drawn from ``seed``, so the
-same seed replays the same motion. ``INVPW_CURSOR_ENGINE=binary`` restores the
-previous behaviour, where the browser drew the path instead.
+same seed replays the same motion. ``INVPW_CURSOR_ENGINE=off`` disables the
+motion process-wide.
 """
 # ── Import-time core assertion, and repair ───────────────────────────────────
 # Runs BEFORE every other import. Two questions, one check: is the installed
@@ -65,9 +65,10 @@ _assert_pw_range()
 
 from invisible_core import get_default_args, get_default_stealth_prefs
 from invisible_core import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
-from invisible_core import GeoTimezoneError, resolve_session_timezone
+from invisible_core import GeoTimezoneError
 from invisible_core import ensure_binary, ensure_geoip_mmdb
 from .launcher import InvisiblePlaywright
+from ._juggler.remote import RemoteServer, launch_server, launch_server_async
 
 # `__version__` describes the CODE that is about to run; the install record is
 # a different fact and keeps a name that says so, the way `invisible_core` does.
@@ -79,11 +80,13 @@ from ._version import __install_record_version__, __version__
 
 __all__ = [
     "InvisiblePlaywright",
+    "launch_server",
+    "launch_server_async",
+    "RemoteServer",
     "ensure_binary",
     "ensure_geoip_mmdb",
     "get_default_stealth_prefs",
     "get_default_args",
-    "resolve_session_timezone",
     "GeoTimezoneError",
     "BINARY_VERSION",
     "FIREFOX_UPSTREAM_VERSION",

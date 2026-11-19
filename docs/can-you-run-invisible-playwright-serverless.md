@@ -63,8 +63,9 @@ Three separate limits, three separate ways this fails:
 
 The download can be moved off the critical path with a cache directory, and the wrapper
 supports exactly that: `INVISIBLE_PLAYWRIGHT_CACHE_DIR` points the engine at a path your
-platform already caches between runs, and `INVPW_BINARY_PATH` skips the download entirely
-when a compatible binary is already on disk (see [Configuration](configuration.md)). That
+platform already caches between runs, and the `binary_path=` launch argument skips the
+download entirely when a compatible binary is already on disk (see
+[Configuration](configuration.md)). That
 helps a persistent worker a great deal. It helps a stateless function much less, because
 the thing a function does not keep is exactly the local disk those variables point at.
 
@@ -182,7 +183,7 @@ container is the right place to unpack the browser once and keep it warm, but it
 fix your IP reputation, your account quotas, or your timing. You supply those.
 
 **How do I avoid downloading Firefox on every invocation?** Bake it into the image at
-build time, or point `INVPW_BINARY_PATH` at a binary already on disk. On a stateless
+build time, or pass `binary_path=` for a binary already on disk. On a stateless
 function neither fully helps, because the local disk does not persist between calls.
 
 **What is the smallest thing that works?** A single long-lived worker: launch once inside
@@ -208,6 +209,6 @@ signals no stealth layer touches.
 
 ---
 
-*Written while maintaining [invisible_playwright](https://github.com/feder-cr/invisible_playwright),
+*Written while maintaining [invisible_playwright](https://github.com/oss-invisible/playwright),
 a Firefox patched at the C++ level driven by stock Playwright. The weight that keeps it out
 of a small function is the same weight that makes it look real.*

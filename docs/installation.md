@@ -7,13 +7,13 @@ nav_order: 1
 
 # Installation
 
-This guide installs `invisible_playwright 0.44.0` and `invisible_core 160.49.0`
-(tags `v0.44.0` and `v160.49.0`), supporting both native stealth engines out of
+This guide installs `invisible_playwright 0.55.0` and `invisible_core 160.76.0`
+(tags `v0.55.0` and `v160.76.0`), supporting both native stealth engines out of
 the box:
 
 - **Firefox 160.0** (`backend="firefox"`, default) from
-  [`firefox-160.0-r1`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r1)
-  (~245 MB compressed)
+  [`firefox-160.0-r2`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r2)
+  (~280 MB compressed)
 - **Chromium 157.0.8103.78** (`backend="chromium"`) from
   [`chromium-157.0.8103.78-r1`](https://github.com/idawnlight/chromium_antidetect_patch/releases/tag/chromium-157.0.8103.78-r1)
   (~236 MB compressed)
@@ -53,12 +53,14 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.49.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.44.0"
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.76.0" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.55.0"
 ```
 
-The wrapper requires `invisible-core==160.49.0`; supplying both references
-selects the exact paired core directly. The Playwright Python client is bundled
+The wrapper requires `invisible-core==160.76.0`; supplying both references
+selects the exact paired core directly. Add `[remote]` to `invisible-playwright`
+(or `pip install "websockets>=13"`) if you plan to serve a browser over
+WebSocket with `launch_server()`. The Playwright Python client is bundled
 inside `invisible-playwright` (no `playwright install` or Node.js driver is
 used).
 
@@ -110,7 +112,7 @@ python -m pip check
 ```
 
 `version` prints the wrapper and core versions, both sealed engine releases
-(`firefox-160.0-r1` and `chromium-157.0.8103.78-r1`), and both cache roots:
+(`firefox-160.0-r2` and `chromium-157.0.8103.78-r1`), and both cache roots:
 
 - Firefox cache root: `INVISIBLE_PLAYWRIGHT_CACHE_DIR` (defaults to
   `~/.cache/invisible-playwright`)
@@ -149,12 +151,12 @@ the browser release archives, and install without network access:
 
 ```bash
 python -m pip wheel --wheel-dir wheelhouse \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.49.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.44.0"
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.76.0" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.55.0"
 
 # On the offline target machine:
 python -m pip install --no-index --find-links wheelhouse \
-  invisible-core==160.49.0 invisible-playwright==0.44.0
+  invisible-core==160.76.0 invisible-playwright==0.55.0
 ```
 
 ## Update

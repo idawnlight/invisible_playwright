@@ -25,13 +25,29 @@ class _Conn:
         return {}
 
 
+class _Clock:
+    """The keyboard's clock without real time: a sleep advances it by what was asked. The keyboard sends each key at its
+    planned time measured from the start of the action (invisible-core 64.69.0), so a clock that does not move would make
+    every later wait carry the earlier ones."""
+
+    def __init__(self):
+        self.t = 1000.0
+        self.taken: list = []
+
+    def monotonic(self):
+        return self.t
+
+    def sleep(self, seconds):
+        self.taken.append(seconds)
+        self.t += seconds
+
+
 @pytest.fixture()
 def slept(monkeypatch):
-    """Every sleep the keyboard asks for, in SECONDS, without taking any."""
-    taken: list = []
-    monkeypatch.setattr("invisible_core.juggler.keyboard.time.sleep",
-                        taken.append)
-    return taken
+    """Every sleep the keyboard asks for, in SECONDS, without taking any (the clock moves by each one)."""
+    clock = _Clock()
+    monkeypatch.setattr("invisible_core.juggler.keyboard.time", clock)
+    return clock.taken
 
 
 def _keyboard(persona=None):
@@ -158,7 +174,8 @@ def test_a_real_page_measures_a_human_rhythm(firefox_binary):
             "for (const t of ['keydown','keyup'])"
             " document.getElementById('f').addEventListener(t,"
             "  e => window.__e.push([t, e.key, e.timeStamp]));</script>")
-    with InvisiblePlaywright(seed=42, binary_path=firefox_binary) as browser:
+    # The US keyboard, named: the persona's keyboard follows the session's language, which the runner's address decides.
+    with InvisiblePlaywright(seed=42, binary_path=firefox_binary, locale="en-US") as browser:
         page = browser.new_page()
         page.goto("data:text/html," + urllib.parse.quote(html))
         page.click("#f")

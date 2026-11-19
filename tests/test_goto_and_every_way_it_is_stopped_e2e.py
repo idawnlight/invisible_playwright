@@ -49,10 +49,15 @@ on the page being left.
 Each kind runs with the goto's page on the same site (one process) and on
 another (`localhost` against `127.0.0.1`, a Fission process swap, the case the
 dropped abort was written for), twice, back to back. The page being left acts
-once the server has the goto's request, and the server holds the goto's page
-for 1.5 s, so the goto is on its way when the page acts on any machine. (It
-acted on a timer 300 ms after its load until a slow CI runner started the goto
-later than that: nothing was left to stop, and the goto landed.)
+once the server has the goto's request. Where the goto must be stopped the
+server never answers it until the test lets it go, after the call has
+returned (a gate the test opens, no clock): the goto is on its way when the
+page acts on any machine, and a goto that waited for the server instead of
+stopping would not return before its own timeout and would not carry the
+abort. Where the goto must land the server holds its page for 1.5 s, and the
+test asks only that the goto did not answer sooner. (The page acted on a timer
+300 ms after its load until a slow CI runner started the goto later than that:
+nothing was left to stop, and the goto landed.)
 """
 from __future__ import annotations
 
@@ -63,9 +68,14 @@ import time
 
 import pytest
 
+from _waits import awatch
+
 pytestmark = pytest.mark.e2e
 
 HELD_S = 1.5
+#: The deadline of every wait for a thing that must happen (the stop of a goto the server holds, the page it lands on): a goto that nothing stops ends at
+#: it with another error, so it is the bound of the wait that leads up to the stop and no healthy run comes near it.
+GOTO_TIMEOUT_MS = 30_000
 ACT = {
     "docopen": "document.open(); document.write('<html><body><h1>rewritten</h1></body></html>'); document.close();",
     "stop": "window.stop();",
@@ -97,6 +107,19 @@ EXPECT = {
 #: The queries of the goto requests the server has had since it served the
 #: page being left with the same query.
 ARRIVED = set()
+#: The gates of the requests the server must not answer until the test opens
+#: them (after the call that was to be stopped has returned), by query.
+GATES = {}
+
+
+def _hold(query):
+    """Keep the answer to `query` until its gate is opened by the test, or for
+    HELD_S where the test registered no gate (the goto that must land)."""
+    gate = GATES.get(query)
+    if gate is None:
+        time.sleep(HELD_S)
+    else:
+        gate.wait()
 
 
 def _when_the_goto_arrives(key, act):
@@ -124,7 +147,7 @@ def server():
             path, _, query = self.path.partition("?")
             if path in ("/new", "/held"):
                 ARRIVED.add(query)
-                time.sleep(HELD_S)
+                _hold(query)
                 body = "<html><body><p>new</p></body></html>"
             elif path == "/act":
                 body = "go" if query in ARRIVED else "wait"
@@ -174,12 +197,21 @@ def test_a_goto_stopped_on_its_way_raises_or_lands_and_never_lies(firefox_binary
                 page.goto(same + "/start?k=%s&i=%d" % (kind, i))
                 page.goto(same + "/old?k=%s&i=%d" % (kind, i), wait_until="load")
                 target = target_base + "/new?k=%s&i=%d" % (kind, i)
+                gate = None
+                if answer == "stopped":
+                    # The server keeps the goto's page until this call has
+                    # returned: it can only return by being stopped (or by its
+                    # own timeout, which is not the abort asserted below).
+                    gate = GATES["k=%s&i=%d" % (kind, i)] = threading.Event()
                 began = time.monotonic()
                 error = None
                 try:
-                    page.goto(target, wait_until="domcontentloaded", timeout=10_000)
+                    page.goto(target, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
                 except Error as e:
                     error = e.message
+                finally:
+                    if gate is not None:
+                        gate.set()
                 took = time.monotonic() - began
                 where = (kind, site, i, error, took)
                 if answer == "stopped":
@@ -187,11 +219,10 @@ def test_a_goto_stopped_on_its_way_raises_or_lands_and_never_lies(firefox_binary
                     assert ("NS_BINDING_ABORTED" in error
                             or (kind == "back"
                                 and "is interrupted by another navigation" in error)), where
-                    assert took < HELD_S, where
                     expected = same + end
                     if end in ("/old", "/start"):
                         expected = same + "%s?k=%s&i=%d" % (end, kind, i)
-                    page.wait_for_url(expected, timeout=5_000)
+                    page.wait_for_url(expected, timeout=GOTO_TIMEOUT_MS)
                 else:
                     assert error is None, where
                     # It waited for its page, which the server held.
@@ -218,27 +249,32 @@ def test_a_second_goto_interrupts_the_first_and_lands(firefox_binary, server):
             page = await browser.new_page()
             for i in range(3):
                 await page.goto(base + "/start?i=%d" % i)
-                began = time.monotonic()
+                # The server keeps the first goto's page until the test opens
+                # the gate, after both gotos have returned: the first can only
+                # end by being replaced.
+                gate = GATES["first=%d" % i] = threading.Event()
 
                 async def go(url, after=None):
                     # The second goto starts once the server has the first's
-                    # request, so the first is on its way on any machine.
-                    while after is not None and after not in ARRIVED:
-                        assert time.monotonic() - began < HELD_S, "the first goto never left"
-                        await asyncio.sleep(0.02)
+                    # request, so the first is on its way on any machine. The
+                    # first goto's own timeout is the bound of the wait.
+                    if after is not None:
+                        left = await awatch(lambda: after in ARRIVED, bool, GOTO_TIMEOUT_MS / 1000, lambda: asyncio.sleep(0.02))
+                        assert left.ok, "the first goto never left: %s" % left.render()
                     try:
-                        await page.goto(url, wait_until="domcontentloaded", timeout=10_000)
+                        await page.goto(url, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
                         return None
                     except Exception as e:
                         return str(e)
                 ARRIVED.discard("first=%d" % i)
-                first, second = await asyncio.gather(
-                    go(base + "/held?first=%d" % i),
-                    go(base + "/second?i=%d" % i, after="first=%d" % i))
-                took = time.monotonic() - began
+                try:
+                    first, second = await asyncio.gather(
+                        go(base + "/held?first=%d" % i),
+                        go(base + "/second?i=%d" % i, after="first=%d" % i))
+                finally:
+                    gate.set()
                 assert first is not None and "is interrupted by another navigation" in first, first
                 assert second is None, second
-                assert took < HELD_S, took
                 assert page.url == base + "/second?i=%d" % i
 
     asyncio.run(run())

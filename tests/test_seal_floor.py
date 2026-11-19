@@ -126,21 +126,18 @@ def stub_core(tmp_path: Path, *, with_seal: bool, version: str | None = None,
         "from .seal import active_seal  # noqa: F401\n"
         "from ._version import __version__  # noqa: F401\n",
         encoding="utf-8")
-    # Copy whichever shape the INSTALLED core has, because that is the shape a
-    # user's environment has. Cores published before the rename carry `_pin.py`
-    # only; newer ones carry `pin.py` plus a two-line `sys.modules` alias at
-    # `_pin.py`. Copying `pin.py` unconditionally made this whole file fail
-    # against a published core that predated it - eight tests, and the stub was
-    # never built. And every module those import, read from the installed
-    # copies, not listed here: `installer.py` from 49.45.0 and `environment.py`
-    # from 50.48.0 were each a new line in a hand list, and each core that added
-    # one killed the stub on its first import until the list caught up.
-    for name in ("pin.py", "_pin.py", *_imported_by(("pin.py", "_pin.py"))):
+    # Copy the pin machinery of the INSTALLED core, and every module it imports,
+    # read from the installed copies, not listed here: `installer.py` from
+    # 49.45.0 and `environment.py` from 50.48.0 were each a new line in a hand
+    # list, and each core that added one killed the stub on its first import
+    # until the list caught up. The core has had one module for it, `pin.py`,
+    # since 66.76.0 removed the `_pin.py` alias.
+    for name in ("pin.py", *_imported_by(("pin.py",))):
         if (CORE_PKG / name).exists():
             shutil.copy2(CORE_PKG / name, pkg / name)
-    assert (pkg / "_pin.py").exists(), (
-        f"the installed core at {CORE_PKG} has neither pin.py nor _pin.py, so "
-        f"there is no pin machinery to build a stub from")
+    assert (pkg / "pin.py").exists(), (
+        f"the installed core at {CORE_PKG} has no pin.py, so there is no pin "
+        f"machinery to build a stub from")
     text = (CORE_PKG / "_version.py").read_text(encoding="utf-8")
     text = re.sub(r'(?m)^__version__\s*=\s*[^\n]+', f'__version__ = {version!r}', text)
     (pkg / "_version.py").write_text(text, encoding="utf-8")
@@ -191,7 +188,7 @@ def test_the_stub_declares_its_python_version_independently(tmp_path):
     code = textwrap.dedent(f"""
         import sys
         sys.path.insert(0, {str(root)!r})
-        from invisible_core import _pin
+        from invisible_core import pin as _pin
         print("VERSION:" + str(_pin.installed_core_version()))
     """)
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,

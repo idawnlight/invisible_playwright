@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "invisible_playwright"
-version = "0.44.0"
+version = "0.55.0"
 description = "Playwright wrapper for patched Firefox and Chromium with deterministic stealth profiles."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -50,10 +50,10 @@ dependencies = [
     #
     # Install both repositories at the Git refs in docs/installation.md.
     # The version constraint also lets pip check detect an incompatible core.
-    "invisible_core==160.49.0",
+    "invisible_core==160.76.0",
     # ⛔ playwright is NO LONGER a dependency: since the full fork, the Python
-    # client lives in src/invisible_playwright/_pw/ and the Node driver in
-    # src/invisible_playwright/_driver/. Reintroducing it would not visibly
+    # client lives in src/invisible_playwright/_pw/ and its server in
+    # src/invisible_playwright/_juggler/ (no Node driver). Reintroducing it would not visibly
     # break anything - that is the problem - because the two packages coexist
     # without colliding: one of them would simply never run, and whoever
     # reads the pyproject would believe the opposite.
@@ -98,7 +98,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "build>=1", "ruff>=0.6", "pytest-rerunfailures>=14", "pytest-timeout>=2", "pytest-xdist>=3", "playwright==1.61.0", "cryptography>=41"]
+remote = ["websockets>=13"]
+dev = ["websockets>=13", "aioquic>=1.2", "pytest>=7", "build>=1", "ruff>=0.6", "pytest-timeout>=2", "pytest-xdist>=3", "playwright==1.61.0", "cryptography>=41", "h2>=4,<5"]
 
 [tool.pytest.ini_options]
 markers = [

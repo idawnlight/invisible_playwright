@@ -28,6 +28,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from _waits import wait_until
+
 pytestmark = pytest.mark.e2e
 
 
@@ -104,7 +106,7 @@ def _open_context_page(browser):
 def _goto_opener(page, harness):
     page.goto(harness["opener_url"], wait_until="domcontentloaded",
               timeout=30_000)
-    page.wait_for_selector("#open-simple", timeout=10_000)
+    page.wait_for_selector("#open-simple", timeout=30_000)
 
 
 def test_window_open_plain_is_a_page(browser, harness):
@@ -116,10 +118,10 @@ def test_window_open_plain_is_a_page(browser, harness):
         seen = []
         page.on("popup", lambda p: seen.append(p))
 
-        with ctx.expect_page(timeout=15_000) as info:
+        with ctx.expect_page(timeout=30_000) as info:
             page.click("#open-simple")
         popup = info.value
-        popup.wait_for_url(harness["popup_url"], timeout=10_000)
+        popup.wait_for_url(harness["popup_url"], timeout=30_000)
 
         assert popup.url == harness["popup_url"], (
             f"popup landed on the wrong URL: {popup.url!r}")
@@ -132,9 +134,9 @@ def test_window_open_plain_is_a_page(browser, harness):
             "popup.opener() did not resolve to the opening page")
 
         # A popup must behave like any other page.
-        popup.wait_for_selector("#ping", timeout=10_000)
+        popup.wait_for_selector("#ping", timeout=30_000)
         popup.click("#ping")
-        popup.wait_for_function("document.title === 'pong'", timeout=10_000)
+        popup.wait_for_function("document.title === 'pong'", timeout=30_000)
         assert popup.title() == "pong"
 
         popup.close()
@@ -152,15 +154,15 @@ def test_window_open_with_features_is_a_page(browser, harness):
     ctx, page = _open_context_page(browser)
     try:
         _goto_opener(page, harness)
-        with ctx.expect_page(timeout=15_000) as info:
+        with ctx.expect_page(timeout=30_000) as info:
             page.click("#open-features")
         popup = info.value
-        popup.wait_for_url(harness["popup_url"], timeout=10_000)
+        popup.wait_for_url(harness["popup_url"], timeout=30_000)
 
         assert popup.url == harness["popup_url"]
         assert len(ctx.pages) == 2
         assert popup.opener() == page
-        popup.wait_for_selector("#ping", timeout=10_000)
+        popup.wait_for_selector("#ping", timeout=30_000)
         popup.close()
         assert popup.is_closed()
     finally:
@@ -183,11 +185,11 @@ def test_window_open_with_a_size_keeps_that_size(browser, harness):
     try:
         _goto_opener(page, harness)
         tab_size = page.evaluate("[innerWidth, innerHeight]")
-        with ctx.expect_page(timeout=15_000) as info:
+        with ctx.expect_page(timeout=30_000) as info:
             page.click("#open-features")
         popup = info.value
-        popup.wait_for_url(harness["popup_url"], timeout=10_000)
-        popup.wait_for_load_state("load", timeout=10_000)
+        popup.wait_for_url(harness["popup_url"], timeout=30_000)
+        popup.wait_for_load_state("load", timeout=30_000)
         # The size is final when the window is shown; reading it once more
         # after a beat catches a late resize to the context viewport.
         first = popup.evaluate("[innerWidth, innerHeight]")
@@ -201,10 +203,10 @@ def test_window_open_with_a_size_keeps_that_size(browser, harness):
             f"keep it.")
         popup.close()
 
-        with ctx.expect_page(timeout=15_000) as info:
+        with ctx.expect_page(timeout=30_000) as info:
             page.click("#open-simple")
         tab = info.value
-        tab.wait_for_url(harness["popup_url"], timeout=10_000)
+        tab.wait_for_url(harness["popup_url"], timeout=30_000)
         assert tab.evaluate("[innerWidth, innerHeight]") == tab_size, (
             "a window.open without features is a tab of the same window and "
             "must have the opener's size")
@@ -222,10 +224,10 @@ def test_window_open_noopener_is_a_tracked_page(browser, harness):
     ctx, page = _open_context_page(browser)
     try:
         _goto_opener(page, harness)
-        with ctx.expect_page(timeout=15_000) as info:
+        with ctx.expect_page(timeout=30_000) as info:
             page.click("#open-noopener")
         popup = info.value
-        popup.wait_for_url(harness["popup_url"], timeout=10_000)
+        popup.wait_for_url(harness["popup_url"], timeout=30_000)
 
         assert popup.url == harness["popup_url"]
         assert popup in ctx.pages
@@ -234,9 +236,9 @@ def test_window_open_noopener_is_a_tracked_page(browser, harness):
         assert popup.evaluate("window.opener === null"), (
             "the test's noopener shape is broken: in-page window.opener "
             "should be null")
-        popup.wait_for_selector("#ping", timeout=10_000)
+        popup.wait_for_selector("#ping", timeout=30_000)
         popup.click("#ping")
-        popup.wait_for_function("document.title === 'pong'", timeout=10_000)
+        popup.wait_for_function("document.title === 'pong'", timeout=30_000)
         assert popup.title() == "pong"
         popup.close()
         assert popup.is_closed()
@@ -250,10 +252,10 @@ def test_target_blank_link_expect_popup(browser, harness):
     ctx, page = _open_context_page(browser)
     try:
         _goto_opener(page, harness)
-        with page.expect_popup(timeout=15_000) as info:
+        with page.expect_popup(timeout=30_000) as info:
             page.click("#open-link")
         popup = info.value
-        popup.wait_for_url(harness["popup_url"], timeout=10_000)
+        popup.wait_for_url(harness["popup_url"], timeout=30_000)
 
         assert popup.url == harness["popup_url"]
         assert popup in ctx.pages
@@ -274,15 +276,15 @@ def test_popup_in_persistent_context(firefox_binary, harness, tmp_path):
                              profile_dir=str(tmp_path / "profile")) as ctx:
         page = ctx.new_page()
         _goto_opener(page, harness)
-        with ctx.expect_page(timeout=15_000) as info:
+        with ctx.expect_page(timeout=30_000) as info:
             page.click("#open-simple")
         popup = info.value
-        popup.wait_for_url(harness["popup_url"], timeout=10_000)
+        popup.wait_for_url(harness["popup_url"], timeout=30_000)
 
         assert popup.url == harness["popup_url"]
         assert popup in ctx.pages
         assert popup.opener() == page
-        popup.wait_for_selector("#ping", timeout=10_000)
+        popup.wait_for_selector("#ping", timeout=30_000)
         popup.close()
         assert popup.is_closed()
 
@@ -374,13 +376,13 @@ def test_window_open_features_headed_humanized(firefox_binary, harness):
         try:
             page = ctx.new_page()
             _goto_opener(page, harness)
-            with ctx.expect_page(timeout=15_000) as info:
+            with ctx.expect_page(timeout=30_000) as info:
                 page.click("#open-features")
             popup = info.value
-            popup.wait_for_url(harness["popup_url"], timeout=10_000)
+            popup.wait_for_url(harness["popup_url"], timeout=30_000)
             assert popup.url == harness["popup_url"]
             assert popup in ctx.pages
-            popup.wait_for_selector("#ping", timeout=10_000)
+            popup.wait_for_selector("#ping", timeout=30_000)
             popup.close()
             assert popup.is_closed()
         finally:
@@ -401,12 +403,16 @@ def test_popup_document_reaches_the_context(browser, harness):
         requests, responses = [], []
         ctx.on("request", lambda r: requests.append(r.url))
         ctx.on("response", lambda r: responses.append(r))
-        with ctx.expect_page(timeout=15_000) as info:
+        with ctx.expect_page(timeout=30_000) as info:
             page.click("#open-simple")
         popup = info.value
-        popup.wait_for_load_state("load", timeout=10_000)
-        popup.wait_for_timeout(500)
+        popup.wait_for_load_state("load", timeout=30_000)
         url = harness["popup_url"]
+        # until the document's request and its response have been heard (a condition with a deadline, not 500 ms);
+        # then a short window is left only for a DUPLICATE, which is what the two counts below look for
+        wait_until(lambda: url in requests and any(r.url == url for r in responses), 30,
+                   lambda: popup.wait_for_timeout(50))
+        popup.wait_for_timeout(500)
         assert requests.count(url) == 1, (url, requests)
         documents = [r for r in responses if r.url == url]
         assert len(documents) == 1, (url, [r.url for r in responses])
@@ -423,15 +429,14 @@ def test_a_popup_the_site_closes_is_closed(browser, harness):
     ctx, page = _open_context_page(browser)
     try:
         _goto_opener(page, harness)
-        with ctx.expect_page(timeout=15_000) as info:
+        with ctx.expect_page(timeout=30_000) as info:
             page.click("#open-closing")
         popup = info.value
         closes = []
         popup.on("close", lambda _p: closes.append(1))
-        deadline = 50
-        while not popup.is_closed() and deadline:
-            page.wait_for_timeout(100)
-            deadline -= 1
+        # until the page is closed (the site closes it 300 ms after it loads; the close crosses processes): a
+        # deadline of 30 s, not 5 s of looks; then a short window is left only for a SECOND close event
+        wait_until(popup.is_closed, 30, lambda: page.wait_for_timeout(100))
         page.wait_for_timeout(300)
         assert popup.is_closed()
         assert len(closes) <= 1

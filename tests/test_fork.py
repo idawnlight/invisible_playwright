@@ -15,8 +15,6 @@ The same checks also apply to the end user: a wheel missing
 import pathlib
 import re
 
-import pytest
-
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "invisible_playwright"
 TESTS = pathlib.Path(__file__).resolve().parent
 
@@ -142,39 +140,6 @@ def test_nothing_declares_a_node_version_any_more():
         "in this package downloads or runs node since 2026-08-28." % offenders)
 
 
-def _injected_sources():
-    """The strings the bundle injects into the page, one per physical line.
-
-    They are declared as ``sourceN = '...'`` with SINGLE quotes and with newlines
-    written as two characters, so each one occupies a single line of the file.
-    """
-    # ⛔ THE BUNDLE MAY NOT BE HERE ANY MORE, and that is not a broken tree:
-    # the driver was removed on 2026-08-28. The defect this scans for lives in
-    # a SINGLE-QUOTED JavaScript string inside that bundle, so with the bundle
-    # gone the class is gone with it - our `injected.js` is a plain file, where
-    # an apostrophe in a comment is just an apostrophe.
-    #
-    # It is kept reachable rather than deleted because the check still applies
-    # to any bundle somebody points at: `INVPW_DRIVER_TREE` from a git worktree,
-    # or a fresh upstream one being considered for extraction.
-    import os
-
-    tree = os.environ.get("INVPW_DRIVER_TREE")
-    root = (pathlib.Path(tree) if tree
-            else pathlib.Path(__file__).resolve().parent.parent)
-    bundle = (root / "src" / "invisible_playwright" / "_driver" / "package"
-              / "lib" / "coreBundle.js")
-    if not bundle.is_file():
-        return
-    text = bundle.read_text(encoding="utf-8", errors="replace")
-    for number, line in enumerate(text.splitlines(), 1):
-        m = re.match(r"^\s*(source\d*) = '", line)
-        if m:
-            yield number, m.group(1), line
-
-
-
-
 def _unprotected_quote(line):
     """Where the single-quoted string closes before the end, or None.
 
@@ -193,35 +158,6 @@ def _unprotected_quote(line):
             return None if rest in (";", "", ");") else rest[:80]
         k += 1
     return "the string never closes at all"
-
-
-def test_the_injected_sources_have_balanced_quotes():
-    """An apostrophe in a comment closes the string and breaks the whole bundle.
-
-    Happened on 2026-08-24: an Italian comment added inside ``source4``
-    contained ``piu'`` and ``cioe'``. The string closed right there, the file
-    became invalid JavaScript and the driver stopped starting at all.
-
-    The defect is not visible to the eye - those lines are hundreds of
-    thousands of characters long - and no test that only imports the Python
-    package sees it. No Node required: it holds even where the runtime has not
-    been downloaded yet.
-    """
-    found = list(_injected_sources())
-    if not found:
-        # ⛔ NOT AN ASSERTION FAILURE. With no bundle reachable there is
-        # nothing of this shape to check, and the defect class went with it -
-        # see `_injected_sources`. Saying "no injected source found" as a
-        # failure would turn a deliberate deletion into a permanent red.
-        pytest.skip("no driver bundle reachable: nothing of this shape exists "
-                    "to check. Point INVPW_DRIVER_TREE at a worktree to run "
-                    "it against one.")
-    for number, name, line in found:
-        rest = _unprotected_quote(line)
-        assert rest is None, (
-            "coreBundle.js:%d, %s: the injected string closes too early, "
-            "what remains after it is %r - almost always an apostrophe inside a "
-            "comment" % (number, name, rest))
 
 
 def test_the_quote_check_sees_a_real_apostrophe():

@@ -78,8 +78,23 @@ asyncio.run(main())
 
 The `browser` object yielded by the context manager (or `BrowserContext` when
 `profile_dir=` is passed) is a genuine `playwright.sync_api.Browser` /
-`playwright.async_api.Browser` - locators, `frame_locator`, `expect()`, `page.route()`,
-dialogs, screenshots, and cookies work identically across both backends.
+`playwright.async_api.Browser` - locators, `Locator.screenshot()`, `frame_locator`,
+`expect()`, `page.expose_function()`, `page.route()`, `context.set_offline()`,
+downloads (`page.expect_download()`), dialogs, popups, screenshots, and cookies work
+identically across both backends.
+
+## Serving one browser over WebSocket (`launch_server`)
+
+With the `remote` extra installed (`pip install "websockets>=13"`), `launch_server()`
+and `launch_server_async()` expose a shared Firefox or Chromium browser over WebSocket
+so Playwright clients in any language can connect:
+
+```python
+from invisible_playwright import launch_server
+
+with launch_server(seed=42, headless=True, backend="chromium") as server:
+    print(server.ws_endpoint)  # connect with p.chromium.connect(...) or p.firefox.connect(...)
+```
 
 ## Logging the seed to replay a run
 

@@ -92,7 +92,7 @@ def test_element_atom_accepts_a_select_whose_document_has_no_window(
         result = page.send("Page.elementAtom", {
             "frameId": page.main_frame_id, "objectId": object_id,
             "atom": "isElementDisplayed",
-        }, timeout=10)
+        }, timeout=30)
         # None is displayed in a window; the atom answers false, not an error.
         assert result == {"result": False}
         assert _main_read(page)["events"] == []
@@ -107,7 +107,7 @@ def test_select_options_changes_the_value_and_delivers_trusted_events_in_that_gl
     object_id = _make_select(page, factory, has_default_view, connected)
     command = {"frameId": page.main_frame_id, "objectId": object_id, "indices": [1]}
     try:
-        assert page.send("Page.selectOptions", command, timeout=10) == {"changed": True}
+        assert page.send("Page.selectOptions", command, timeout=30) == {"changed": True}
         expected = {
             "value": "b", "connected": connected,
             "hasDefaultView": has_default_view,
@@ -118,7 +118,7 @@ def test_select_options_changes_the_value_and_delivers_trusted_events_in_that_gl
         }
         assert _main_read(page) == expected
         # Selecting the existing value does not manufacture another event pair.
-        assert page.send("Page.selectOptions", command, timeout=10) == {"changed": False}
+        assert page.send("Page.selectOptions", command, timeout=30) == {"changed": False}
         assert _main_read(page) == expected
     finally:
         page.injected.release(_main_context(page), object_id)

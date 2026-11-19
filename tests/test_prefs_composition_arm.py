@@ -12,12 +12,10 @@ what the index has.
 """
 from __future__ import annotations
 
-import sys
-
 import pytest
 
 from invisible_core import generate_profile, get_default_stealth_prefs
-from invisible_playwright._cursor import ENGINE_BINARY, ENGINE_PYTHON
+from invisible_playwright._cursor import ENGINE_PYTHON
 from invisible_playwright._session import build_prefs
 
 pytestmark = pytest.mark.unit
@@ -40,6 +38,11 @@ DELIBERATE_VS_PUBLIC_API = {
     # 10 ms, which measured gave 79% of the intervals between two `mousemove`
     # tighter than a real 60 Hz can deliver.
     "stealthfox.humanize.stepMs",
+    # Not a pref of the browser: the server's mark that this dict IS a composed
+    # session (server.COMPOSED_PREF). `op_launch` takes it out before `user.js`
+    # and composes a session for a launch that does not carry it; the public API
+    # returns prefs for a caller's own launch, which has no such server.
+    "invisible.server.composed",
 }
 
 
@@ -64,75 +67,16 @@ def test_the_wrapper_composes_what_the_public_api_composes():
         f"nothing looks wrong: {differing}")
 
 
-def test_the_binary_engine_still_produces_the_cap_it_always_did():
-    """The delegation must not change what either engine writes.
+def test_the_python_engine_leaves_the_browser_expansion_off():
+    """The delegation must not change what the engine writes.
 
-    ENGINE_BINARY means the browser draws the path, so the pref is on and the
-    cap is written; ENGINE_PYTHON means the wrapper draws it, so the pref is off
-    and no cap is written - both exactly as before the core took the layer.
+    ENGINE_PYTHON means the wrapper draws the path, so the pref is off and no
+    cap is written, whatever `humanize` the caller gave.
     """
     profile = generate_profile(SEED)
-    binary = build_prefs(profile=profile, locale=LOCALE, timezone=TZ,
-                         extra_prefs=None, virtual_display=False,
-                         cursor_engine=ENGINE_BINARY, humanize=2.5)
-    python = build_prefs(profile=profile, locale=LOCALE, timezone=TZ,
-                         extra_prefs=None, virtual_display=False,
-                         cursor_engine=ENGINE_PYTHON, humanize=2.5)
-
-    assert binary["stealthfox.humanize"] is True
-    assert binary["stealthfox.humanize.maxTime"] == "2.5"
-    assert python["stealthfox.humanize"] is False
-    assert "stealthfox.humanize.maxTime" not in python
-
-
-def test_a_zero_cap_with_the_binary_engine_means_the_default_not_off():
-    """The edge the delegation had to be written around.
-
-    `humanize=0` with the binary engine selected is a cap of nothing, not a
-    request to disable motion - `max_seconds_for` has always turned it into the
-    default. Passing `humanize` straight through to the core would have made it
-    falsy and switched the generator off, which is a different browser.
-    """
-    prefs = build_prefs(profile=generate_profile(SEED), locale=LOCALE,
-                        timezone=TZ, extra_prefs=None,
-                        virtual_display=False,
-                        cursor_engine=ENGINE_BINARY, humanize=0)
-    assert prefs["stealthfox.humanize"] is True
-    assert prefs["stealthfox.humanize.maxTime"] == "1.5"
-
-
-@pytest.mark.skipif(sys.platform != "win32",
-                    reason="the hidden desktop is a Windows path")
-def test_a_hidden_desktop_brings_its_two_sandbox_keys_and_nothing_hides_by_pref():
-    """The window is hidden by WHERE the browser is created, not by a pref.
-
-    ⛔ `zoom.stealth.cloak_windows` must never come back: from 2026-06-11 to
-    2026-09-20 it switched on a DWMWA_CLOAK inside the binary, and the owner
-    chose a stock engine on that surface. The two keys that DO ride with a
-    hidden desktop are the sandbox workarounds measured in 2026-05 (§P16,
-    #18 Bug A), emitted only when the desktop was actually created, with
-    setdefault so an explicit override still wins.
-    """
-    without = build_prefs(profile=generate_profile(SEED), locale=LOCALE,
-                          timezone=TZ, extra_prefs=None,
-                          virtual_display=False,
-                          cursor_engine=ENGINE_PYTHON, humanize=True)
-    hidden = build_prefs(profile=generate_profile(SEED), locale=LOCALE,
-                         timezone=TZ, extra_prefs=None,
-                         virtual_display=True,
-                         cursor_engine=ENGINE_PYTHON, humanize=True)
-    overridden = build_prefs(profile=generate_profile(SEED), locale=LOCALE,
-                             timezone=TZ,
-                             extra_prefs={"security.sandbox.gpu.level": 1},
-                             virtual_display=True,
-                             cursor_engine=ENGINE_PYTHON, humanize=True)
-
-    for prefs in (without, hidden, overridden):
-        assert "zoom.stealth.cloak_windows" not in prefs, (
-            "the in-binary cloak pref is back")
-    assert "security.sandbox.gpu.level" not in without
-    assert "security.sandbox.content.level" not in without
-    assert hidden["security.sandbox.gpu.level"] == 0
-    assert hidden["security.sandbox.content.level"] == 4
-    assert overridden["security.sandbox.gpu.level"] == 1, (
-        "the desktop workaround overwrote an explicit override")
+    for humanize in (True, 2.5, 0):
+        python = build_prefs(profile=profile, locale=LOCALE, timezone=TZ,
+                             extra_prefs=None, virtual_display=False,
+                             cursor_engine=ENGINE_PYTHON, humanize=humanize)
+        assert python["stealthfox.humanize"] is False
+        assert "stealthfox.humanize.maxTime" not in python

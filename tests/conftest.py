@@ -2,6 +2,7 @@ import faulthandler
 import http.server
 import os
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -10,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from _servers import LocalServer
+from _browser_census import _a_module_leaves_no_browser_open, _the_connections_a_test_made_are_closed_with_it  # noqa: F401  (autouse)
 
 
 @pytest.fixture
@@ -77,6 +79,18 @@ def _watchdog_open():
     return _watchdog_handle
 
 
+def pytest_configure(config):
+    # The run stops at the first refusal of the engine (tests/engine_refusal.py).
+    from engine_refusal import StopAtTheFirstRefusal
+    config.pluginmanager.register(StopAtTheFirstRefusal(config), "engine-refusal-stop")
+    # What the core did about the GeoIP database during the run, for scripts/ci_lab_geoip.py verify (the CI legs set GEOIP_USED_OUT).
+    if os.environ.get("GEOIP_USED_OUT"):
+        from geoip_used import GeoipUsedRecorder
+        recorder = GeoipUsedRecorder(os.environ["GEOIP_USED_OUT"])
+        recorder.start()
+        config.pluginmanager.register(recorder, "geoip-used")
+
+
 def pytest_runtest_setup(item):
     if item.get_closest_marker("e2e") is None:
         return
@@ -89,6 +103,18 @@ def pytest_runtest_setup(item):
 def pytest_runtest_teardown(item, nextitem):
     if _watchdog_handle is not None:
         faulthandler.cancel_dump_traceback_later()
+
+
+def pytest_collection_modifyitems(config, items):
+    """The e2e tests of the post-publication files (``tests/_post_publication.py``: pip, uv, PyPI, GitHub) belong to the round after a publication: a run
+    that does not NAME their file does not run them. ``user-install.yml`` names both files; ``scripts/run_e2e.py`` and every PR or candidate leg do not."""
+    import _post_publication
+
+    left = [item for item in items
+            if item.get_closest_marker("e2e") is not None and _post_publication.is_left_out(item.path, config.args)]
+    if left:
+        items[:] = [item for item in items if item not in left]
+        config.hook.pytest_deselected(items=left)
 
 
 def pytest_unconfigure(config):
@@ -110,12 +136,12 @@ def pytest_unconfigure(config):
 # is a clear message about one test rather than a collection error covering the
 # whole run.
 try:
-    from invisible_playwright._fpforge import generate_profile
-    from invisible_playwright.constants import BINARY_ENTRY_REL
+    from invisible_core._fpforge import generate_profile
+    from invisible_core.seal import DEFAULT_ENTRY_REL
     _IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - only in the e2e-only environment
     generate_profile = None
-    BINARY_ENTRY_REL = None
+    DEFAULT_ENTRY_REL = None
     _IMPORT_ERROR = exc
 
 
@@ -126,6 +152,83 @@ def _require_package():
             f"not: {_IMPORT_ERROR}. That is expected only when running the "
             f"user-path e2e files, which install the package into their own "
             f"venv; any other test needs `pip install -e .`")
+
+
+@pytest.fixture(autouse=True)
+def _offline_session_geo(request, monkeypatch):
+    """Outside the e2e, the one network step of composing a session (the egress
+    IP, `_session.session_geo`) answers a fixed geo: New York, en-US. A launch
+    that names no session composes one on the server (`session_for_launch`),
+    and a unit test that drives `op_launch` must not ask the network who it is."""
+    if request.node.get_closest_marker("e2e") is not None:
+        return
+    try:
+        from invisible_playwright import _session
+        from invisible_core import decide_session_locale
+        from invisible_core._geo import SessionGeo
+    except Exception:  # the package is absent: the tests that need it say so
+        return
+    geo = SessionGeo("America/New_York", None, locale=decide_session_locale("en-US"))
+    monkeypatch.setattr(_session, "session_geo", lambda *_a, **_k: geo)
+
+
+@pytest.fixture(autouse=True)
+def _a_unit_test_does_not_depend_on_the_seal_of_whoever_runs_it(request, monkeypatch):
+    """Outside the e2e, a test does not read ``INVISIBLE_SEAL_FILE``.
+
+    The CI jobs export it (a LOCAL seal of the candidate, with no published assets) for the e2e tests that launch the engine under test. A unit test
+    that composes a launch (``build_env``, ``launch_persistent_context``, a second browser served by a virtual display) reaches ``ensure_binary`` and
+    died with ``SealError: the active seal ... is a LOCAL seal with no published assets`` only because of where it ran. Here the variable is taken out
+    of the test's environment (``monkeypatch`` puts it back), and the seal the process had already resolved is dropped, so the test resolves the
+    packaged one; a test that wants a seal sets the variable itself, after this. The e2e tests, which are the ones that need it, keep it."""
+    if request.node.get_closest_marker("e2e") is not None:
+        yield
+        return
+    try:
+        from invisible_core.seal import _reset_active_seal_for_tests
+    except Exception:  # the package is absent: the tests that need it say so
+        _reset_active_seal_for_tests = None
+    monkeypatch.delenv("INVISIBLE_SEAL_FILE", raising=False)
+    if _reset_active_seal_for_tests is not None:
+        _reset_active_seal_for_tests()
+    yield
+    if _reset_active_seal_for_tests is not None:
+        _reset_active_seal_for_tests()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _the_lab_declares_the_exit(request, tmp_path_factory):
+    """Where an e2e launch leaves from is DECLARED, not asked of three services of the internet.
+
+    A launch with no proxy asks the core's ``discover_egress_ip`` for its exit, which asks api.ipify.org, icanhazip.com and checkip.amazonaws.com: a
+    third party in every one of the 222 launches that name neither ``timezone=`` nor ``proxy=``. For a session in which an e2e test is selected, the
+    question with no proxy is answered the exit of the lab (``tests/_lab_egress.py``), and the GeoIP database is the lab's when no leg set one. SESSION
+    scope, because the module-scoped browsers of several files launch before any function-scoped fixture; a test that replaces the question (an exit
+    behind its own gateway) does it with ``monkeypatch`` and goes back to this answer. A session with no e2e test selected is left as it is: the unit
+    tests of the discovery call the real function."""
+    if not any(item.get_closest_marker("e2e") is not None for item in request.session.items):
+        yield None
+        return
+    import _lab_egress
+
+    with pytest.MonkeyPatch.context() as patch:
+        yield _lab_egress.install(patch, tmp_path_factory.mktemp("lab-geoip"))
+
+
+@pytest.fixture
+def local_egress_echo(monkeypatch):
+    """The REAL discovery of the exit, for the test that must prove it, against an echo service of its own on loopback: the three services of the
+    product are replaced by one that answers :data:`_lab_egress.LAB_EGRESS_IP` and counts its questions. Nothing goes to the internet."""
+    from invisible_core import _geo
+
+    import _lab_egress
+
+    current = _geo.discover_egress_ip
+    monkeypatch.setattr(_geo, "discover_egress_ip", getattr(current, "original", current))
+    echo = _lab_egress.EchoService()
+    monkeypatch.setattr(_geo, "_IP_ECHO_ENDPOINTS", (echo.url,))
+    yield echo
+    echo.close()
 
 
 @pytest.fixture
@@ -142,6 +245,18 @@ def sample_profile():
 
 
 @pytest.fixture(scope="session")
+def first_run_prefs():
+    """What invisible_core declares for a new profile's first run. Since firefox-55 the
+    engine leaves Mozilla's first-run lines, so a test that starts the engine without
+    the core has to bring this, or a second tab fails Browser.newPage."""
+    from invisible_core._fpforge import generate_profile
+    from invisible_core.prefs import translate_profile_to_prefs
+
+    prefs = translate_profile_to_prefs(generate_profile(970411), timezone="America/New_York")
+    return {k: v for k, v in prefs.items() if k.startswith(("termsofuse.", "browser.preonboarding."))}
+
+
+@pytest.fixture(scope="session")
 def firefox_binary():
     """Locate the patched Firefox binary for E2E tests, or skip cleanly.
 
@@ -152,7 +267,7 @@ def firefox_binary():
 
       1. ``INVPW_BINARY_PATH`` env var - point the whole suite at a local build
          or a freshly-extracted release (this is how the full-suite gate runs).
-      2. Cached binary under ``cache_dir_for_version()`` (post ``fetch``).
+      2. Cached binary under ``cache_dir_for_seal()`` (post ``fetch``).
       3. Skip - we never trigger an implicit multi-hundred-MB network download
          inside a test run.
     """
@@ -166,16 +281,75 @@ def firefox_binary():
     # `in None` answered a TypeError that hid the reason - measured 2026-10-25
     # with a core whose version the wrapper's pin did not name.
     _require_package()
-    if sys.platform not in BINARY_ENTRY_REL:
+    if sys.platform not in DEFAULT_ENTRY_REL:
         pytest.skip(f"unsupported platform: {sys.platform}")
-    from invisible_playwright.download import cache_dir_for_version
-    entry = cache_dir_for_version() / BINARY_ENTRY_REL[sys.platform]
+    from invisible_core.download import cache_dir_for_seal
+    entry = cache_dir_for_seal() / DEFAULT_ENTRY_REL[sys.platform]
     if not entry.exists():
         pytest.skip(
             "patched Firefox binary not cached and INVPW_BINARY_PATH unset; "
             "set INVPW_BINARY_PATH=<firefox binary> or run `invisible-playwright fetch`"
         )
     return str(entry)
+
+
+# ---------------------------------------------------------------------------
+# The engine a test runs against. main's e2e runs against the engine the
+# published core pins AND against the candidate of the next engine (the gate),
+# so a property only the newer engine promises must not run on the older one.
+#
+# The engine is read from the seal the process runs under, the same one that
+# checks the launch: `active_seal().tag`. Only the number counts: `firefox-64`
+# and `firefox-64-candidate` are both 64. A tag with no number (`local`, or
+# anything else) does not say which engine it is, so the test does not skip and
+# does not run: it fails and says why. A candidate is sealed as
+# `firefox-N-candidate` by the gate.
+#
+# No new pytest marker: the marker vocabulary is shared with invisible_core
+# and a marker only here would make the two drift.
+_ENGINE_TAG = re.compile(r"^firefox-(\d+)(?:-candidate)?$")
+
+
+def _engine_number(tag):
+    """N of `firefox-N` or `firefox-N-candidate`, or None."""
+    m = _ENGINE_TAG.match(tag or "")
+    return int(m.group(1)) if m else None
+
+
+def _skip_unless_engine_at_least(minimum, tag):
+    want = _engine_number(minimum)
+    if want is None:
+        raise pytest.UsageError("engine_at_least wants 'firefox-N', got %r" % (minimum,))
+    have = _engine_number(tag)
+    if have is None:
+        pytest.fail("the engine's seal has no number: a candidate must be sealed as "
+                    "firefox-N-candidate (seal tag %r)" % (tag,), pytrace=False)
+    if have < want:
+        pytest.skip("the property needs %s or later; this engine is %s"
+                    % (minimum, tag))
+
+
+@pytest.fixture(scope="session")
+def engine_at_least():
+    """``engine_at_least("firefox-65")``: skip the test unless the engine in
+    use is that release or a later one (see above for how it is read). A seal
+    whose tag has no number (``local``, anything but firefox-N or
+    firefox-N-candidate) makes the test FAIL, saying so: it neither skips nor
+    runs."""
+    _require_package()
+    from invisible_core.seal import active_seal
+    tag = active_seal().tag
+
+    def check(minimum):
+        _skip_unless_engine_at_least(minimum, tag)
+    return check
+
+
+@pytest.fixture
+def the_udp_line(engine_at_least):
+    """The UDP line (the declared network, the DoH through the proxy, the SOCKS5 UDP layer, HTTP/3 through it) is the engine
+    firefox-63: a test of it skips on an older engine (the published one that main's e2e fetches) and runs on the candidate."""
+    engine_at_least("firefox-63")
 
 
 # ---------------------------------------------------------------------------
@@ -256,3 +430,149 @@ def fixture_server():
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+# ======================================================================================================================
+#  Fixtures shared by several e2e files. They live here, not in one file that the others import from: an imported fixture
+#  that a test then names as an argument is a redefinition (ruff F811, the lint of the `tests` job).
+# ======================================================================================================================
+@pytest.fixture
+def doh():
+    import h2  # noqa: F401 - the dev extra installs it: a missing one is a failure, never a skip
+    from _doh_servers import FakeDoh
+    from _doh_support import ZONE
+
+    server = FakeDoh(ZONE)
+    yield server
+    server.close()
+
+
+@pytest.fixture
+def gateway(doh):
+    from _doh_servers import DohGateway
+
+    made = []
+
+    def make(name, **kwargs):
+        gw = DohGateway(name, doh, **kwargs)
+        made.append(gw)
+        return gw
+
+    yield make
+    for gw in made:
+        gw.close()
+
+
+@pytest.fixture
+def trap():
+    """The resolver trap, counting every question the machine's resolver is asked.
+
+    None only where it cannot run AND the gate does not require it (a developer's machine). With INVPW_REQUIRE_TRAP=1
+    (the gate's Linux leg) a trap that is unavailable or whose port 53 cannot be bound is a failure with its reason."""
+    import _trap_policy
+    from _leaks import ResolverTrap
+
+    if not ResolverTrap.available:
+        why = _trap_policy.failure(None, False, ResolverTrap.reason)
+        if why:
+            pytest.fail(why)
+        yield None
+        return
+    resolver = ResolverTrap()
+    try:
+        resolver.__enter__()
+    except OSError as exc:  # port 53 taken (another worker holds the trap)
+        why = _trap_policy.failure(None, True, bind_error=exc)
+        if why:
+            pytest.fail(why)
+        yield None
+        return
+    try:
+        yield resolver
+    finally:
+        resolver.__exit__(None, None, None)
+
+
+@pytest.fixture
+def watcher(firefox_binary):
+    """Started BEFORE the test body, so before any launch; stopped by the test or here."""
+    from pathlib import Path
+
+    from _leaks import Watcher
+
+    w = Watcher(match=("firefox", Path(firefox_binary).stem.lower())).start()
+    yield w
+    w.stop()
+
+
+@pytest.fixture
+def pages():
+    from _doh_support import Pages
+
+    server = Pages()
+    yield server
+    server.close()
+
+
+@pytest.fixture
+def socks5_tcp_only():
+    from _socks_servers import Socks5TcpOnly
+
+    srv = Socks5TcpOnly()
+    yield srv
+    srv.close()
+
+
+@pytest.fixture
+def local_https_page():
+    """A trivial localhost page (used by the no-proxy srflx test)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        #: A silent socket no longer pins a thread down: after five seconds it drops.
+        timeout = 5
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<html><body>wrtc</body></html>")
+
+        def log_message(self, *a):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}/"
+    httpd.shutdown()
+
+
+@pytest.fixture(scope="module", params=["in-process", "stock-client"])
+def browser(request, firefox_binary):
+    """One browser per transport for the whole file (the popup tests of two files use it)."""
+    import importlib
+    if request.param == "in-process":
+        from invisible_playwright import InvisiblePlaywright
+
+        with InvisiblePlaywright(binary_path=firefox_binary, headless=True) as b:
+            yield b
+        return
+    try:     # the stock client (a pinned dev dependency), imported by name: the fork's guard forbids a static import
+        sync_playwright = importlib.import_module("playwright.sync_api").sync_playwright
+    except ImportError as exc:
+        pytest.fail("the stock Playwright client is missing (%s): install the wrapper with its dev extra" % exc,
+                    pytrace=False)
+    from invisible_playwright._juggler.remote import launch_server
+
+    server = launch_server(headless=True, binary_path=firefox_binary, locale="en-US", timezone="Europe/Rome")
+    try:
+        with sync_playwright() as p:
+            b = p.firefox.connect(server.ws_endpoint)
+            try:
+                yield b
+            finally:
+                b.close()
+    finally:
+        server.close()

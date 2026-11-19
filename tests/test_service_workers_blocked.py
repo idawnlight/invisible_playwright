@@ -173,7 +173,7 @@ def _install(page, origin):
     page.goto(origin)
     assert page.evaluate(_REGISTER) == {"registered": True}
     page.wait_for_function("navigator.serviceWorker.controller !== null",
-                           timeout=10_000)
+                           timeout=30_000)
     assert page.evaluate("async () => (await fetch('/sw-answer')).text()") == "worker"
     assert page.evaluate(_MESSAGE) == 204
 

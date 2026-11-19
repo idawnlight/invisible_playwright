@@ -7,8 +7,10 @@ It does not break - it breaks one time in twenty.
 The client is `invisible_core.juggler` and its tests without a browser are
 the core's (`tests/test_juggler_actions.py` there). These need the engine,
 which is where this package's e2e job is, and every one runs TWICE: with the
-pointer approach drawn by the client (this package's mode, where `_cursor`
-walks the cursor first) and by the engine (`engine_approach=True`, the mode
+plain approach (this package's mode: the server's pointer, `_juggler/
+pointer.py`, walks onto the element before calling the action, which these
+tests, building `Actions` directly, do not exercise) and by the engine
+(`engine_approach=True`, the mode
 invisible-selenium and invisible-puppeteer drive the same client in). Those
 two packages had a copy of these tests each; one place now covers both modes.
 """
@@ -26,6 +28,11 @@ from invisible_core.juggler._behaviour import PageActs
 from invisible_core.juggler.actions import Actions, ElementNotActionable
 
 from _servers import LocalServer
+
+#: The retry budget of an action that is MEANT to fail (an element that is not there, one that is disabled): the test reads the reason of the
+#: last attempt, so the budget must leave a loaded runner the time to finish an attempt and say why (2 s was red on Windows, 13/11 and 14/11,
+#: where stalls of 2.5 s are seen). Such a test costs its whole budget by design, and still fails if the action does not say the reason.
+NEGATIVE_S = 10
 
 #: Who draws the pointer approach in `_open`; set per test by the fixture below.
 _ENGINE_APPROACH = False
@@ -109,9 +116,14 @@ def _open(binary, body):
     srv = LocalServer(("127.0.0.1", 0), _serve(body))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     c = conn.launch(binary, profile_dir, headless=True, env=plan.env)
+    # ⛔ THE PAGE'S LISTENERS ARE BORN ON THE ATTACH, on the reader thread, before the next event of the session is delivered:
+    # the connection hands each event to the listeners of that moment (dispatch_event copies the list), so a Lifecycle built
+    # later from this thread missed the page's first frameAttached and Page.ready when they came in between, and waited for
+    # ever (Windows CI of 13/11, run 43373058301 part 2: "the engine never said Page.ready (frames seen: [])").
     sessions: dict = {}
     c.add_listener(lambda m, p, s: (
-        sessions.__setitem__(p["targetInfo"]["targetId"], p["sessionId"])
+        sessions.__setitem__(p["targetInfo"]["targetId"], (p["sessionId"], Lifecycle(c, p["sessionId"]),
+                                                           InjectedScript(c, p["sessionId"])))
         if m == "Browser.attachedToTarget" else None))
     c.send("Browser.enable", {"attachToDefaultContext": True})
     ctx = c.send("Browser.createBrowserContext", {"removeOnDetach": True})
@@ -120,11 +132,12 @@ def _open(binary, body):
     deadline = time.time() + 20
     while page["targetId"] not in sessions and time.time() < deadline:
         time.sleep(0.02)
-    sess = sessions[page["targetId"]]
-    lifecycle = Lifecycle(c, sess)
-    inj = InjectedScript(c, sess)
+    sess, lifecycle, inj = sessions[page["targetId"]]
     inj.install()
-    time.sleep(0.4)
+    # The page is the caller's when the engine says it is ready, as Playwright hands it over (Page.ready); a fixed 0.4 s was a race
+    # that the Windows census lost (run 43307193708: "no frame: the page has not announced its main frame yet", 6 tests).
+    lifecycle.wait_for_page_ready(30)
+    lifecycle.wait_for_main_frame(30)
     lifecycle.goto("http://127.0.0.1:%d/" % srv.server_address[1],
                    until="load", timeout=30)
     actions = Actions(c, sess, lifecycle, inj, acts=PageActs(1),
@@ -209,7 +222,7 @@ def test_the_lifecycle_WAITS_for_an_element_that_appears_later(firefox_binary):
     instead of a wait. The element appears after 1.2 seconds."""
     actions, inj, f, close = _open(firefox_binary, PAGE)
     try:
-        actions.click("#slow", timeout=15)
+        actions.click("#slow", timeout=30)
     finally:
         close()
 
@@ -223,7 +236,7 @@ def test_a_timeout_SAYS_the_reason_for_the_last_attempt(firefox_binary):
     actions, inj, f, close = _open(firefox_binary, PAGE)
     try:
         with pytest.raises(ElementNotActionable) as e:
-            actions.click("#doesnotexist", timeout=2)
+            actions.click("#doesnotexist", timeout=NEGATIVE_S)
         text = str(e.value)
         assert "#doesnotexist" in text
         assert "attempts" in text
@@ -242,7 +255,7 @@ def test_an_element_that_is_NEVER_actionable_says_WHICH_state_is_missing(
     actions, inj, f, close = _open(firefox_binary, body)
     try:
         with pytest.raises(ElementNotActionable) as e:
-            actions.click("#disabled", timeout=2)
+            actions.click("#disabled", timeout=NEGATIVE_S)
         assert "missing enabled" in str(e.value), str(e.value)
     finally:
         close()

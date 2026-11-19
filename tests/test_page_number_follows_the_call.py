@@ -43,6 +43,7 @@ from invisible_playwright._pw._impl._browser import Browser
 from invisible_playwright._pw._impl._browser_context import (
     BrowserContext, page_number_for_call,
 )
+from _browser_census import closes_with_the_test
 
 
 # -- the client: the number is reserved at the call --------------------------
@@ -196,6 +197,7 @@ class _Engine(EventListeners):
 
     def __init__(self):
         super().__init__()
+        closes_with_the_test(self)
         self.browser = None
         self.arrived = threading.Semaphore(0)
         self.release = [threading.Event() for _ in range(8)]
@@ -230,12 +232,23 @@ class _Page:
     """The `PageDispatcher` seen from the numbering: what it was given."""
 
     def __init__(self, server, context, session, target_id, number,
-                 opener=None):
+                 opener=None, is_gone=None):
         self.target_id = target_id
         self.number = number
         self.opener = opener
         self.popups_opened = 0
         self.channel = {"guid": "page-" + target_id}
+
+    gone_while_building = False
+
+    def wait_until_ready(self, timeout=None):
+        pass          # the engine of this test says Page.ready at once
+
+    def settle_events(self):
+        pass
+
+    def announce(self, context, replay):
+        context.emit("page", {"page": self.channel})
 
     def announce_closed(self):
         pass
@@ -245,12 +258,14 @@ class _Page:
 def engine(monkeypatch):
     monkeypatch.setattr(srv, "PageDispatcher", _Page)
     e = _Engine()
-    browser = BrowserDispatcher(Server(), None, e, "151.0", session_seed=1)
+    server = Server()
+    browser = BrowserDispatcher(server, None, e, "151.0", session_seed=1)
     e.browser = browser
     context = BrowserContextDispatcher(browser.server, browser, {}, "C1")
     browser.contexts.append(context)
     e.context = context
-    return e
+    yield e
+    server.shutdown()      # the connection's one starter ends with its server
 
 
 def _new_page_in_thread(engine, number, out):
@@ -258,7 +273,7 @@ def _new_page_in_thread(engine, number, out):
         out[number] = engine.context.op_new_page({"pageNumber": number})
     t = threading.Thread(target=run, daemon=True)
     t.start()
-    assert engine.arrived.acquire(timeout=10)
+    assert engine.arrived.acquire(timeout=30)
     return t
 
 

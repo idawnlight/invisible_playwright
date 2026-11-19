@@ -33,7 +33,6 @@ that names the reason.
 | `route_web_socket()` | Error | The engine reports WebSocket frames but cannot hold or rewrite one, so a route would look like it worked and pass everything through. |
 | Screencast to a video file | Error | The engine streams JPEG frames and has no encoder. Pass `on_frame=` to receive the frames. |
 | `register_selector_engine()` or `set_test_id_attribute()` after a page exists | Error | Both are built into the page's injected script when it is created. Call them before the first page. |
-| `expose_binding()`, `expose_function()` | Error, not implemented yet | The page-facing half is easy; the reply path into the page's promise is not wired, and a binding that never answers would hang the page. |
 | `set_storage_state()` with per-origin `localStorage` | Error, not implemented yet | Restoring only the cookies would look like success and leave half the session missing. |
 | `response.body()` on a very large or old response | Error | The engine keeps at most 100 MB of response bodies per tab and 10 MB per response. Read the body sooner. |
 
@@ -53,6 +52,6 @@ that names the reason.
   path, typing pauses before the first key, and a file chooser waits as a person
   looking for the file does. Calls take longer than in Playwright, and the page sees a
   person's timing.
-- **The server speaks to this client only.** The bundled Playwright client and the
-  bundled server are versioned together; a stock Playwright client cannot drive the
-  server directly.
+- **Serving remote Playwright clients.** Use `launch_server()` or `launch_server_async()`
+  (with `invisible-playwright[remote]`) when connecting stock Playwright clients over
+  WebSocket (`p.firefox.connect(...)` or `p.chromium.connect(...)`).

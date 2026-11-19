@@ -19,6 +19,7 @@ from invisible_playwright._juggler import server as srv
 from invisible_playwright._juggler.server import (
     BrowserContextDispatcher, BrowserDispatcher, Server,
 )
+from _browser_census import closes_with_the_test
 
 #: How long this engine takes to answer `Browser.newPage`, in its own clock.
 ANSWER_AFTER_S = 35.0
@@ -30,6 +31,7 @@ class _SlowEngine(EventListeners):
 
     def __init__(self):
         super().__init__()
+        closes_with_the_test(self)
         self.browser = None
         self.bounds = []
 
@@ -51,10 +53,21 @@ class _SlowEngine(EventListeners):
 
 
 class _Page:
-    def __init__(self, server, context, session, target_id, number, opener=None):
+    def __init__(self, server, context, session, target_id, number, opener=None, is_gone=None):
         self.target_id = target_id
         self.number = number
         self.channel = {"guid": "page-" + target_id}
+
+    gone_while_building = False
+
+    def wait_until_ready(self, timeout=20.0):
+        pass          # the engine of this test says Page.ready at once
+
+    def settle_events(self):
+        pass
+
+    def announce(self, context, replay):
+        context.emit("page", {"page": self.channel})
 
     def announce_closed(self):
         pass
@@ -64,12 +77,16 @@ class _Page:
 def test_a_page_the_engine_answers_after_35_s_is_still_a_page(monkeypatch):
     monkeypatch.setattr(srv, "PageDispatcher", _Page)
     engine = _SlowEngine()
-    browser = BrowserDispatcher(Server(), None, engine, "151.0", session_seed=1)
+    server = Server()
+    browser = BrowserDispatcher(server, None, engine, "151.0", session_seed=1)
     engine.browser = browser
     context = BrowserContextDispatcher(browser.server, browser, {}, "C1")
     browser.contexts.append(context)
 
-    result = context.op_new_page({"pageNumber": 0})
+    try:
+        result = context.op_new_page({"pageNumber": 0})
+    finally:
+        server.shutdown()      # the connection's one starter ends with its server
 
     assert result == {"page": {"guid": "page-T0"}}
     assert engine.bounds == [None], (

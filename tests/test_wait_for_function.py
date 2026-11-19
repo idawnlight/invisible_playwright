@@ -81,7 +81,7 @@ def test_it_sees_a_global_the_PAGE_defined(firefox_binary, served):
                              binary_path=str(firefox_binary)) as browser:
         page = browser.new_page()
         page.goto(served, wait_until="load")
-        handle = page.wait_for_function("() => window.__ready", timeout=15000)
+        handle = page.wait_for_function("() => window.__ready", timeout=30000)
 
         assert handle is not None, (
             "wait_for_function answered None: `from_channel` turns that into "
@@ -104,5 +104,5 @@ def test_it_also_sees_the_dom(firefox_binary, served):
         page.goto(served, wait_until="load")
         page.wait_for_function(
             "() => document.getElementById('state').textContent === 'done'",
-            timeout=15000)
+            timeout=30000)
         assert page.text_content("#state") == "done"

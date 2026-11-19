@@ -106,7 +106,7 @@ def test_a_payload_reaches_the_page_as_a_file(firefox_binary):
         page.set_input_files("#f", [
             {"name": "note.txt", "mimeType": "text/plain", "buffer": b"hello payload"},
             {"name": "data.csv", "mimeType": "text/csv", "buffer": b"a,b\n1,2\n"},
-        ], timeout=5000)
+        ], timeout=30000)
         page.wait_for_function("got.length > 0")
         assert page.evaluate("got") == [{
             "names": ["note.txt", "data.csv"], "sizes": [13, 8],

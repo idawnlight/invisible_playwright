@@ -51,7 +51,7 @@ const g = document.getElementById('c').getContext('2d'); let i = 0;
 def test_every_screencast_stop_returns_and_the_browser_still_answers(
         firefox_binary):
     from invisible_playwright import InvisiblePlaywright
-    from invisible_playwright._reaper import find_processes, terminate
+    from invisible_core.process import find_processes, terminate
 
     session = InvisiblePlaywright(seed=42, binary_path=firefox_binary,
                                   headless=True)

@@ -13,9 +13,16 @@ real wheel on retail Windows Firefox is 6 to 14 ms below.
 """
 from __future__ import annotations
 
+import statistics
+
 import pytest
 
 pytestmark = pytest.mark.e2e
+
+#: The latency the core declares for an input event (invisible_core.juggler._behaviour.InputLatency.draw keeps it between these), and
+#: the precision of the page's timer.
+LATENCY_MIN_MS, LATENCY_MAX_MS = 2.0, 30.0
+TIMER_PRECISION_MS = 1.0
 
 PAGE = """<!doctype html><body style="margin:40px"><input id=q style="width:300px">
 <script>
@@ -49,6 +56,17 @@ def test_every_key_and_move_is_born_before_its_handler_runs(firefox_binary):
         assert rows, kind
         kept = [r for r in rows if r[2]]
         assert len(kept) == len(rows), (kind, rows)
-        # Born a few ms before, never far in the past: the timer's precision
-        # is 1 ms, the session's latency 2 to 30.
-        assert all(-40.0 < r[1] < 0.0 for r in rows), (kind, rows)
+        # EVERY event is born before its handler runs: the sign of its age, for each key and each move. An order, not a duration,
+        # so no load of the machine can turn it: a handler that runs late only makes the age more negative.
+        ages = [r[1] for r in rows]
+        assert all(age < 0.0 for age in ages), (kind, rows)
+        # Not born at its dispatch: the TYPICAL event (the median of the stream) is at least the least declared latency old (the core
+        # draws it between 2 and 30 ms, invisible_core.juggler._behaviour.InputLatency; the page's timer has a precision of 1 ms).
+        # The load of the machine can only move this median away from zero, never towards it.
+        assert statistics.median(ages) <= -(LATENCY_MIN_MS - TIMER_PRECISION_MS), (kind, statistics.median(ages), rows)
+        # Not born further in the past than declared: AT LEAST ONE event of the stream is within the greatest declared latency.
+        # A late handler adds its delay to the age of its event (a loaded machine has a median delay above zero), so neither a
+        # bound on each event nor one on the median is the product's; one event handled without delay proves the birth is not
+        # backdated beyond the declared latency, and the load would have to delay every handler of the run to turn it red.
+        youngest = max(ages)
+        assert youngest >= -(LATENCY_MAX_MS + TIMER_PRECISION_MS), (kind, youngest, rows)

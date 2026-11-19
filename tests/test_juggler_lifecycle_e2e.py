@@ -51,21 +51,27 @@ def test_the_four_states_are_reached_on_a_real_page(firefox_binary):
         c = conn.launch(firefox_binary, profile_dir, headless=True,
                          env=plan.env)
         try:
+            # ⛔ THE PAGE'S LISTENERS ARE BORN ON THE ATTACH, on the reader thread, before the next event of the session is delivered:
+            # the connection hands each event to the listeners of that moment (dispatch_event copies the list), so a Lifecycle built
+            # later from this thread missed the page's first frameAttached and Page.ready when they came in between, and waited for
+            # ever (Windows CI of 13/11, run 43373058301 part 2: "the engine never said Page.ready (frames seen: [])").
             sessions: dict = {}
             c.add_listener(lambda m, p, s: (
                 sessions.__setitem__(
-                    p["targetInfo"]["targetId"], p["sessionId"])
+                    p["targetInfo"]["targetId"], Lifecycle(c, p["sessionId"]))
                 if m == "Browser.attachedToTarget" else None))
             c.send("Browser.enable", {"attachToDefaultContext": True})
             ctx = c.send("Browser.createBrowserContext",
                          {"removeOnDetach": True})
             page = c.send("Browser.newPage",
                           {"browserContextId": ctx["browserContextId"]})
-            deadline = time.time() + 15
+            deadline = time.time() + 30
             while page["targetId"] not in sessions and time.time() < deadline:
                 time.sleep(0.02)
-            v = Lifecycle(c, sessions[page["targetId"]])
-            time.sleep(0.5)
+            v = sessions[page["targetId"]]
+            # Page.ready, not a fixed 0.5 s: the Windows census lost that race (run 43307193708).
+            v.wait_for_page_ready(30)
+            v.wait_for_main_frame(30)
 
             result = v.goto("http://127.0.0.1:%d/" % port,
                             until="load", timeout=30)
@@ -78,8 +84,8 @@ def test_the_four_states_are_reached_on_a_real_page(firefox_binary):
             assert v.inflight == 0
 
             tree = v.frame_tree()
-            children = [d for d in tree.values() if d["parent"]]
-            assert len(children) == 1, tree
+            iframes = [d for d in tree.values() if d["parent"]]    # the frames of the page's tree: its one <iframe>, not a count of processes
+            assert len(iframes) == 1, tree
             assert "load" in tree[v.main_frame]["states"]
         finally:
             c.close()

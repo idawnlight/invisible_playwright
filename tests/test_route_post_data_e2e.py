@@ -4,7 +4,7 @@ The known-bad input, measured on 2026-10-03: `request.post_data` was None for
 every POST, including a page `fetch()` with a JSON body, both inside a context
 route handler and on the `request` event fired for the same request. The
 engine's `NetworkObserver.js` sent `postData: undefined` for every request
-(feder-cr/invisible_core#90), so a route guard could check a POST's URL and
+(oss-invisible/core#90), so a route guard could check a POST's URL and
 never its body. From 2026-10-03 the engine read the body while interception
 was on for the page or its context; from firefox-49 it reads it always, as
 Playwright's does, so `request.post_data` holds without a route too.
@@ -84,9 +84,9 @@ def test_a_routed_post_carries_its_body(firefox_binary, where):
             page = context.new_page()
             page.on("request", on_request)
             (context if where == "context" else page).route("**/*", guard)
-            page.goto(url, wait_until="load", timeout=20_000)
+            page.goto(url, wait_until="load", timeout=30_000)
             page.wait_for_function("document.title.startsWith('post:')",
-                                   timeout=10_000)
+                                   timeout=30_000)
             assert page.title() == "post:204", page.title()
     finally:
         srv.shutdown()
@@ -118,9 +118,9 @@ def test_without_a_route_the_request_still_carries_its_body(firefox_binary):
             page = browser.new_context().new_page()
             page.on("request", lambda r: on_event.append(r.post_data)
                     if r.method == "POST" else None)
-            page.goto(url, wait_until="load", timeout=20_000)
+            page.goto(url, wait_until="load", timeout=30_000)
             page.wait_for_function("document.title.startsWith('post:')",
-                                   timeout=10_000)
+                                   timeout=30_000)
             assert page.title() == "post:204", page.title()
     finally:
         srv.shutdown()

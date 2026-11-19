@@ -24,10 +24,8 @@ from invisible_core.prefs import translate_profile_to_prefs
 # Keys every Profile-derived prefs dict MUST carry.
 #
 # CAREFUL: this list is a DUPLICATE of a contract that belongs to another
-# package. `invisible_core.prefs` is a pure alias shim for
-# `invisible_core.prefs`, so this file tests the CORE's function through an
-# alias - against whichever core version pip resolved, which on CI is the
-# PUBLISHED one and locally is the checkout.
+# package. This file tests the CORE's function against whichever core version
+# pip resolved, which on CI is the PUBLISHED one and locally is the checkout.
 #
 # That difference made CI red on 2026-07-27. Two codec prefs were renamed to
 # their real Firefox spellings (`media.webm.enabled` / `media.mp4.enabled`) in
@@ -56,7 +54,6 @@ _REQUIRED_PREFS_KEYS = (
     "intl.accept_languages",
     "intl.locale.requested",
     "zoom.stealth.fpp.hw_seed",
-    "zoom.stealth.webrtc.host_ip",
     "zoom.stealth.webgl.renderer",
     "zoom.stealth.webgl.vendor",
     "webgl.msaa-samples",
@@ -120,7 +117,9 @@ def test_socks5_proxy_mutates_prefs_then_pipeline_still_valid():
                  "network.proxy.socks_username", "network.proxy.socks_password",
                  "network.proxy.http", "network.proxy.ssl"):
         assert name not in prefs, name
-    assert prefs["zoom.stealth.dns.no_local_resolution"] is True
+    # Names are resolved by Firefox's own DoH, through the session proxy: no gate of ours; the core declares the provider only.
+    assert "zoom.stealth.dns.no_local_resolution" not in prefs
+    assert "network.trr.mode" not in prefs and "network.trr.uri" in prefs   # the provider is the core's, the state the engine's
 
     # Profile-derived keys must still be present after proxy mutation.
     #
@@ -334,8 +333,13 @@ def test_linux_xvfb_workarounds_with_socks_proxy(monkeypatch):
 
     assert pw_proxy is not None      # a single path, here too
     # Xvfb workarounds present.
-    assert prefs["gfx.webrender.all"] is False
-    assert prefs["webgl.force-enabled"] is True
+    assert "gfx.webrender.all" not in prefs   # core 63.68.0: a pref that does nothing is not declared
+    # WebGL2 is not the host adapter's decision: since invisible-core 9d74a77 the
+    # engine answers the blocklist from the declared outcomes, and
+    # webgl.force-enabled left the core.
+    assert "webgl.force-enabled" not in prefs
+    status = dict(e.split("|")[:2] for e in prefs["zoom.stealth.gfx.feature_status"].split(","))
+    assert status["WEBGL2"] == "1"
     # Windows-only sandbox key absent on Linux even with virtual_display=True.
     assert "security.sandbox.gpu.level" not in prefs
     # GPU renderer is spoofed from the validated WebGL persona (a coherent Windows
@@ -354,7 +358,9 @@ def test_linux_xvfb_workarounds_with_socks_proxy(monkeypatch):
     # The proxy layer no longer writes any endpoint, and what it does write - the
     # leak-channel prefs - does not trample the Linux prefs above.
     assert "network.proxy.type" not in prefs
-    assert prefs["zoom.stealth.dns.no_local_resolution"] is True
+    # Names are resolved by Firefox's own DoH, through the session proxy: no gate of ours; the core declares the provider only.
+    assert "zoom.stealth.dns.no_local_resolution" not in prefs
+    assert "network.trr.mode" not in prefs and "network.trr.uri" in prefs   # the provider is the core's, the state the engine's
 
 
 # ──────────────────────────────────────────────────────────────────────

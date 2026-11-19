@@ -125,7 +125,7 @@ install` run" question specifically for the engine this project ships. It does n
 change how Playwright itself resolves executables for any other browser, and the same
 environment mismatches above (wrong OS in a Docker build, a filesystem that resets
 between CI stages, missing system libraries) apply identically to any browser process
-launched in that environment, patched or stock. Pointing `INVPW_BINARY_PATH` at a binary
+launched in that environment, patched or stock. Passing `binary_path=` for a binary
 you already manage yourself skips the automatic download entirely if your deployment
 already solves this problem another way.
 
@@ -188,7 +188,7 @@ another launch-time reliability issue with its own distinct cause.
 
 ---
 
-*Written while maintaining [invisible_playwright](https://github.com/feder-cr/invisible_playwright),
+*Written while maintaining [invisible_playwright](https://github.com/oss-invisible/playwright),
 a Firefox patched at the C++ level driven by stock Playwright. This wrapper manages its
 own engine download so this specific error class does not apply to it directly, but the
 same platform and filesystem mismatches apply to any browser process in the same

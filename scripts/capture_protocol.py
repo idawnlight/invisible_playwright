@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
-import os
 import pathlib
 import socketserver
 import sys
@@ -31,19 +30,6 @@ import threading
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-
-# ⛔ THE DRIVER ARM IMPORTS AN OLDER TREE, and the line above would otherwise
-# beat it. `INVPW_DRIVER_TREE` names a git worktree at the last commit that
-# carried the Node driver, and on the driver arm that tree's package has to WIN
-# the import - a `PYTHONPATH` from the caller does not, because the insert
-# above runs afterwards and goes in front of it.
-#
-# ⛔ Only the PACKAGE comes from there. This recorder stays this tree's: two
-# traces produced by two different instruments measure the instruments, which
-# is the mistake the comparison exists to avoid.
-if (os.environ.get("INVPW_TRANSPORT") == "driver"
-        and os.environ.get("INVPW_DRIVER_TREE")):
-    sys.path.insert(0, str(pathlib.Path(os.environ["INVPW_DRIVER_TREE"]) / "src"))
 
 PAGE = b"""<!doctype html><html><head><title>capture</title></head><body>
 <button id=b onclick="this.textContent='clicked'">press</button>

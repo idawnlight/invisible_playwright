@@ -108,7 +108,7 @@ is on the [installation](installation.md) page.
 that path is one the cache action restores. On a corporate or rate-limited runner that
 refuses anonymous GitHub downloads, `STEALTHFOX_GITHUB_TOKEN` lets the fetch authenticate;
 both variables are documented in [configuration](configuration.md). If you already ship a
-binary in the image, `INVPW_BINARY_PATH` skips the download entirely.
+binary in the image, `binary_path=` skips the download entirely.
 
 ## The real limiting factor: the runner's IP
 
@@ -218,7 +218,7 @@ and none is needed.
 ## Sources
 
 - This project's own CI runs and the documented environment variables
-  (`INVISIBLE_PLAYWRIGHT_CACHE_DIR`, `STEALTHFOX_GITHUB_TOKEN`, `INVPW_BINARY_PATH`) on
+  (`INVISIBLE_PLAYWRIGHT_CACHE_DIR`, `STEALTHFOX_GITHUB_TOKEN`) on
   the [configuration](configuration.md) page.
 - The exit-address reading taken from inside a headless runner job, compared against the
   same script run from a residential connection.
@@ -231,7 +231,7 @@ and none is needed.
 
 ---
 
-*Written while maintaining [invisible_playwright](https://github.com/feder-cr/invisible_playwright),
+*Written while maintaining [invisible_playwright](https://github.com/oss-invisible/playwright),
 a Firefox patched at the C++ level driven by stock Playwright. It makes the browser look
 like a real person's, which is most of the battle and not all of it: on CI the runner's
 IP is the part you still have to fix yourself.*

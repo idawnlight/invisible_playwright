@@ -31,6 +31,8 @@ import time
 
 import pytest
 
+from _waits import wait_until
+
 SPA = (b"<!doctype html><html><head><title>spa</title></head><body>spa"
        b"<script>addEventListener('load', () => {"
        b" history.pushState({}, '', '/spa/route');"
@@ -79,13 +81,14 @@ def test_networkidle_goto_leaves_a_quiet_spa_and_answers_for_the_new_page(firefo
         with InvisiblePlaywright(seed=4244, binary_path=firefox_binary,
                                  headless=True) as browser:
             page = browser.new_context().new_page()
-            first = page.goto(spa_url, wait_until="networkidle", timeout=20_000)
+            first = page.goto(spa_url, wait_until="networkidle", timeout=30_000)
             assert first is not None and first.status == 200, first
-            time.sleep(1.0)  # the SPA has pushed its routes and gone quiet
-            assert page.url.endswith("/spa/later"), page.url
+            # until the SPA has pushed its last route (a condition with a deadline, not 1 s: its 50 ms timer runs
+            # late on a loaded machine); after that it has nothing left to do, so the page is quiet
+            assert wait_until(lambda: page.url.endswith("/spa/later"), 30, lambda: page.wait_for_timeout(50)), page.url
 
             response = page.goto(slow_url, wait_until="networkidle",
-                                 timeout=20_000)
+                                 timeout=30_000)
             assert page.url == slow_url, (
                 "goto(networkidle) returned while still on %s" % page.url)
             assert response is not None, (

@@ -20,6 +20,8 @@ import threading
 
 import pytest
 
+from _waits import wait_until
+
 pytestmark = pytest.mark.e2e
 
 PAGE = b"<!doctype html><html><head><title>f</title></head><body>f</body></html>"
@@ -27,6 +29,7 @@ PAGE = b"<!doctype html><html><head><title>f</title></head><body>f</body></html>
 
 def _site():
     seen, arrived, release = [], threading.Event(), threading.Event()
+    served = threading.Event()   # the favicon's answer has been written: it is a request that ended
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -37,11 +40,15 @@ def _site():
                 body, ctype = b"\x00\x00\x01\x00", "image/x-icon"
             else:
                 body, ctype = PAGE, "text/html"
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            finally:
+                if self.path == "/favicon.ico":
+                    served.set()
 
         def log_message(self, *a):
             pass
@@ -49,14 +56,14 @@ def _site():
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv, seen, arrived, release
+    return srv, seen, arrived, release, served
 
 
 @pytest.mark.parametrize("routed", [False, True], ids=["no-route", "route-on-everything"])
 def test_the_favicon_goes_to_the_site_and_nothing_of_it_to_the_client(firefox_binary, routed):
     from invisible_playwright import InvisiblePlaywright
 
-    srv, seen, arrived, release = _site()
+    srv, seen, arrived, release, served = _site()
     url = "http://127.0.0.1:%d/" % srv.server_address[1]
     told, routes = [], []
     try:
@@ -77,8 +84,13 @@ def test_the_favicon_goes_to_the_site_and_nothing_of_it_to_the_client(firefox_bi
             # and nothing above noticed: networkidle reaches the client from
             # the lifecycle's timer, not from the reader. A round trip to the
             # engine does need the reader.
-            page.wait_for_function("() => document.title === 'f'", timeout=10000)
+            page.wait_for_function("() => document.title === 'f'", timeout=30000)
             release.set()
+            # What a client could be told of the favicon comes when its answer is over: wait for the site to have
+            # written it (a condition with a deadline), then leave the client a short window to say anything. The
+            # window only looks for something that must not be there; it cannot make a healthy run red.
+            assert wait_until(served.is_set, 30, lambda: page.wait_for_timeout(50)), (
+                "the site never finished answering the favicon", seen)
             page.wait_for_timeout(500)
     finally:
         release.set()

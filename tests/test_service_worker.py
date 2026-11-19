@@ -50,10 +50,10 @@ def test_service_worker_registration_does_not_crash_page(page, fixture_server):
     crashed = {"v": False}
     page.on("crash", lambda p: crashed.__setitem__("v", True))
 
-    page.goto(f"{fixture_server}/", timeout=15_000)
+    page.goto(f"{fixture_server}/", timeout=30_000)
     # Wait for SW to register (or fail cleanly)
     page.wait_for_function(
-        "window.__swState !== 'loading'", timeout=10_000
+        "window.__swState !== 'loading'", timeout=30_000
     )
     state = page.evaluate("window.__swState")
     assert not crashed["v"], f"page crashed during SW registration (state={state!r})"
@@ -71,12 +71,12 @@ def test_page_with_sw_can_navigate_repeatedly(page, fixture_server):
     crashed = {"v": False}
     page.on("crash", lambda p: crashed.__setitem__("v", True))
 
-    page.goto(f"{fixture_server}/", timeout=15_000)
-    page.wait_for_function("window.__swState !== 'loading'", timeout=10_000)
+    page.goto(f"{fixture_server}/", timeout=30_000)
+    page.wait_for_function("window.__swState !== 'loading'", timeout=30_000)
 
     # 5 reloads - the SW fetch handler runs each time
     for _ in range(5):
-        page.reload(timeout=15_000)
+        page.reload(timeout=30_000)
         assert not crashed["v"]
     assert page.evaluate("document.title") == "sw-host"
 
@@ -86,8 +86,8 @@ def test_fetch_through_sw_returns_sw_synthesized_response(page, fixture_server):
     """The SW intercepts `/from-sw` and synthesizes a response without
     hitting the network. Verifies the SW fetch path is functional - this
     is the exact flow that crashed on a real site's login page."""
-    page.goto(f"{fixture_server}/", timeout=15_000)
-    page.wait_for_function("window.__swState === 'registered'", timeout=10_000)
+    page.goto(f"{fixture_server}/", timeout=30_000)
+    page.wait_for_function("window.__swState === 'registered'", timeout=30_000)
 
     # First request to /from-sw routes through the SW
     body = page.evaluate("""async (base) => {
@@ -112,8 +112,8 @@ def test_sw_fall_through_to_network_does_not_crash(page, fixture_server):
     crashed = {"v": False}
     page.on("crash", lambda p: crashed.__setitem__("v", True))
 
-    page.goto(f"{fixture_server}/", timeout=15_000)
-    page.wait_for_function("window.__swState === 'registered'", timeout=10_000)
+    page.goto(f"{fixture_server}/", timeout=30_000)
+    page.wait_for_function("window.__swState === 'registered'", timeout=30_000)
 
     # /from-network is NOT intercepted by SW - exercises the fall-through
     body = page.evaluate("""async (base) => {
@@ -131,8 +131,8 @@ def test_sw_unregister_then_register_again(page, fixture_server):
     crashed = {"v": False}
     page.on("crash", lambda p: crashed.__setitem__("v", True))
 
-    page.goto(f"{fixture_server}/", timeout=15_000)
-    page.wait_for_function("window.__swState === 'registered'", timeout=10_000)
+    page.goto(f"{fixture_server}/", timeout=30_000)
+    page.wait_for_function("window.__swState === 'registered'", timeout=30_000)
 
     # Unregister all SWs then register again
     result = page.evaluate("""async () => {

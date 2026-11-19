@@ -103,13 +103,12 @@ build runner mounts a persistent volume, point
 entirely - `fetch` checks the cached tree against the seal first and only
 downloads if it does not match, so a warm cache makes the step nearly free.
 
-The three environment variables that matter in a container build:
+The two environment variables that matter in a container build:
 
 | Environment variable | What it does | Documented in |
 |---|---|---|
 | `STEALTHFOX_GITHUB_TOKEN` | Authenticates the engine download when a CI runner or corporate network rate-limits or blocks anonymous GitHub downloads | [Configuration](configuration.md) |
 | `INVISIBLE_PLAYWRIGHT_CACHE_DIR` | Points the binary cache at a path the build persists between runs, so a rebuild skips the ~238 MB download | [Configuration](configuration.md) |
-| `INVPW_BINARY_PATH` | Uses a binary already baked into the image and skips the `fetch` step entirely | [Configuration](configuration.md) |
 
 ## Running headless in the container
 
@@ -223,8 +222,8 @@ container would answer with the container's own defaults instead, which
 by field.
 
 **Can I skip the download and bring my own binary into the image?** Yes,
-set `INVPW_BINARY_PATH` to a binary already baked into the image and the
-fetch step is skipped entirely. Covered in
+pass `binary_path=` for a binary already baked into the image and the
+fetch step is skipped entirely. The binary must be the sealed build; see
 [Configuration](configuration.md).
 
 **Do I need a real GPU for this to work in a container?** Not for the
@@ -238,8 +237,8 @@ is a rendering-quality question, not a detection one.
   the detection-level page this tutorial complements.
 - [Installation](installation.md) and the [CLI reference](cli-reference.md)
   for the exact `fetch` behaviour and environment variables used above.
-- [Configuration](configuration.md) for `INVISIBLE_PLAYWRIGHT_CACHE_DIR`,
-  `INVPW_BINARY_PATH` and `STEALTHFOX_GITHUB_TOKEN`.
+- [Configuration](configuration.md) for `INVISIBLE_PLAYWRIGHT_CACHE_DIR`
+  and `STEALTHFOX_GITHUB_TOKEN`.
 - Playwright documentation, [Docker](https://playwright.dev/python/docs/docker), for the
   base image and its version tags, retrieved 2026-08-28.
 - Docker Engine reference, [`docker run`](https://docs.docker.com/engine/containers/run/),
@@ -256,7 +255,7 @@ needs to reproduce one specific machine rather than any seeded one.
 
 ---
 
-*From the notes of [invisible_playwright](https://github.com/feder-cr/invisible_playwright),
+*From the notes of [invisible_playwright](https://github.com/oss-invisible/playwright),
 a Firefox patched at the C++ level and driven by stock Playwright. The
 engine fetch and the font bundle are the two things this page leans on
 that a plain Playwright container does not have.*

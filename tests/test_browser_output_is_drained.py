@@ -22,6 +22,11 @@ from invisible_core.juggler.connection import (
     Connection, ProcessOutput, TargetClosedError, _READY)
 
 
+#: How long a test looks for what a local thread of this process does (a read of a pipe, a write that ends): 30 s, the far end of
+#: any stall of a loaded runner. Only a thread that never does it makes the test wait this long, and then it is red.
+_LOOK_FOR = 30
+
+
 class _Alive:
     """A process that has not exited."""
 
@@ -49,11 +54,12 @@ def test_output_after_readiness_is_still_read_so_the_writer_never_blocks():
     done = threading.Event()
     threading.Thread(target=_writer, args=(w, lines, done), daemon=True).start()
 
-    assert output.wait_for_ready(_Alive(), 5.0) is True
-    assert done.wait(10), (
+    # 30 s is the hang detector, not a speed: a reader that never reads leaves the wait running to it and the test red.
+    assert output.wait_for_ready(_Alive(), _LOOK_FOR) is True
+    assert done.wait(_LOOK_FOR), (
         "the writer is still blocked: nobody read the pipe after the readiness "
         "line, which is how the browser froze ([B229])")
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + _LOOK_FOR
     while output.tail(1) != ["the last one"] and time.monotonic() < deadline:
         time.sleep(0.02)
     assert output.tail(1) == ["the last one"], output.tail(3)
@@ -64,10 +70,24 @@ def test_readiness_that_never_comes_is_answered_with_false_not_a_hang():
     r, w = os.pipe()
     output = ProcessOutput(os.fdopen(r, "rb"))
     os.write(w, b"something else\n")
+    # The wait runs on a thread of its own so that "a hang" is a join that does not come back, whatever the speed of the
+    # machine; the verdict is "False, after the 0.3 s it was given", never a stopwatch on how late it came.
+    asked: dict = {}
+
+    def ask():
+        asked["answer"] = output.wait_for_ready(_Alive(), 0.3)
+        asked["at"] = time.monotonic()
+
     started = time.monotonic()
-    assert output.wait_for_ready(_Alive(), 0.3) is False
-    assert time.monotonic() - started < 2
-    os.close(w)
+    waiter = threading.Thread(target=ask, daemon=True)
+    waiter.start()
+    waiter.join(_LOOK_FOR)
+    try:
+        assert not waiter.is_alive(), "wait_for_ready(0.3 s) was still waiting after %d s: a hang, not an answer" % _LOOK_FOR
+        assert asked["answer"] is False
+        assert asked["at"] - started >= 0.3, "answered False before the 0.3 s it was given"
+    finally:
+        os.close(w)
 
 
 def test_a_pipe_that_closes_mid_session_says_what_the_browser_printed():
@@ -81,11 +101,11 @@ def test_a_pipe_that_closes_mid_session_says_what_the_browser_printed():
     from_browser_r, from_browser_w = os.pipe()
     c = Connection(to_browser_w, from_browser_r, None)
     c.output = output
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + _LOOK_FOR
     while not output.tail() and time.monotonic() < deadline:
         time.sleep(0.02)
     os.close(from_browser_w)                  # the browser side goes away
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + _LOOK_FOR
     while not c._closed and time.monotonic() < deadline:
         time.sleep(0.02)
     with pytest.raises(TargetClosedError) as e:

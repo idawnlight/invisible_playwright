@@ -64,7 +64,7 @@ def test_navigation_wait(firefox_binary, redirect_origins, wait, requestless):
         page.goto(start + "/start")
         url = destination if requestless else start + "/redirect"
         if wait == "expect_navigation":
-            with page.expect_navigation(url=destination, timeout=5000) as navigation:
+            with page.expect_navigation(url=destination, timeout=30000) as navigation:
                 page.evaluate("url => { location.href = url; }", url)
             response = navigation.value
             if requestless:
@@ -74,5 +74,5 @@ def test_navigation_wait(firefox_binary, redirect_origins, wait, requestless):
                 assert response.url == destination
         else:
             page.evaluate("url => { setTimeout(() => location.href = url, 100); }", url)
-            page.wait_for_url(destination, timeout=5000)
+            page.wait_for_url(destination, timeout=30000)
         assert page.url == page.evaluate("location.href") == destination

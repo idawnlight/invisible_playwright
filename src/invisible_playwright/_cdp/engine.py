@@ -168,11 +168,11 @@ class DesktopHardwareProfile:
                 if k in pin and pin[k] is not None:
                     cpu_perf = int(pin[k])
                     break
-            for k in ("webgl.vendor", "webglVendor"):
+            for k in ("gpu.vendor", "webgl.vendor", "webglVendor"):
                 if k in pin and pin[k]:
                     vendor = str(pin[k])
                     break
-            for k in ("webgl.renderer", "webglRenderer"):
+            for k in ("gpu.renderer", "webgl.renderer", "webglRenderer"):
                 if k in pin and pin[k]:
                     renderer = str(pin[k])
                     break

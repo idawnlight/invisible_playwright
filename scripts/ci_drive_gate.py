@@ -3,8 +3,20 @@
 
 A raw `firefox --screenshot` proves nothing about automation: a juggler-less
 binary renders a screenshot just fine and ships broken (firefox-8 did exactly
-that). This DRIVES the binary the way users will - Playwright launches it over
-the juggler pipe and exercises real paths.
+that). This DRIVES the binary the way users will - the wrapper (and the core under
+it) launches it over the juggler pipe and exercises real paths.
+
+⛔ THROUGH THE CORE, NOT THROUGH BARE PLAYWRIGHT. Since firefox-63 the engine holds
+every channel that asks the proxy service until the client has said how the
+session leaves the host (`Browser.setBrowserProxy`, or the explicit
+`Browser.setNoBrowserProxy` of a session without a proxy): nothing may leave the
+host before that. Stock Playwright sends the first only when it is given a proxy,
+so a bare `p.firefox.launch_persistent_context(executable_path=...)` navigates
+nowhere: run 43134774602, `Page.goto: Timeout 30000ms` on every leg, three
+attempts. The core's launch sends the decision FIRST, and declares the first run
+(terms of use, pre-onboarding) that this script used to copy into user.js, so
+the copy is gone with it. The job installs the core under test (core_ref, from
+git) and the wrapper, and seals the binary, before this script runs.
 
 Three levels (see `--click` / `--full`):
 
@@ -133,12 +145,14 @@ def _drive(exe: str, url: str, level: str) -> str:
     """One run. `level` is "smoke", "click" or "full". Returns the UA."""
     interacts = level in ("click", "full")
     full = level == "full"
-    from playwright.sync_api import sync_playwright
+    from invisible_playwright import InvisiblePlaywright
 
-    with sync_playwright() as p:
-        browser = p.firefox.launch(executable_path=exe, headless=True)
+    # The core declares the first run and sends the session's road before anything else; the seal of the binary is
+    # INVISIBLE_SEAL_FILE (the job sets it), and `binary_path` is the binary under test.
+    with InvisiblePlaywright(seed=42, binary_path=exe, headless=True, humanize=False) as browser:
+        ctx = browser.new_context()
         try:
-            page = browser.new_page()
+            page = ctx.new_page()
             resp = page.goto(url, wait_until="load")
             assert resp and resp.ok, f"navigation to {url} failed: {resp.status if resp else 'no response'}"
             ua = page.evaluate("() => navigator.userAgent")
@@ -163,7 +177,7 @@ def _drive(exe: str, url: str, level: str) -> str:
                 inter["langs"] = page.evaluate("() => navigator.languages.length")
                 inter["plugins"] = page.evaluate("() => navigator.plugins instanceof PluginArray")
         finally:
-            browser.close()
+            ctx.close()
 
     # SMOKE asserts (always).
     assert "Firefox" in ua, f"unexpected UA (binary not driving correctly): {ua!r}"
@@ -171,7 +185,7 @@ def _drive(exe: str, url: str, level: str) -> str:
     assert not webdriver, f"navigator.webdriver leaked True (stealth regression): {webdriver!r}"
 
     if interacts:
-        assert inter["clicked"] == 1, "page.click() did not fire the click listener - mouse-event synthesis broken (firefox-2 class), or a chrome overlay is swallowing input (terms-of-use modal: see browser/app/profile/firefox.js, termsofuse.acceptedDate)"
+        assert inter["clicked"] == 1, "page.click() did not fire the click listener - mouse-event synthesis broken (firefox-2 class), or a chrome overlay is swallowing input (terms-of-use modal: see FIRST_RUN above)"
         assert inter["moves"] >= 1, "page.mouse.move() produced no mousemove - jugglerSendMouseEvent regression, or a chrome overlay is swallowing input"
     if full:
         assert inter["typed"] == "ok", f"page.keyboard.type() failed: {inter['typed']!r}"

@@ -91,7 +91,7 @@ class _Socks5AuthRecorder:
             if cmd != 0x01:                        # only CONNECT
                 conn.sendall(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00"); conn.close(); return
             try:
-                up = socket.create_connection((addr, port), timeout=15)
+                up = socket.create_connection((addr, port), timeout=30)
             except OSError:
                 conn.sendall(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00"); conn.close(); return
             conn.sendall(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")

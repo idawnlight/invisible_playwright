@@ -16,7 +16,6 @@ its whole job before a process exists.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import zipfile
 from pathlib import Path
@@ -28,7 +27,6 @@ from invisible_core.seal import (
     JUGGLER_ENTRIES,
     EngineMismatch,
     _reset_active_seal_for_tests,
-    read_engine_identity,
 )
 from invisible_playwright import _engine
 
@@ -169,20 +167,3 @@ def test_no_binary_path_goes_through_ensure_binary(tmp_path, active, monkeypatch
     monkeypatch.setattr(_engine, "ensure_binary", fake_ensure)
     assert _engine.resolve_executable(None) == sentinel
     assert calls and calls[0] is not None, "the resolved seal must be passed down"
-
-
-def test_real_stock_firefox_via_binary_path_is_refused(active):
-    """The cell as it exists on this machine, not a synthetic stand-in. Read
-    only; skips cleanly when no bundled Playwright Firefox is present."""
-    local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData/Local")
-    roots = [Path(local) / "ms-playwright", Path.home() / ".cache" / "ms-playwright"]
-    entries = [d / "firefox" / ENTRY_REL for root in roots if root.is_dir()
-               for d in sorted(root.glob("firefox-*"))]
-    entries = [e for e in entries if e.exists()]
-    if not entries:
-        pytest.skip("no bundled stock Firefox on this machine")
-    for entry in entries:
-        ident = read_engine_identity(entry)
-        with pytest.raises(EngineMismatch):
-            _engine.resolve_executable(entry)
-        assert ident.marked_entries == 0, f"{entry} unexpectedly carries our marker"

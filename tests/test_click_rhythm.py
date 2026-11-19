@@ -32,10 +32,20 @@ class _Conn:
 
 @pytest.fixture()
 def slept(monkeypatch):
-    """Every wait the actions ask for, in SECONDS, without taking any."""
+    """Every wait the actions ask for, in SECONDS, without taking any.
+
+    The clock advances when something sleeps and only then: a click is one stroke whose presses go "at" instants on
+    `time.monotonic`, so a fake sleep that left the clock where it was would be waited for again at the stroke's end."""
     taken: list = []
-    monkeypatch.setattr("invisible_core.juggler.actions.time.sleep",
-                        taken.append)
+    now = [1000.0]
+
+    def sleep(seconds):
+        taken.append(seconds)
+        now[0] += max(0.0, seconds)
+
+    monkeypatch.setattr("invisible_core.juggler.actions.time.sleep", sleep)
+    monkeypatch.setattr("invisible_core.juggler.actions.time.monotonic",
+                        lambda: now[0])
     return taken
 
 
@@ -91,7 +101,7 @@ def test_the_delay_a_caller_passes_is_MILLISECONDS(slept):
     It used to be dropped here with `button` and `modifiers`."""
     a = _actions()
     a._click_at_point((10.0, 10.0), delay_ms=150.0)
-    assert slept == [0.150]
+    assert slept == pytest.approx([0.150])
 
 
 def test_two_clicks_in_a_session_are_not_the_same_length(slept):

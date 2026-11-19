@@ -106,7 +106,7 @@ def test_ignore_https_errors_loads_a_self_signed_page(firefox_binary, tmp_path):
 
             ctx = browser.new_context(ignore_https_errors=True)
             page = ctx.new_page()
-            page.goto(url, timeout=15_000)
+            page.goto(url, timeout=30_000)
             assert page.title() == TITLE.decode()
     finally:
         srv.close()

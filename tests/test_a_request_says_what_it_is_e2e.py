@@ -73,8 +73,8 @@ def test_each_kind_of_request_is_named_by_the_engine(firefox_binary):
             page = browser.new_page()
             page.on("request", lambda r: seen.setdefault(
                 r.url[len(base):] or "/", r.resource_type))
-            page.goto(base + "/", wait_until="load", timeout=20_000)
-            page.wait_for_function("document.title === 'done'", timeout=10_000)
+            page.goto(base + "/", wait_until="load", timeout=30_000)
+            page.wait_for_function("document.title === 'done'", timeout=30_000)
     finally:
         srv.shutdown()
 

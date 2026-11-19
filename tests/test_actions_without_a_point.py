@@ -109,9 +109,9 @@ def test_hidden_elements_take_the_actions_playwright_allows(firefox_binary):
                              humanize=False, headless=True) as browser:
         page = browser.new_page()
         page.set_content(PAGE)
-        page.dispatch_event("#b", "click", timeout=4000)
-        page.focus("#t", timeout=4000)
-        page.locator("#t").blur(timeout=4000)
+        page.dispatch_event("#b", "click", timeout=30_000)
+        page.focus("#t", timeout=30_000)
+        page.locator("#t").blur(timeout=30_000)
         # A display:none input cannot take focus, so only the dispatched
         # click reaches a listener; what matters is that none of the three
         # timed out asking a hidden element for a point.

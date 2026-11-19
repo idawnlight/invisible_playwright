@@ -86,9 +86,9 @@ def test_a_route_guard_sees_and_stops_every_post(firefox_binary, where):
             context = browser.new_context()
             page = context.new_page()
             (context if where == "context" else page).route("**/*", guard)
-            page.goto(url, wait_until="load", timeout=20_000)
+            page.goto(url, wait_until="load", timeout=30_000)
             page.wait_for_function("document.title.startsWith('post:')",
-                                   timeout=10_000)
+                                   timeout=30_000)
             assert page.title() == "post:blocked", page.title()
             # routing leaves nothing in the page: the container is the
             # browser's own, with no property planted on it

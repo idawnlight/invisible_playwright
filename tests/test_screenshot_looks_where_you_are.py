@@ -38,6 +38,7 @@ import zlib
 import pytest
 
 from _servers import LocalServer
+from _waits import wait_until
 
 # White down to 1000, one RED band 1000..1200, black to 4000, and a GREEN
 # column at x=1400 so the same trick works sideways. Reading the colour at a
@@ -184,7 +185,10 @@ def shots(tmp_path_factory, firefox_binary):
             page.screenshot(path=str(out / "top.png"))
             page.screenshot(path=str(out / "whole.png"), full_page=True)
             page.evaluate("() => window.scrollTo(0, 1000)")
-            page.wait_for_timeout(300)
+            # until the page IS at 1000 (the condition that makes the photograph below a photograph of where it
+            # scrolled to), not 300 ms; if it never lands the image is the wrong place and the pixel test says so
+            wait_until(lambda: page.evaluate("() => Math.round(window.scrollY)") == 1000, 30,
+                       lambda: page.wait_for_timeout(50))
             page.screenshot(path=str(out / "scrolled.png"))
             page.screenshot(path=str(out / "clipped.png"),
                             clip={"x": 0, "y": 1000, "width": 400, "height": 200})
@@ -193,7 +197,11 @@ def shots(tmp_path_factory, firefox_binary):
             # reads back where it actually went rather than assuming, which
             # is the same mistake in miniature as the defect it covers.
             page.evaluate("() => window.scrollTo(1400, 0)")
-            page.wait_for_timeout(300)
+            # until the page IS where the clamp puts it (the scrollable width, at most 1400), not 300 ms; if it never lands, `landed` below is
+            # read at the deadline and the assertions on it say so
+            wait_until(lambda: page.evaluate(
+                "() => Math.round(window.scrollX) === Math.round(Math.min(1400, document.documentElement.scrollWidth"
+                " - document.documentElement.clientWidth))"), 30, lambda: page.wait_for_timeout(50))
             landed = page.evaluate("() => Math.round(window.scrollX)")
             page.screenshot(path=str(out / "sideways.png"))
             wide = page.evaluate(

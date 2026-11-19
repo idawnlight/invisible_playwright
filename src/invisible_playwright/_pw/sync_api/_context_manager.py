@@ -58,9 +58,7 @@ Please use the Async API instead."""
         dispatcher_fiber = MainGreenlet(greenlet_main)
 
         # MODIFIED by invisible_playwright: the transport is the in-process
-        # server, from `make_transport`. The Node driver was removed on
-        # 2026-08-28, and `INVPW_TRANSPORT=driver` is refused with a message
-        # that says so - see `_juggler/transport.py`.
+        # server, from `make_transport` (`_juggler/transport.py`).
         transport = make_transport(self._loop)
         self._connection = Connection(
             dispatcher_fiber,
@@ -68,15 +66,6 @@ Please use the Async API instead."""
             transport,
             self._loop,
         )
-        # MODIFIED by invisible_playwright: the one bridge between the two
-        # object graphs. A FUSED type (Dialog, 2026-08-29) has no guid and no
-        # `__create__` of its own, and still needs to reach the live impl-side
-        # object a sibling guid corresponds to - see
-        # `InProcessTransport.bind_impl_objects` for why. `_connection._objects`
-        # is a reference, not a snapshot: it always reflects what has been
-        # created so far, including everything created after this line runs.
-        transport.bind_impl_objects(self._connection._objects,
-                                   self._connection.deliver_event)
 
         g_self = greenlet.getcurrent()
 

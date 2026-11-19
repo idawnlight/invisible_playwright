@@ -50,16 +50,16 @@ def test_the_client_side_networkidle_waits_resolve(firefox_binary):
         with InvisiblePlaywright(seed=4245, binary_path=firefox_binary,
                                  headless=True) as browser:
             page = browser.new_context().new_page()
-            page.goto(base + "/first", wait_until="load", timeout=20_000)
-            page.wait_for_load_state("networkidle", timeout=10_000)
+            page.goto(base + "/first", wait_until="load", timeout=30_000)
+            page.wait_for_load_state("networkidle", timeout=30_000)
 
-            page.goto(base + "/plain", wait_until="load", timeout=20_000)
+            page.goto(base + "/plain", wait_until="load", timeout=30_000)
             page.wait_for_url(base + "/plain", wait_until="networkidle",
-                              timeout=10_000)
+                              timeout=30_000)
 
-            page.goto(base + "/first", wait_until="networkidle", timeout=20_000)
+            page.goto(base + "/first", wait_until="networkidle", timeout=30_000)
             with page.expect_navigation(wait_until="networkidle",
-                                        timeout=10_000):
+                                        timeout=30_000):
                 page.click("#next")
             assert page.url == base + "/second", page.url
     finally:

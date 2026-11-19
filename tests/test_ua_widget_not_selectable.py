@@ -131,7 +131,7 @@ def test_a_simple_selector_returns_only_author_elements(firefox_binary, widget_h
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary, humanize=False) as browser:
         page = browser.new_page()
         page.goto(widget_harness + "/", wait_until="load", timeout=30_000)
-        page.wait_for_selector("#author_button", timeout=10_000)
+        page.wait_for_selector("#author_button", timeout=30_000)
 
         found = _ids(page.locator("button"))
         assert found == ["author_button"], (
@@ -155,7 +155,7 @@ def test_a_comma_selector_returns_only_author_elements(firefox_binary, widget_ha
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary, humanize=False) as browser:
         page = browser.new_page()
         page.goto(widget_harness + "/", wait_until="load", timeout=30_000)
-        page.wait_for_selector("#author_button", timeout=10_000)
+        page.wait_for_selector("#author_button", timeout=30_000)
 
         loc = page.locator("button, input[type='submit']")
         found = _ids(loc)
@@ -185,7 +185,7 @@ def test_the_order_is_author_document_order_in_both_forms(firefox_binary, widget
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary, humanize=False) as browser:
         page = browser.new_page()
         page.goto(widget_harness + "/", wait_until="load", timeout=30_000)
-        page.wait_for_selector("#author_button", timeout=10_000)
+        page.wait_for_selector("#author_button", timeout=30_000)
 
         # The document's own order, straight from the DOM, so the expectation
         # is not a second copy of the same belief written by hand.
@@ -215,7 +215,7 @@ def test_an_author_closed_shadow_root_is_still_reachable(firefox_binary, widget_
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary, humanize=False) as browser:
         page = browser.new_page()
         page.goto(widget_harness + "/author", wait_until="load", timeout=30_000)
-        page.wait_for_selector("#host", timeout=10_000)
+        page.wait_for_selector("#host", timeout=30_000)
 
         found = _ids(page.locator("button"))
         # `in`, not equality, and the difference is the whole point of the test.
@@ -249,7 +249,7 @@ def test_the_page_itself_still_sees_null_on_both_kinds_of_closed_root(
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary, humanize=False) as browser:
         page = browser.new_page()
         page.goto(widget_harness + "/author", wait_until="load", timeout=30_000)
-        page.wait_for_selector("#host", timeout=10_000)
+        page.wait_for_selector("#host", timeout=30_000)
 
         seen = page.evaluate(
             "() => ({own: window.__page_sees_own_closed,"

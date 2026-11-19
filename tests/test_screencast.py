@@ -29,7 +29,9 @@ import pytest
 
 from invisible_core.juggler.connection import EventListeners
 
+from _screencast_evidence import Stream, engine_screencast_lines
 from _servers import LocalServer
+from _waits import wait_until
 
 PAGE = b"""<!doctype html><html><head><title>screencast</title>
 <style>html,body{margin:0;background:#FF00FF;height:100%}</style>
@@ -66,6 +68,9 @@ def _bare_page(conn):
     page.session = "session-1"
     page.disposed = False
     page._screencast_id = None
+    page._screencast_lock = threading.Lock()
+    page._screencast_starting = False
+    page._screencast_early = None
     page.context = SimpleNamespace(browser=SimpleNamespace(conn=conn))
     return page, up
 
@@ -175,12 +180,12 @@ def test_a_screencast_frame_is_a_jpeg_of_the_whole_window(firefox_binary):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = "http://127.0.0.1:%d/" % srv.server_address[1]
     from invisible_playwright import InvisiblePlaywright
-    frames = []
-
-    # A plain function, not `frames.append`: the sync client tags the handler
-    # with an attribute, and a builtin method cannot carry one.
-    def on_frame(frame):
-        frames.append(frame)
+    # The stream keeps its frames and the clock (`_screencast_evidence.Stream`);
+    # its handler is a plain function, not `frames.append`: the sync client
+    # tags the handler with an attribute, and a builtin method cannot carry one.
+    stream = Stream("screencast")
+    frames = stream.frames
+    evidence = ""
 
     try:
         with InvisiblePlaywright(seed=42, binary_path=firefox_binary,
@@ -189,8 +194,7 @@ def test_a_screencast_frame_is_a_jpeg_of_the_whole_window(firefox_binary):
             page.set_viewport_size({"width": 800, "height": 600})
             page.goto(url)
             try:
-                page.screencast.start(on_frame=on_frame,
-                                      size={"width": 4000, "height": 4000})
+                stream.start(page, size={"width": 4000, "height": 4000})
             except Exception as refused:
                 # ⛔ A SKIP THAT NAMES THE ENGINE, not a pass and not a red.
                 # The CI drives the SEALED engine, and until the seal rolls to
@@ -202,13 +206,15 @@ def test_a_screencast_frame_is_a_jpeg_of_the_whole_window(firefox_binary):
                     pytest.skip("this engine has no screencast (it needs "
                                 "firefox-28 or later): %s" % refused)
                 raise
-            deadline = time.time() + 15
-            while len(frames) < 3 and time.time() < deadline:
-                time.sleep(0.1)
+            wait_until(lambda: len(frames) >= 3, 30, lambda: time.sleep(0.1))
             page.screencast.stop()
+            if not frames:
+                evidence = engine_screencast_lines(page)
     finally:
         srv.shutdown()
-    assert frames, "no frame arrived in 15 s"
+    assert frames, ("no frame arrived in 30 s\n%s\n"
+                    "engine output (lines starting with 'screencast:'):\n%s"
+                    % (stream.describe(), evidence))
     first = frames[0]
     assert first["data"][:3] == b"\xff\xd8\xff", "not a JPEG"
     assert first["viewportHeight"] > 600, (
@@ -297,9 +303,11 @@ def test_asking_for_a_higher_rate_actually_delivers_more_frames(firefox_binary):
 
     Interleaved is not possible here - a screencast is per page and the rate is
     fixed at start - so the arms are two pages of the same browser, same page
-    served, same duration, and the assertion is on the RATIO rather than on
-    either count: the absolute rate depends on the machine, and the claim is
-    that asking for more gets more.
+    served, each waited for until it has delivered a number of frames (not for
+    a fixed time: a loaded machine delivered none in 3 s), and the assertion is
+    on the RATIO of the rates of the frames that came, not on either count: the
+    absolute rate depends on the machine, and the claim is that asking for more
+    gets more.
 
     Measured 2026-09-08 on this machine: 10 asked delivered 9.6-9.8 fps, 25
     asked delivered 23.8-24.0. The floor below is deliberately far from that -
@@ -331,54 +339,109 @@ def test_asking_for_a_higher_rate_actually_delivers_more_frames(firefox_binary):
     url = "http://127.0.0.1:%d/" % srv.server_address[1]
     from invisible_playwright import InvisiblePlaywright
 
-    def count(page, fps, seconds=3.0):
-        got = []
-
-        def on_frame(frame):
-            got.append(frame)
-
+    def count(page, fps, wanted):
+        """Starts a stream at ``fps`` and waits until ``wanted`` frames have come (a deadline of 30 s, not a pause: a loaded
+        machine takes longer for the same frames), then stops it."""
+        stream = Stream("asking for %d fps" % fps)
         page.goto(url)
         try:
-            page.screencast.start(on_frame=on_frame, fps=fps)
+            stream.start(page, fps=fps)
         except Exception as refused:
             if "Page.startScreencast" in str(refused) and "not supported" in str(refused):
                 pytest.skip("this engine has no screencast (it needs "
                             "firefox-28 or later): %s" % refused)
             raise
-        time.sleep(seconds)
+        wait_until(lambda: len(stream.frames) >= wanted, 30, lambda: time.sleep(0.05))
         page.screencast.stop()
-        return len(got)
+        return stream
 
-    seconds = 3.0
     slow_fps, fast_fps = 2, 25
+    slow_wanted, fast_wanted = 6, 10
     try:
         with InvisiblePlaywright(seed=42, binary_path=firefox_binary,
                                  headless=True) as browser:
-            slow = count(browser.new_page(), slow_fps, seconds)
-            fast = count(browser.new_page(), fast_fps, seconds)
+            slow_page, fast_page = browser.new_page(), browser.new_page()
+            slow_stream = count(slow_page, slow_fps, slow_wanted)
+            fast_stream = count(fast_page, fast_fps, fast_wanted)
+            # Read while the browser is up: the output goes with the process.
+            evidence = engine_screencast_lines(fast_page)
     finally:
         srv.shutdown()
 
-    assert slow and fast, "no frames at all: %d and %d" % (slow, fast)
+    slow, fast = len(slow_stream.frames), len(fast_stream.frames)
+    assert slow >= slow_wanted and fast >= fast_wanted, (
+        "not the frames asked for within 30 s: %d of %d and %d of %d\n%s\n%s\n"
+        "engine output (lines starting with 'screencast:'):\n%s"
+        % (slow, slow_wanted, fast, fast_wanted, slow_stream.describe(), fast_stream.describe(), evidence))
+
+    # The rates are those of the frames that came, from the engine's stamp of the first to that of the last: how long the
+    # first took to start, how long a window was, and a burst a stalled client received at once are no part of them.
+    slow_rate, fast_rate = slow_stream.rate(), fast_stream.rate()
+    assert slow_rate is not None and fast_rate is not None, "no time between the frames: %s / %s" % (
+        slow_stream.stamps, fast_stream.stamps)
 
     # The half that does not depend on the machine: a cap only pushes the rate
     # down, so this one is answerable however slow the runner is.
-    ceiling = slow_fps * seconds * 2
-    assert slow <= ceiling, (
-        "asking for %d frames a second delivered %d in %.0f seconds (%.1f "
-        "fps), which is not a cap being honoured - it is what this machine "
+    ceiling = slow_fps * 2
+    assert slow_rate <= ceiling, (
+        "asking for %d frames a second delivered %d frames at %.1f fps, which is "
+        "not a cap being honoured - it is what this machine "
         "produces when nothing limits it, so the rate the caller asks for is "
         "not reaching the engine"
-        % (slow_fps, slow, seconds, slow / seconds))
+        % (slow_fps, slow, slow_rate))
 
-    assert fast > slow * 1.5, (
-        "asking for %d frames a second delivered %d in %.0f seconds and "
-        "asking for %d delivered %d: the rate the caller asks for is not "
+    assert fast_rate > slow_rate * 1.5, (
+        "asking for %d frames a second delivered %.1f fps and "
+        "asking for %d delivered %.1f fps: the rate the caller asks for is not "
         "reaching the engine.\n"
         "    Before believing that, check the second number against the "
         "machine: the fast arm is limited by what this host can render, not "
-        "by what was asked (%d would be %.0f frames), so a fast arm far below "
+        "by what was asked (%d fps asked), so a fast arm far below "
         "its request means the host is the ceiling and this comparison cannot "
         "answer the question."
-        % (fast_fps, fast, seconds, slow_fps, slow,
-           fast_fps, fast_fps * seconds))
+        % (fast_fps, fast_rate, slow_fps, slow_rate, fast_fps))
+
+
+def test_a_dead_stream_is_described_with_the_engine_lines_and_the_clock():
+    """The evidence a failed e2e carries: the engine's `screencast:` lines out
+    of the browser's output (and only those), and, per stream, the time from the
+    start reply to the first frame - or that none came."""
+    import io
+
+    from _screencast_evidence import Stream, engine_screencast_lines
+    from invisible_core.juggler.connection import ProcessOutput
+
+    output = ProcessOutput(io.BytesIO(
+        b"JavaScript warning: something\n"
+        b"screencast: StartCapture failed\n"
+        b"  screencast: this widget has no native window id\n"))
+    # the reader thread of the output has taken the three lines (a deadline of 30 s, not 5: a loaded machine runs it late)
+    assert wait_until(lambda: len(output.tail()) >= 3, 30, lambda: time.sleep(0.01)), output.tail()
+    server = SimpleNamespace(object=lambda guid: SimpleNamespace(
+        conn=SimpleNamespace(output=output)))
+    page = SimpleNamespace(_impl_obj=SimpleNamespace(
+        _connection=SimpleNamespace(_transport=SimpleNamespace(_server=server)),
+        _guid="page@1"))
+    assert engine_screencast_lines(page) == (
+        "screencast: StartCapture failed\n"
+        "  screencast: this widget has no native window id")
+    assert "could not be read" in engine_screencast_lines(SimpleNamespace())
+
+    class Started:
+        def __init__(self, handler):
+            self.handler = handler
+
+        def start(self, on_frame=None, **kwargs):
+            self.handler[0] = on_frame
+
+    handler = [None]
+    page = SimpleNamespace(screencast=Started(handler))
+    dead = Stream("dead")
+    dead.start(page)
+    assert dead.first_after_start() is None
+    assert dead.describe() == "dead: 0 frame(s), first frame never arrived"
+    live = Stream("live")
+    live.start(page)
+    handler[0]({"data": b"x"})
+    assert live.first_after_start() is not None
+    assert live.describe().startswith("live: 1 frame(s), first frame +")

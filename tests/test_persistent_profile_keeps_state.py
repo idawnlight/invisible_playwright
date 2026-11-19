@@ -67,11 +67,14 @@ def _rows(profile: str) -> list:
 
 
 @pytest.mark.e2e
-def test_cookies_and_local_storage_survive_to_the_next_session(firefox_binary):
+def test_cookies_and_local_storage_survive_to_the_next_session(firefox_binary, local_https_page):
     """⛔ BOTH STORES, AND THE DISK IN BETWEEN. A cookie alone could survive a
     fix that only moved cookies; the on-disk read separates "the second session
     saw it" from "it was actually persisted", which is the property a login
     relies on when the machine restarts.
+
+    The page is the test's own server on loopback, the same origin in both sessions (a real site is a third party: its outage, its redirect or the
+    network of the runner would be this test's red).
     """
     from invisible_playwright import InvisiblePlaywright
 
@@ -79,7 +82,7 @@ def test_cookies_and_local_storage_survive_to_the_next_session(firefox_binary):
     with InvisiblePlaywright(headless=True, seed=11, binary_path=firefox_binary,
                              profile_dir=profile) as ctx:
         page = ctx.new_page()
-        page.goto("https://example.com", timeout=60000)
+        page.goto(local_https_page, timeout=60000)
         page.evaluate("() => { localStorage.setItem('kept', 'yes');"
                       " document.cookie = 'kept=yes; max-age=86400; SameSite=Lax'; }")
         assert page.evaluate("localStorage.getItem('kept')") == "yes"
@@ -92,7 +95,7 @@ def test_cookies_and_local_storage_survive_to_the_next_session(firefox_binary):
     with InvisiblePlaywright(headless=True, seed=11, binary_path=firefox_binary,
                              profile_dir=profile) as ctx:
         page = ctx.new_page()
-        page.goto("https://example.com", timeout=60000)
+        page.goto(local_https_page, timeout=60000)
         assert page.evaluate("localStorage.getItem('kept')") == "yes", "localStorage did not survive"
         assert "kept=yes" in page.evaluate("document.cookie"), "the cookie did not survive"
         assert ("kept", "yes") in [(c["name"], c["value"]) for c in ctx.cookies()]

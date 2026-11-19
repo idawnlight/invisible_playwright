@@ -40,10 +40,32 @@ class _Recorder:
         self.calls.append(("press", kw))
 
 
+class _Lifecycle:
+    """What `FrameDispatcher._waiting_after` asks of a page's lifecycle."""
+
+    def __init__(self):
+        self.waited = []
+
+    def mark(self, frame_id):
+        return ("mark", frame_id)
+
+    def wait_for_action_signals(self, frame_id, since, timeout):
+        self.waited.append((frame_id, since))
+
+
+class _Page:
+    def __init__(self):
+        self.lifecycle = _Lifecycle()
+        self.main_frame_id = "frame-main"
+
+
 class _Frame:
     def __init__(self):
         self.actions = _Recorder()
         self.frame_id = "frame-main"
+        self.page = _Page()
+
+    _waiting_after = FrameDispatcher._waiting_after
 
     def enter_frames(self, selector):
         return self.frame_id, selector
@@ -79,6 +101,9 @@ class _FrameSelf:
         self.enter_frames = frame.enter_frames
         self._timeout = frame._timeout
         self._act_opts = frame._act_opts
+        self.page = frame.page
+
+    _waiting_after = FrameDispatcher._waiting_after
 
 
 def _handle_op(name, params):
@@ -151,13 +176,16 @@ def test_only_one_place_reads_the_key_delay():
     assert readers == {"_key_delay", "_pointer"}, readers
 
 
+# The time of each event is `e.timeStamp`, which is when the browser CREATED the event, not `performance.now()` read when
+# the handler happens to run: on a loaded machine the content process runs two handlers back to back (74 ms apart for
+# keys the driver sent 150 ms apart, four reds), and the gap between the two reads says nothing about when the keys left.
 PAGE = b"""<!doctype html><meta charset=utf-8>
 <input id=f>
 <script>
 window.__ev = [];
 for (const k of ["keydown", "keyup"])
   document.getElementById("f").addEventListener(k, e =>
-    __ev.push([k, e.key, performance.now()]));
+    __ev.push([k, e.key, e.timeStamp]));
 </script>"""
 
 
@@ -186,8 +214,9 @@ def test_the_page_sees_the_delay_the_caller_asked_for(firefox_binary, page_url):
     150 ms and a dwell of 300 ms can only come from the caller's `delay`."""
     from invisible_playwright import InvisiblePlaywright
 
+    # The US keyboard, named: the persona's keyboard follows the session's language, which the runner's address decides.
     with InvisiblePlaywright(binary_path=firefox_binary, headless=True,
-                             humanize=False) as browser:
+                             humanize=False, locale="en-US") as browser:
         page = browser.new_page()
         page.goto(page_url)
         page.locator("#f").type("abcd", delay=150)

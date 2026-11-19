@@ -38,7 +38,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "$(python scripts/core_requirement.py)" -e ".[dev]" build hatchling
       - name: Arm checkout hooks
-        run: python scripts/install_hooks.py
+        run: python -m invisible_core.hooks install
       - name: Test the tagged source
         run: python -m pytest -q -rs --junitxml=unit.xml
       - name: Require the default suite to run

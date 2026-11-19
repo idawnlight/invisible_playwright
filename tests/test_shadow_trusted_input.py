@@ -57,7 +57,7 @@ def page(firefox_binary):
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary,
                              humanize=False, headless=True) as browser:
         page = browser.new_context().new_page()
-        page.set_default_timeout(5000)
+        page.set_default_timeout(30000)
         page.set_content(PAGE)
         yield page
 
