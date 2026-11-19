@@ -1,12 +1,13 @@
 ---
 title: "Browser fingerprinting and bot detection, from the source"
-description: "Documentation and standalone explainers for invisible_playwright, an undetected Playwright wrapper on a stealth-patched Firefox. Each page is checked against the current source of the thing it describes."
+description: "Documentation and standalone explainers for invisible_playwright, a dual-engine undetected Playwright wrapper on stealth-patched Firefox 160 and Chromium 157."
 nav_order: 1
 ---
 
 # Browser fingerprinting and bot detection, from the source
 
-Documentation for [invisible_playwright](https://github.com/feder-cr/invisible_playwright),
+Documentation for [invisible_playwright](https://github.com/idawnlight/invisible_playwright)
+(pairing stealth-patched Firefox 160 and Chromium 157 under one Python Playwright API),
 plus a set of standalone explainers. Each one is written against the current source of
 the thing it describes, and several of them record something we got wrong first.
 

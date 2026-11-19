@@ -1,6 +1,6 @@
 ---
 title: "CLI reference"
-description: "The invisible-playwright command line: two commands, fetch and version, and what each one covers."
+description: "The invisible-playwright command line: fetch and version across both Firefox 160 and Chromium 157 backends."
 parent: "Documentation"
 nav_order: 5
 ---
@@ -8,77 +8,74 @@ nav_order: 5
 
 # CLI reference
 
-The installed command is `invisible-playwright`, with a hyphen. `python -m
-invisible_playwright` works identically and needs nothing on `PATH`.
+The installed console script is `invisible-playwright` (with a hyphen).
+`python -m invisible_playwright` runs the exact same entrypoint.
 
 ```bash
-invisible-playwright fetch    # download the engine if missing, check every cached
-                              # one against the seal, print the path
-invisible-playwright version  # wrapper, core and engine versions, and where the
-                              # engine is cached
+invisible-playwright fetch    # download/verify the selected backend's engine and print its executable path
+invisible-playwright version  # print wrapper, core, Firefox & Chromium engine versions, and cache paths
 ```
 
 ## `fetch`
 
-Makes the engine present and correct, then prints where it is.
+Ensures the selected backend's browser binary is downloaded, matches its sealed
+SHA256 (and BuildID / `omni.ja` for Firefox), and prints the executable's
+absolute path as the final line on stdout.
 
-It checks every cached engine tree against the seal shipped inside
-`invisible-core` **before** downloading anything. That ordering is the point: a
-tree that no longer matches the seal is the case worth catching, and it is
-invisible to a plain "download if missing" that only looks at whether a file is
-there. Anything that does not match is reported on stderr and left alone; the
-sealed engine is fetched and verified against its sha256.
-
-The last line on stdout is the absolute path, by itself, so this is the scripting
-form:
+- By default (`INVPW_BACKEND` unset or `firefox`), `fetch` verifies every cached
+  Firefox tree against the seal shipped in `invisible-core`, reports any stale
+  tree on stderr, and downloads `firefox-160.0-r1` if needed:
 
 ```bash
-FIREFOX="$(invisible-playwright fetch)"
+FIREFOX_BIN="$(invisible-playwright fetch)"
 ```
 
-which is better than asking for a path separately, because it guarantees the
-thing it names actually exists and matches the seal.
+- When `INVPW_BACKEND=chromium` is set, `fetch` downloads and SHA256-verifies
+  the sealed Chromium release (`chromium-157.0.8103.78-r1`) and prints the
+  verified `chrome` binary path:
 
-Running it when everything is already correct is cheap and does nothing.
+```bash
+CHROME_BIN="$(INVPW_BACKEND=chromium invisible-playwright fetch)"
+```
+
+Running `fetch` when the verified engine is already cached is a fast local
+check with zero network traffic.
 
 ## `version`
 
+```text
+invisible_playwright 0.44.0
+invisible_core       160.49.0   (declared: ==160.49.0)
+engine               firefox-160.0-r1  Firefox 160.0  build 20261119071042
+seal                 bc41cacd8e68  [.../invisible_core/seal.json]
+chromium_engine      chromium-157.0.8103.78-r1  Chromium 157.0.8103.78
+engines              /home/you/.cache/invisible-playwright
+chromium_engines     /home/you/.cache/invisible-chromium
+state                /home/you/.cache/invisible-playwright
 ```
-invisible_playwright 0.6.0
-invisible_core       18.12.0   (declared: ==18.12.0)
-engine               firefox-18  Firefox 151.0  build 20260724001949
-seal                 f294a96ae4ec  [.../invisible_core/seal.json]
-cache                /home/you/.cache/invisible-playwright
-```
 
-This is the output to paste into a bug report. Two lines are worth knowing about:
+Paste this output into bug reports:
 
-- if the installer's record disagrees with the core that will actually run, a
-  `STALE RECORD` line appears between them. That is the state pip and `pip check`
-  both call healthy, because both read the record and neither reads the files.
-- `cache` is where the engine trees live. Deleting a directory there is how you
-  reclaim the space; there is no subcommand for it, on purpose - see below.
+- If package metadata disagrees with the `invisible_core` module imported at
+  runtime, `version` prints a `STALE RECORD` diagnostic line that `pip check`
+  alone cannot see.
+- `engines` and `chromium_engines` show where the unpacked Firefox and Chromium
+  builds live on disk so you can inspect or reclaim disk space directly.
 
-## What happened to the other four
+## Why there are only two subcommands
 
-The command line used to have six entries: `fetch`, `fetch --force`, `path`,
-`version`, `clear-cache`, `doctor`. Each was a step somebody had to know to take,
-in a package whose whole promise is that the browser handles itself. None of the
-behaviour was lost:
+Earlier versions had six commands (`fetch`, `fetch --force`, `path`, `version`,
+`clear-cache`, `doctor`). Their useful behavior was folded into `fetch` and
+`version`:
 
-| gone | where it went |
+| Former command | Where it lives now |
 |---|---|
-| `doctor` | `fetch` does it on every run. It was the thing most worth doing and the thing least likely to be typed, which is the worst combination a subcommand can have. |
-| `fetch --force` | unnecessary once every run verifies. A tree is replaced because it does not match the seal, not because a flag was passed. |
-| `path` | `fetch` prints it as its last line, and unlike `path` it guarantees the tree is there and correct. |
-| `clear-cache` | deliberately not folded in. The cache root belongs to `invisible_core`, not to this package, so pruning "trees no seal points at" would delete an engine this package did not put there. `version` prints the location. |
-
-The `tag` argument went with them. The seal decides which engine a given build
-runs, and the engine check refuses anything else, so a tag on the command line
-could only ever name something that would then be rejected.
+| `doctor` | `fetch` verifies cached trees against the seal on every run. |
+| `fetch --force` | Unnecessary once every run checks integrity against the seal. |
+| `path` | `fetch` prints the verified executable path on its final stdout line. |
+| `clear-cache` | Intentionally omitted so one wrapper never deletes another tool's cached engines; `version` prints the exact directories. |
 
 ## See also
 
-[Installation](installation.md) for the initial `fetch`, and
-[Configuration](configuration.md) for the environment variables that change where
-the engine is cached or which binary gets used.
+[Installation](installation.md) for system dependencies and first-run setup, and
+[Configuration](configuration.md) for cache and binary path environment variables.

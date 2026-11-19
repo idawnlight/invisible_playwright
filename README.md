@@ -1,19 +1,26 @@
 # InvisiblePlaywright on Firefox 160 and Chromium 157
 
-This fork pairs Firefox 160.0 (`firefox-160.0-r1`) and Chromium 157.0.8103.78
-(`chromium-157.0.8103.78-r1`) with `invisible_core 160.49.0` and
-`invisible_playwright 0.44.0`.
-The bundled Playwright Python client is 1.61.
+`invisible_playwright` is the unified Python Playwright entrypoint for two
+native stealth browser engines:
 
-The engine implements session identity and geometry, language and timezone
-propagation, bundled fonts, graphics and media declarations, Juggler execution
-worlds, native input, network interception and proxy routing.
+- **`backend="firefox"` (default)**: Firefox 160.0 (`firefox-160.0-r1`),
+  declaring a coherent Windows 10/11 desktop persona on Linux through native
+  Gecko declarations, 119 bundled Windows fonts, and isolated Juggler worlds.
+- **`backend="chromium"`**: Chromium 157.0.8103.78
+  (`chromium-157.0.8103.78-r1`), presenting a genuine Linux Desktop Chromium
+  session that normalizes server CPU/RAM/V8-heap tiers and GPU-less Mesa
+  `llvmpipe` WebGL1/2 parameters while driving `--remote-debugging-pipe` with
+  `navigator.webdriver === false` and zero `Runtime.enable` leaks.
+
+This release pairs `invisible_core 160.49.0` with `invisible_playwright 0.44.0`
+and bundles the Playwright Python 1.61 client (both `sync_api` and `async_api`).
 
 ## Install
 
 Supported platforms: **Linux x86_64**;
-Python **3.11+** and Git are required. The Firefox download is approximately
-233 MiB (245 MB) and is cached after its first download.
+Python **3.11+** and Git are required. The Firefox archive is approximately
+245 MB and the Chromium archive is approximately 236 MB; each engine is
+downloaded on first use, verified against its pinned SHA256, and cached locally.
 
 Install both Python packages from their GitHub tags:
 
@@ -26,49 +33,86 @@ python -m pip install \
   "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.44.0"
 ```
 
-Use [the installation guide](docs/installation.md) for Linux system dependencies,
-Xvfb, cache settings, and preloaded builds. Firefox downloads automatically from
-[this fork's GitHub Release](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r1)
-on first launch, and Chromium downloads automatically when `backend="chromium"` is selected:
+See [the installation guide](docs/installation.md) for Ubuntu/Linux system
+packages (Xvfb, Openbox, GTK/NSS/Mesa libraries, and desktop fonts), cache
+paths, and offline installation.
+
+## Quickstart
+
+Switch between Firefox and Chromium with `backend="firefox"` or
+`backend="chromium"` (or set `INVPW_BACKEND=chromium` in the environment) while
+keeping the exact same Playwright API, selectors, `expect()` assertions, and
+Bezier-curve humanized input:
 
 ```python
 from invisible_playwright import InvisiblePlaywright
 
+# Windows desktop persona on patched Firefox 160.0 (default)
 with InvisiblePlaywright(seed=42, headless=True, backend="firefox") as browser:
     page = browser.new_page()
     page.goto("https://example.com/")
-    print(page.title())
+    print("Firefox:", browser.version, page.title())
+
+# Linux desktop persona on patched Chromium 157.0.8103.78
+with InvisiblePlaywright(seed=42, headless=True, backend="chromium") as browser:
+    page = browser.new_page()
+    page.goto("https://example.com/")
+    print("Chromium:", browser.version, page.title())
 ```
 
-You can prefetch the browser and inspect the installed versions:
+The async API (`invisible_playwright.async_api.InvisiblePlaywright`) accepts
+the exact same arguments and can even run both engines concurrently in one
+event loop; see [Quickstart](docs/quickstart.md) and
+[Configuration](docs/configuration.md).
+
+## CLI
+
+Prefetch either browser binary ahead of first launch and inspect installed
+versions and cache directories:
 
 ```bash
 python -m invisible_playwright fetch
+INVPW_BACKEND=chromium python -m invisible_playwright fetch
 python -m invisible_playwright version
 ```
 
-On Linux, `headless=True` starts Xvfb automatically. A local build can be passed
-through `binary_path`; details are in the installation guide.
+On Linux, `headless=True` starts an isolated Xvfb display automatically (plus
+an Openbox desktop workarea for Chromium). A custom local executable can be
+passed via `binary_path`.
+
+## Documentation
+
+- [Installation](docs/installation.md) - Linux runtime packages, first launch,
+  cache directories, and offline wheelhouse setup
+- [Quickstart](docs/quickstart.md) - Sync/async Playwright usage, backend
+  selection, and deterministic `seed` replay
+- [Configuration](docs/configuration.md) - Proxies, egress-derived timezone,
+  backend selection, and environment variables
+- [Pinning fingerprint fields](docs/pinning.md) - Overriding specific hardware,
+  GPU, or screen fields on top of a seed
+- [CLI reference](docs/cli-reference.md) - `fetch` and `version` subcommands
+- [Differences from Playwright](docs/differences-from-playwright.md) - Intentional
+  stealth safeguards and unsupported upstream calls
 
 ## Repositories
 
 | Repository | Owns |
 | --- | --- |
-| [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native declarations, fonts, Juggler and platform builds |
-| [Chromium patches](https://github.com/idawnlight/chromium_antidetect_patch) | Native Linux Desktop hardware/WebGL normalization, CDP/V8 stealth and builds |
-| [invisible_core](https://github.com/idawnlight/invisible_core) | Profile generation, prefs, protocol client, release record and downloads |
-| [invisible_playwright](https://github.com/idawnlight/invisible_playwright) | Playwright API, bundled client and dual-engine Python server |
+| [invisible_playwright](https://github.com/idawnlight/invisible_playwright) | **User entrypoint**: Playwright sync/async API, bundled client, and dual-engine Juggler/CDP server |
+| [invisible_core](https://github.com/idawnlight/invisible_core) | Profile generation, GeoIP/timezone resolution, humanized motion/typing, Juggler client, and release verification |
+| [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native Gecko 160 declarations, bundled Windows fonts, Juggler worlds, and `firefox-160.0-r1` builds |
+| [Chromium patches](https://github.com/idawnlight/chromium_antidetect_patch) | Native Chromium 157 hardware/WebGL normalization, CDP/V8 stealth patches, and `chromium-157.0.8103.78-r1` builds |
 
-The engines maintain Firefox 160 on `release/160` and Chromium 157 on `release/157`; core and wrapper each use
-`main`. Browser engines are built and distributed separately from the Python packages.
+The native repositories maintain Firefox 160 on `release/160` and Chromium 157
+on `release/157`; `invisible_core` and `invisible_playwright` use `main`.
 
 ## Tests
 
-The existing tests run against the paired packages. Browser tests select the
-engine through `INVPW_BINARY_PATH`; `scripts/run_e2e.py` runs their parallel and
-serial timing passes. The source contracts read the native commit in the seal.
+Default unit and contract suites run via `pytest`. Real-browser dual-backend
+parity tests live in `tests/test_dual_backend_parity_e2e.py` (`pytest -m e2e`).
 
 ## Licenses
 
 The wrapper's original code is MIT. Its bundled Playwright client is Apache-2.0.
-Firefox and the native changes use the licenses recorded in the engine tree.
+Firefox and Chromium native changes use the licenses recorded in their engine
+trees.

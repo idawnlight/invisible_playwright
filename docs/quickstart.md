@@ -1,6 +1,6 @@
 ---
 title: "Quickstart"
-description: "Two-line switch from Playwright with zero API changes to learn. Sessions get distinct fingerprints by default; pass a seed for reproducible ones instead."
+description: "Two-line switch from Playwright with parallel Firefox 160 and Chromium 157 stealth backends across sync and async APIs."
 parent: "Documentation"
 nav_order: 2
 ---
@@ -8,9 +8,9 @@ nav_order: 2
 
 # Quickstart
 
-**100% Playwright-compatible** - sync and async, every method, zero API changes
-beyond how the browser is launched. If you already have Playwright code, switching is
-two lines:
+**100% Playwright-compatible** - sync and async, zero new page or locator methods to
+learn beyond how the browser is launched. Switching existing Playwright code takes two
+lines:
 
 ```diff
 - from playwright.sync_api import sync_playwright
@@ -20,100 +20,103 @@ two lines:
 + with InvisiblePlaywright() as browser:
 ```
 
-Every session gets a distinct fingerprint (GPU, audio, fonts, screen, roughly 400
-fields) and Bezier-curve mouse motion, with no further configuration required.
+Every session gets a deterministic or fresh hardware/graphics identity and Bezier-curve
+humanized mouse and keyboard input out of the box.
+
+## Choosing a backend (`firefox` vs `chromium`)
+
+`InvisiblePlaywright` and `invisible_playwright.async_api.InvisiblePlaywright` both
+accept `backend="firefox"` (the default) or `backend="chromium"` (or the
+`INVPW_BACKEND` environment variable):
+
+| Backend | Engine | OS & Hardware Persona | Best When |
+|---|---|---|---|
+| `backend="firefox"` (default) | Patched Firefox 160.0 (`-juggler-pipe`) | Coherent **Windows 10/11 64-bit** desktop persona on Linux (119 bundled Windows fonts, ANGLE GPU personas, WebGL readback projection, native SOCKS5/ICE routing) | You want diverse Windows desktop identities (~400 fields) from a Linux host |
+| `backend="chromium"` | Patched Chromium 157.0.8103.78 (`--remote-debugging-pipe`) | Authentic **Linux x86_64 Desktop** Chromium with server CPU/RAM/V8-heap tiers normalized (`2..32 GiB`), GPU-less `llvmpipe` normalized to Intel Mesa `iris` OpenGL 4.6, `webdriver === false`, and zero `Runtime.enable` leaks | Target sites require Blink/Chromium behavior or TLS/HTTP3 stack while running in GPU-less Linux containers |
 
 ## Sync
-
-The synchronous API, for scripts that already call `sync_playwright()` directly:
 
 ```python
 from invisible_playwright import InvisiblePlaywright
 
-with InvisiblePlaywright(proxy={"server": "socks5://gate.example.com:1080", "username": "u", "password": "p"}) as browser:
+with InvisiblePlaywright(
+    seed=42,
+    backend="chromium",  # or "firefox" (default)
+    headless=True,
+    proxy={"server": "socks5://gate.example.com:1080", "username": "u", "password": "p"},
+) as browser:
     page = browser.new_page()
     page.goto("https://example.com")
-    page.click("#submit")   # mouse arcs to the button on a Bezier curve
+    page.click("#submit")   # mouse arcs to the button along a paced Bezier curve
 ```
 
-## Async
+## Async (including simultaneous dual-engine sessions)
 
-The same shape under `asyncio`, for code that already calls `async_playwright()`:
+The same constructor shape works under `asyncio`, and both backends can even run side
+by side in the same process and event loop:
 
 ```python
+import asyncio
 from invisible_playwright.async_api import InvisiblePlaywright
 
-async with InvisiblePlaywright(proxy={"server": "socks5://gate.example.com:1080", "username": "u", "password": "p"}) as browser:
-    page = await browser.new_page()
-    await page.goto("https://example.com")
-    await page.click("#submit")
+async def main() -> None:
+    async with (
+        InvisiblePlaywright(seed=42, backend="firefox", headless=True) as fx_browser,
+        InvisiblePlaywright(seed=42, backend="chromium", headless=True) as cr_browser,
+    ):
+        fx_page = await fx_browser.new_page()
+        cr_page = await cr_browser.new_page()
+        await asyncio.gather(
+            fx_page.goto("https://example.com"),
+            cr_page.goto("https://example.com"),
+        )
+        await fx_page.click("a")
+        await cr_page.click("a")
+
+asyncio.run(main())
 ```
 
-The `browser` object returned is a real `playwright.sync_api.Browser` /
-`playwright.async_api.Browser` - every Playwright method works exactly as documented
-upstream. There is no wrapped subset of the API to learn.
+The `browser` object yielded by the context manager (or `BrowserContext` when
+`profile_dir=` is passed) is a genuine `playwright.sync_api.Browser` /
+`playwright.async_api.Browser` - locators, `frame_locator`, `expect()`, `page.route()`,
+dialogs, screenshots, and cookies work identically across both backends.
 
 ## Logging the seed to replay a run
 
-Every session is generated from a seed, whether you pass one or not. Log it and you
-can reproduce the exact same identity later:
+Every session is generated from an integer seed, whether you pass one or let the
+launcher draw one. Log `sf.seed` to replay the exact same session persona later:
 
 ```python
-sf = InvisiblePlaywright()
+sf = InvisiblePlaywright(backend="firefox")
 with sf as browser:
     print("seed =", sf.seed)
-    # ...
 ```
 
 ## Reproducible fingerprint
 
-Pass a seed explicitly and every field it implies - GPU, canvas hash, audio context,
-fonts, screen - comes back identical, run after run:
+Pass `seed=` explicitly and every seed-derived parameter comes back identical across
+runs:
 
 ```python
-with InvisiblePlaywright(seed=42) as browser:
-    ...   # same GPU, same canvas hash, same audio context, every run
+with InvisiblePlaywright(seed=42, backend="chromium") as browser:
+    ...   # deterministic hardware tier, memory/heap limit, and GPU persona every run
 ```
 
-This is the difference between debugging a failure and guessing at one: same seed,
-same browser, so a failing run can be replayed exactly rather than hoping the next
-random draw reproduces it. The seed reaches the browser layer and stops there, and
-[what it does not pin](reproducible-agent-browser-identity-seed.md) is the half worth
-reading before treating a stable fingerprint as a finished job.
+See [giving an agent a reproducible browser identity](reproducible-agent-browser-identity-seed.md)
+for what a browser seed pins and what still depends on network egress and profile state.
 
-## Short answers to the questions that lead here
+## Short answers to common questions
 
-**Do I need to change my Playwright code to use invisible_playwright?** No, beyond
-the two-line switch above. Every method - sync and async - is the same one you
-already call on `playwright.sync_api.Browser` / `playwright.async_api.Browser`;
-there is no wrapped subset of the API to learn.
+**Do I need different Playwright code when switching between `firefox` and `chromium`?**
+No. Only `backend="firefox"` vs `backend="chromium"` (or `INVPW_BACKEND`) changes; your
+page, locator, routing, and `expect()` calls stay identical.
 
-**Does every session get a different fingerprint automatically?** Yes. GPU, audio,
-fonts, screen and the rest of the roughly 400 fields are generated fresh per session
-with no configuration required, and each gets Bezier-curve mouse motion by default too.
+**How do I persist cookies and `localStorage` across restarts?** Pass
+`profile_dir="/path/to/profile"`. In persistent-profile mode the context manager yields
+a `BrowserContext` directly (`page = ctx.new_page()`), and works on both `firefox` and
+`chromium`.
 
-**How do I make a fingerprint reproducible across runs instead of random?** Pass
-`seed=` explicitly, or log `sf.seed` from a seedless run and reuse that value next
-time. Either way, every field the seed implies comes back identical.
-
-**Is the `browser` object a real Playwright object, or a wrapper around one?** It is
-the real thing - `playwright.sync_api.Browser` or `playwright.async_api.Browser` -
-so anything documented upstream for that object works unchanged here.
-
-**Where do I set a proxy, force the timezone, or fix one fingerprint field while
-leaving the rest random?** [Configuration](configuration.md) covers proxies,
-timezone and environment variables; [Pinning fingerprint fields](pinning.md) covers
-forcing individual values like a GPU model or screen size.
-
-**See also:** [Installation](installation.md) for downloading the patched Firefox
-binary this class drives, [Configuration](configuration.md) for proxy and timezone
-options, [Pinning fingerprint fields](pinning.md) for forcing specific values while
-the rest stays seed-derived, and
-[giving an agent a reproducible browser identity](reproducible-agent-browser-identity-seed.md)
-for the full seed-reuse pattern this page introduces.
-
-## Next
-
-[Configuration](configuration.md) covers proxies, timezone and environment
-variables. [Pinning fingerprint fields](pinning.md) covers forcing specific values -
-a GPU model, a screen size - while leaving the rest seed-derived.
+**Where do I configure proxies, timezones, cache paths, or pinned hardware fields?**
+See [Configuration](configuration.md) for proxies, egress-derived timezones, and
+environment variables, and [Pinning fingerprint fields](pinning.md) for overriding
+individual fields on top of a seed.

@@ -43,6 +43,11 @@ That last point is the subtle one, and `gpu.*` is the exception to it: a GPU pin
 
 **Rule of thumb:** pin correlated fields together, or just trust the sampler.
 
+### Backend coverage (`firefox` vs `chromium`)
+
+- On **`backend="firefox"`**, the full Bayesian profile table below (`gpu.*`, `screen.*`, `hardware.*`, `audio.*`, `codec.*`, `desktop.*`, `font.*`) is validated and projected into Gecko's native `zoom.stealth.*` declarations.
+- On **`backend="chromium"`**, `DesktopHardwareProfile.from_seed(seed, pin=pin)` maps `hardware.concurrency`, `gpu.vendor`, `gpu.renderer`, `screen.width`, and `screen.height` onto Chromium's `INVISIBLE_CHROMIUM_PROFILE` hardware/WebGL normalization layer (keeping `deviceMemory`, V8 `jsHeapSizeLimit`, and Linux Mesa `iris` parameters internally coherent).
+
 ## Full list of pinnable keys
 
 Keys are dotted paths. All values are optional - omitted keys fall back to the sampler.

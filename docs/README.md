@@ -1,15 +1,19 @@
 ---
 title: "docs/ source folder"
-description: "This folder is the Jekyll source for the published documentation site. Read it there, with search and proper navigation, not as raw files."
+description: "Markdown documentation for invisible_playwright: installation, dual-engine quickstart, configuration, fingerprint pinning, CLI reference, and bot-detection guides."
 nav_exclude: true
 search_exclude: true
 sitemap: false
 ---
 
-# docs/ source folder
+# Documentation directory
 
-This folder is the source the wiki is rendered from. Read it with search and
-navigation in **[the wiki](https://github.com/feder-cr/invisible_playwright/wiki)**.
+Start at [index.md](index.md) or [documentation.md](documentation.md) for core
+setup and usage guides:
 
-`index.md` is what the site root actually serves. This file exists so the folder
-still shows something sensible when browsed directly on github.com.
+- [Installation](installation.md)
+- [Quickstart](quickstart.md)
+- [Configuration](configuration.md)
+- [Pinning fingerprint fields](pinning.md)
+- [CLI reference](cli-reference.md)
+- [Differences from Playwright](differences-from-playwright.md)

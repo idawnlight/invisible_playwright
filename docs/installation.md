@@ -1,37 +1,52 @@
 ---
 title: "Installation"
-description: "Install the paired Python packages from GitHub tags. Firefox downloads from the fork's GitHub Release on first launch and is reused from the local cache."
+description: "Install the paired Python packages from GitHub tags and run either Firefox 160 or Chromium 157 with automatic SHA256-verified binary caching."
 parent: "Documentation"
 nav_order: 1
 ---
 
 # Installation
 
-This guide installs `invisible_playwright 0.44.0`, `invisible_core 160.49.0`,
-and Firefox 160.0 from the `firefox-160.0-r1` engine release (with parallel
-`backend="chromium"` support for `chromium-157.0.8103.78-r1`). The Python tags
-are `v0.44.0` and `v160.49.0`.
+This guide installs `invisible_playwright 0.44.0` and `invisible_core 160.49.0`
+(tags `v0.44.0` and `v160.49.0`), supporting both native stealth engines out of
+the box:
+
+- **Firefox 160.0** (`backend="firefox"`, default) from
+  [`firefox-160.0-r1`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r1)
+  (~245 MB compressed)
+- **Chromium 157.0.8103.78** (`backend="chromium"`) from
+  [`chromium-157.0.8103.78-r1`](https://github.com/idawnlight/chromium_antidetect_patch/releases/tag/chromium-157.0.8103.78-r1)
+  (~236 MB compressed)
 
 Supported platforms: **Linux x86_64**. Use Python **3.11 or newer** and Git.
 
-## Linux runtime dependencies
+## 1. Linux runtime dependencies
 
-On Ubuntu 24.04:
+On Ubuntu 24.04, install the shared Xvfb/desktop packages plus the GTK/NSS/Mesa
+runtime libraries and desktop font families so both `backend="firefox"` and
+`backend="chromium"` work cleanly on headless servers and GPU-less containers:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  python3 python3-venv git xvfb xauth \
-  libgtk-3-0t64 libdbus-glib-1-2 libasound2t64 libx11-xcb1 libxt6t64
+  python3 python3-venv git xvfb xauth openbox x11-xserver-utils x11-utils \
+  libgtk-3-0t64 libdbus-glib-1-2 libasound2t64 libx11-xcb1 libxt6t64 \
+  libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
+  libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+  libgbm1 libpango-1.0-0 libcairo2 libgl1-mesa-dri \
+  fonts-ubuntu fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji
 ```
 
-With `headless=True`, the wrapper starts its own Xvfb display on Linux.
-Run your script with `python`; an outer `xvfb-run` is optional. With
-`headless=False`, Firefox opens on your desktop's display.
+With `headless=True`, the wrapper starts its own Xvfb display on Linux (and
+starts an Openbox desktop workarea automatically for Chromium so
+`screen.availHeight < screen.height` holds). Run your script directly with
+`python`; an outer `xvfb-run` is unnecessary. With `headless=False`, the browser
+opens on your desktop's active `DISPLAY`.
 
-## Install the Python packages
+## 2. Install the Python packages
 
-Create a fresh environment and install both Git references in the same command:
+Create a fresh virtual environment and install both pinned Git tags in a single
+command:
 
 ```bash
 python3 -m venv .venv
@@ -43,19 +58,22 @@ python -m pip install \
 ```
 
 The wrapper requires `invisible-core==160.49.0`; supplying both references
-selects the fork's paired core directly. Its Playwright Python client is bundled.
+selects the exact paired core directly. The Playwright Python client is bundled
+inside `invisible-playwright` (no `playwright install` or Node.js driver is
+used).
 
-## First launch
+## 3. First launch
 
 Save this as `smoke.py`:
 
 ```python
 from invisible_playwright import InvisiblePlaywright
 
-with InvisiblePlaywright(seed=42, headless=True) as browser:
-    page = browser.new_page()
-    page.goto("https://example.com/")
-    print(page.title())
+for backend in ("firefox", "chromium"):
+    with InvisiblePlaywright(seed=42, headless=True, backend=backend) as browser:
+        page = browser.new_page()
+        page.goto("https://example.com/")
+        print(backend, browser.version, page.title())
 ```
 
 Run it:
@@ -64,71 +82,83 @@ Run it:
 python smoke.py
 ```
 
-On first launch, the core downloads Firefox from
-[idawnlight/firefox_antidetect_patch](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r1),
-checks the archive's SHA256, unpacks it, and starts the browser. Later launches
-check and reuse the cached engine. The normal installation uses the release
-record bundled with the core; it needs no `binary_path` or environment settings.
-The Python installation and browser download happen at separate times.
+On first launch of each backend, the wrapper downloads the corresponding archive
+from its public GitHub Release, verifies the exact byte size and SHA256 from the
+bundled seal, extracts it into the local cache, and launches the browser.
+Subsequent launches verify and reuse the cached tree without network access.
 
-To download the browser ahead of the first launch, run:
+To prefetch either engine ahead of first launch (for example during Docker
+image build):
 
 ```bash
+# Prefetch Firefox 160.0 (default backend)
 python -m invisible_playwright fetch
+
+# Prefetch Chromium 157.0.8103.78
+INVPW_BACKEND=chromium python -m invisible_playwright fetch
 ```
 
-Its last output line is the executable path. The equivalent console command is
-`invisible-playwright fetch`.
+In both cases the last line printed on stdout is the verified browser
+executable path. The installed console script `invisible-playwright fetch`
+behaves identically.
 
-## Versions and cache
+## 4. Versions and cache locations
 
 ```bash
 python -m invisible_playwright version
 python -m pip check
 ```
 
-`version` prints the wrapper/core versions, Firefox release and BuildID, plus
-the engine and state cache directories. To put the cache on another disk, set
-this before launching or fetching:
+`version` prints the wrapper and core versions, both sealed engine releases
+(`firefox-160.0-r1` and `chromium-157.0.8103.78-r1`), and both cache roots:
+
+- Firefox cache root: `INVISIBLE_PLAYWRIGHT_CACHE_DIR` (defaults to
+  `~/.cache/invisible-playwright`)
+- Chromium cache root: `INVISIBLE_CHROMIUM_CACHE_DIR` (defaults to
+  `~/.cache/invisible-chromium`)
+
+To relocate both caches onto another volume:
 
 ```bash
-export INVISIBLE_PLAYWRIGHT_CACHE_DIR=/mnt/browser-cache
+export INVISIBLE_PLAYWRIGHT_CACHE_DIR=/mnt/browser-cache/firefox
+export INVISIBLE_CHROMIUM_CACHE_DIR=/mnt/browser-cache/chromium
 python -m invisible_playwright fetch
+INVPW_BACKEND=chromium python -m invisible_playwright fetch
 ```
 
-## Preloaded or locally built Firefox
+## 5. Preloaded binaries and offline installation
 
-For machines where the browser is distributed separately, download the release
-archive on another machine and extract it. Pass its Firefox executable directly:
+For air-gapped or pre-provisioned hosts, unpack the release archive on the
+target machine and pass the executable via `binary_path`:
 
 ```python
+from invisible_playwright import InvisiblePlaywright
+
 with InvisiblePlaywright(
-    binary_path="/opt/invisible-firefox/firefox",
+    backend="chromium",
+    binary_path="/opt/invisible-chromium/chrome",
     seed=42,
     headless=True,
 ) as browser:
     page = browser.new_page()
 ```
 
-The release build uses the same bundled release record. For a different local
-build, set `INVISIBLE_SEAL_FILE` to that build's generated seal before importing
-the package. `binary_path` is an API argument; `INVPW_BINARY_PATH` belongs to the
-repository's test runner.
-
-For an offline Python installation, build a wheel directory on a machine with
-the same Python/platform, copy it with the browser archive, then install from it:
+For an offline Python installation, build a wheelhouse on a connected Linux
+x86_64 host with the same Python minor version, transfer `wheelhouse/` alongside
+the browser release archives, and install without network access:
 
 ```bash
 python -m pip wheel --wheel-dir wheelhouse \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.2" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.3"
-# On the destination machine:
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.49.0" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.44.0"
+
+# On the offline target machine:
 python -m pip install --no-index --find-links wheelhouse \
-  invisible-core==159.49.2 invisible-playwright==0.43.3
+  invisible-core==160.49.0 invisible-playwright==0.44.0
 ```
 
 ## Update
 
-Install the next release's two documented Git references together. Their Python
-versions and the core's selected Firefox release determine the installed pair.
-See [Quickstart](quickstart.md) for the sync and async APIs.
+Upgrade by installing the next release's paired `invisible-core` and
+`invisible-playwright` Git tags together. See [Quickstart](quickstart.md) for
+sync/async usage and backend selection.

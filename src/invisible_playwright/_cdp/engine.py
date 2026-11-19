@@ -25,7 +25,8 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_SEAL_PATH = PACKAGE_DIR / "seal.json"
 CHROMIUM_SEAL_ENV = "INVISIBLE_CHROMIUM_SEAL_FILE"
 CHROMIUM_CACHE_ENV = "INVISIBLE_CHROMIUM_CACHE_DIR"
-CHROMIUM_BINARY_ENV = "INVISIBLE_CHROMIUM_BINARY"
+CHROMIUM_BINARY_ENV = "INVPW_CHROMIUM_BINARY_PATH"
+LEGACY_CHROMIUM_BINARY_ENV = "INVISIBLE_CHROMIUM_BINARY"
 
 DOWNLOAD_ATTEMPTS = 3
 DOWNLOAD_BACKOFF_S = (2.0, 8.0)
@@ -299,7 +300,9 @@ def resolve_chromium_executable(
             raise FileNotFoundError(f"Chromium binary not found: {resolved}")
         return resolved
 
-    env_bin = os.environ.get(CHROMIUM_BINARY_ENV)
+    env_bin = os.environ.get(CHROMIUM_BINARY_ENV) or os.environ.get(
+        LEGACY_CHROMIUM_BINARY_ENV
+    )
     if env_bin:
         resolved = Path(env_bin).expanduser().resolve()
         if not resolved.is_file():
