@@ -1126,6 +1126,9 @@ _EXPECTED_SIGNATURE = [
     # has nothing to arrive through - it is a property of the session, decided
     # before the first window is built, so it has to be said at construction.
     ("show_cursor", inspect.Parameter.KEYWORD_ONLY),
+    # Added 2026-11-19 for dual-engine selection ("firefox" or "chromium") on
+    # both sync and async entry points.
+    ("backend", inspect.Parameter.KEYWORD_ONLY),
 ]
 
 

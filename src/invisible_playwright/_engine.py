@@ -38,25 +38,33 @@ def resolve_executable(binary_path: Optional[Union[str, Path]]) -> Path:
     return ensure_binary(seal=seal)
 
 
-def assert_wire_version(browser) -> None:
+def assert_wire_version(browser, *, backend: str = "firefox") -> None:
     """Compare what the engine reports over the protocol with the seal.
 
     browser.version is a cached property from the connection initializer
-    (Juggler Browser.getInfo -> MOZ_APP_VERSION_DISPLAY), so this costs zero
-    round trips and no pref can spoof it. It is the only check that also
-    catches a hand-edited application.ini. Not available on the persistent
-    context path, where Playwright exposes no Browser.
+    (Juggler Browser.getInfo -> MOZ_APP_VERSION_DISPLAY, or CDP Browser.getVersion),
+    so this costs zero round trips and no pref can spoof it.
     """
     if browser is None:
         return
-    seal = active_seal()
     raw = getattr(browser, "version", "")
-    # Playwright types Browser.version as str. Anything else (a stub, a mock,
-    # a driver that did not populate the initializer) carries no evidence
-    # either way, and inventing a mismatch out of it would be a false alarm.
     if not isinstance(raw, str):
         return
     reported = raw.split("/")[-1].strip()
+    if backend == "chromium":
+        from ._cdp.engine import load_chromium_seal
+
+        c_seal = load_chromium_seal()
+        expected = str(c_seal.get("version") or "")
+        if reported and expected and reported != expected:
+            raise EngineMismatch(
+                "engine/seal mismatch after launch - the running browser is not the sealed build\n"
+                f"  protocol says: Chromium {reported}\n"
+                f"  seal says    : Chromium {expected} (tag {c_seal.get('tag')})\n"
+                "  fix          : INVPW_BACKEND=chromium python -m invisible_playwright fetch"
+            )
+        return
+    seal = active_seal()
     if reported and reported != seal.upstream_version:
         raise EngineMismatch(
             "engine/seal mismatch after launch - the running browser is not the sealed build\n"

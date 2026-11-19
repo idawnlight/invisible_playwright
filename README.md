@@ -1,7 +1,8 @@
-# InvisiblePlaywright on Firefox 159
+# InvisiblePlaywright on Firefox 160 and Chromium 157
 
-This fork pairs Firefox 159.0 (`firefox-159.0-r1`) with
-`invisible_core 159.49.2` and `invisible_playwright 0.43.3`.
+This fork pairs Firefox 160.0 (`firefox-160.0-r1`) and Chromium 157.0.8103.78
+(`chromium-157.0.8103.78-r1`) with `invisible_core 160.49.0` and
+`invisible_playwright 0.44.0`.
 The bundled Playwright Python client is 1.61.
 
 The engine implements session identity and geometry, language and timezone
@@ -21,19 +22,19 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.2" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.3"
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.49.0" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.44.0"
 ```
 
 Use [the installation guide](docs/installation.md) for Linux system dependencies,
 Xvfb, cache settings, and preloaded builds. Firefox downloads automatically from
-[this fork's GitHub Release](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-159.0-r1)
-on first launch:
+[this fork's GitHub Release](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r1)
+on first launch, and Chromium downloads automatically when `backend="chromium"` is selected:
 
 ```python
 from invisible_playwright import InvisiblePlaywright
 
-with InvisiblePlaywright(seed=42, headless=True) as browser:
+with InvisiblePlaywright(seed=42, headless=True, backend="firefox") as browser:
     page = browser.new_page()
     page.goto("https://example.com/")
     print(page.title())
@@ -54,11 +55,12 @@ through `binary_path`; details are in the installation guide.
 | Repository | Owns |
 | --- | --- |
 | [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native declarations, fonts, Juggler and platform builds |
+| [Chromium patches](https://github.com/idawnlight/chromium_antidetect_patch) | Native Linux Desktop hardware/WebGL normalization, CDP/V8 stealth and builds |
 | [invisible_core](https://github.com/idawnlight/invisible_core) | Profile generation, prefs, protocol client, release record and downloads |
-| [invisible_playwright](https://github.com/idawnlight/invisible_playwright) | Playwright API, bundled client and Python server |
+| [invisible_playwright](https://github.com/idawnlight/invisible_playwright) | Playwright API, bundled client and dual-engine Python server |
 
-The engine maintains Firefox 159 on `release/159`; core and wrapper each use
-`main`. Firefox is built and distributed separately from the Python packages.
+The engines maintain Firefox 160 on `release/160` and Chromium 157 on `release/157`; core and wrapper each use
+`main`. Browser engines are built and distributed separately from the Python packages.
 
 ## Tests
 

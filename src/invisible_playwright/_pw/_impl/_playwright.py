@@ -23,6 +23,7 @@ from invisible_playwright._pw._impl._selectors import Selectors
 class Playwright(ChannelOwner):
     devices: Dict
     selectors: Selectors
+    chromium: BrowserType
     firefox: BrowserType
     request: APIRequest
 
@@ -33,6 +34,9 @@ class Playwright(ChannelOwner):
         self.request = APIRequest(self)
         self.firefox = from_channel(initializer["firefox"])
         self.firefox._playwright = self
+        if "chromium" in initializer:
+            self.chromium = from_channel(initializer["chromium"])
+            self.chromium._playwright = self
 
         self.selectors = Selectors(self._loop, self._dispatcher_fiber)
 
@@ -41,14 +45,13 @@ class Playwright(ChannelOwner):
     def __getitem__(self, value: str) -> "BrowserType":
         if value == "firefox":
             return self.firefox
-        # MODIFIED by invisible_playwright: chromium and webkit no longer exist
-        # in this fork - their modules have been removed from the vendored
-        # driver. The message says so, instead of leaving an
-        # AttributeError on a field that nobody sets anymore.
-        if value in ("chromium", "webkit"):
+        if value == "chromium" and hasattr(self, "chromium"):
+            return self.chromium
+        if value == "webkit":
             raise ValueError(
-                "invisible_playwright drives Firefox ONLY: support for %s "
-                "has been removed from the driver, not disabled." % value)
+                "invisible_playwright drives Firefox and Chromium only: "
+                "support for %s has been removed from the driver, not disabled."
+                % value)
         raise ValueError("Invalid browser " + value)
 
     def _set_selectors(self, selectors: Selectors) -> None:

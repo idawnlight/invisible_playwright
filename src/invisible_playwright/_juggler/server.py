@@ -3933,10 +3933,11 @@ class BrowserDispatcher(Dispatcher):
     METHODS = {"newContext": "op_new_context", "close": "op_close",
                "newPage": "op_new_page"}
 
-    def __init__(self, server, browser_type: "BrowserTypeDispatcher",
+    def __init__(self, server, browser_type: "Dispatcher",
                  conn: Any, version: str, session_seed: Any = None,
                  motion_budget_s: Any = None,
-                 service_workers_enabled: bool = True) -> None:
+                 service_workers_enabled: bool = True,
+                 browser_name: str = "firefox") -> None:
         self.conn = conn
         #: ⛔ WHETHER `route()` CAN WORK AT ALL. Firefox asks a channel's
         #: intercept controller - the hook Juggler holds requests through -
@@ -4049,8 +4050,8 @@ class BrowserDispatcher(Dispatcher):
         # bound of its own: until 0.34.0 it had 30 s whatever the caller said.
         conn.startup_send("Browser.enable", {"attachToDefaultContext": True})
         super().__init__(server, browser_type,
-                         {"version": version, "name": "firefox",
-                          "browserName": "firefox"})
+                         {"version": version, "name": browser_name,
+                          "browserName": browser_name})
         self.contexts: List[BrowserContextDispatcher] = []
         # ⛔ Adoptions start HERE, not at `add_listener` above. Anything the
         # engine attached in between predates every context (see the note on
@@ -4893,13 +4894,17 @@ class JugglerServer(Server):
         return getattr(self, name)(params)
 
     def op_initialize(self, params: Dict) -> Any:
-        # ⛔ The order below is the recorded one: BrowserType, then LocalUtils,
-        # then Playwright naming both. Announcing Playwright first would name
-        # two guids the client has never seen.
+        # ⛔ The order below is the recorded one: BrowserTypes, then LocalUtils,
+        # then Playwright naming them. Announcing Playwright first would name
+        # guids the client has never seen.
+        from .._cdp.dispatcher import ChromiumBrowserTypeDispatcher
+
         browser_type = BrowserTypeDispatcher(self)
+        chromium_type = ChromiumBrowserTypeDispatcher(self)
         utils = LocalUtilsDispatcher(self)
         playwright = PlaywrightDispatcher(
             self, None, {"firefox": browser_type.channel,
+                         "chromium": chromium_type.channel,
                          "utils": utils.channel},
             guid="Playwright")
         return {"playwright": playwright.channel}

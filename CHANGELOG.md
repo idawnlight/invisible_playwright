@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-11-19
+
+- Pair with `invisible-core 160.49.0` and Firefox 160.0 (`firefox-160.0-r1`).
+- Add in-process Python CDP pipe backend (`backend="chromium"` and `playwright.chromium`) for patched Linux Desktop Chromium `157.0.8103.78` (`chromium-157.0.8103.78-r1`) across both sync and async APIs.
+
 ## [0.43.3] - 2026-10-29
 
 - Honor `page.screenshot(scale="css")` by producing one image pixel per CSS pixel.

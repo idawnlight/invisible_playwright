@@ -101,6 +101,7 @@ class InvisiblePlaywright(_session.CommonLaunch):
         profile_dir: Optional[Union[str, Path]] = None,
         prep_recaptcha: bool = False,
         show_cursor: Optional[bool] = None,
+        backend: Optional[str] = None,
     ) -> None:
         """
         Args:
@@ -224,11 +225,22 @@ class InvisiblePlaywright(_session.CommonLaunch):
         # places that had to stay in step about which GPU a session presents -
         # and a `pin` reached some of them and not the ones that decide what the
         # browser is told. The choice lives in `invisible_core`, once.
-        self._profile: Profile = generate_profile(self.seed, pin=self._pin)
+        self._backend: str = _session.resolve_backend(backend)
+        if self._backend == "chromium":
+            from ._cdp.engine import DesktopHardwareProfile
+
+            self._chromium_hw: Any = DesktopHardwareProfile.from_seed(
+                self.seed, pin=self._pin
+            )
+            self._profile: Profile = generate_profile(self.seed, pin=None)
+        else:
+            self._chromium_hw = None
+            self._profile = generate_profile(self.seed, pin=self._pin)
         self._pw: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
         self._persistent_context: Optional[BrowserContext] = None
         self._virtual_display: Any = None
+        self._openbox: Any = None
         # Identity for this session's browser tree, and the guard that ties
         # that tree to this process's lifetime. Declared here rather than in
         # __enter__ so that _teardown - which runs on the failure path too,
@@ -277,17 +289,31 @@ class InvisiblePlaywright(_session.CommonLaunch):
         self._srflx_declared = _geo.srflx_to_declare()
         # binary_path= never reaches ensure_binary(), so the engine check lives
         # on the resolved executable rather than inside the fetcher.
-        executable = resolve_executable(self._binary_path)
+        if self._backend == "chromium":
+            from ._cdp.engine import resolve_chromium_executable
+
+            executable = resolve_chromium_executable(self._binary_path)
+        else:
+            executable = resolve_executable(self._binary_path)
         try:
             # the REAL result of _resolve_headless (did it create an alternate
             # desktop or not?) must be known BEFORE composing the prefs, not
             # after: B172, 2026-08-24.
             pw_headless = self._resolve_headless()
             prefs = self._build_prefs()
-            playwright_proxy = _configure_proxy_shared(self._proxy, prefs)
+            playwright_proxy = (
+                dict(self._proxy)
+                if (self._backend == "chromium" and self._proxy)
+                else _configure_proxy_shared(self._proxy, prefs)
+            )
             self._session_token = SessionToken.mint()
             env = self._build_env(prefs)
             self._pw = sync_playwright().start()
+            btype = (
+                self._pw.chromium
+                if self._backend == "chromium"
+                else self._pw.firefox
+            )
             if self._profile_dir is not None:
                 # Persistent context - cookies / localStorage / extensions /
                 # prefs all live on disk between runs.
@@ -345,7 +371,7 @@ class InvisiblePlaywright(_session.CommonLaunch):
                 self._profile_dir.mkdir(parents=True, exist_ok=True)
                 # The profile is this machine from now on (B314).
                 record_session_seed(self._profile_dir, self.seed)
-                self._persistent_context = self._pw.firefox.launch_persistent_context(
+                self._persistent_context = btype.launch_persistent_context(
                     user_data_dir=str(self._profile_dir),
                     executable_path=str(executable),
                     headless=pw_headless,
@@ -358,7 +384,7 @@ class InvisiblePlaywright(_session.CommonLaunch):
                 self._bind_process_tree()
                 self._arm_cursor_engine(self._persistent_context)
                 return self._persistent_context
-            self._browser = self._pw.firefox.launch(
+            self._browser = btype.launch(
                 executable_path=str(executable),
                 headless=pw_headless,
                 firefox_user_prefs=prefs,
@@ -370,7 +396,7 @@ class InvisiblePlaywright(_session.CommonLaunch):
             # from the connection initializer, so it costs no round trip and no
             # pref can spoof it. Inside the try so a refusal tears the browser
             # down instead of leaking the process we just refused.
-            assert_wire_version(self._browser)
+            assert_wire_version(self._browser, backend=self._backend)
             self._bind_process_tree()
         except BaseException:
             # Python doesn't call __exit__ when __enter__ raises - clean up
@@ -573,6 +599,12 @@ class InvisiblePlaywright(_session.CommonLaunch):
             except Exception:
                 pass
             self._pw = None
+        if self._openbox is not None:
+            try:
+                self._openbox.stop()
+            except Exception:
+                pass
+            self._openbox = None
         if self._virtual_display is not None:
             try:
                 self._virtual_display.stop()

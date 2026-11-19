@@ -56,6 +56,19 @@ def _cmd_fetch(_args: argparse.Namespace) -> int:
     catching, and it is invisible to a "download if missing" that only looks at
     whether a file exists.
     """
+    from ._session import resolve_backend
+
+    if resolve_backend(None) == "chromium":
+        from ._cdp.engine import ensure_chromium_binary
+
+        try:
+            c_path = ensure_chromium_binary()
+        except Exception as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        print(c_path)
+        return 0
+
     from invisible_core.download import iter_cached_engines
     from invisible_core.seal import active_seal, engine_problems
 
@@ -108,12 +121,17 @@ def _cmd_version(_args: argparse.Namespace) -> int:
     print(f"invisible_core       {core_v}" + (f"   (declared: =={want})" if want else ""))
     if recorded and recorded != core_v:
         print(f"                     install record says {recorded}  (STALE RECORD)")
+    from ._cdp.engine import chromium_cache_root, load_chromium_seal
+
+    c_seal = load_chromium_seal()
     print(f"engine               {s.tag}  Firefox {s.upstream_version}  build {s.build_id}")
     print(f"seal                 {s.digest[:12]}  [{s.origin}]")
+    print(f"chromium_engine      {c_seal.get('tag')}  Chromium {c_seal.get('version')}")
     # Where the engine lives, because `clear-cache` is gone and "how do I get
     # the disk space back" needs an answer that is not a subcommand. Two
     # roots: the engines (engine_root) and this machine's state (cache_root).
     print(f"engines              {engine_root()}")
+    print(f"chromium_engines     {chromium_cache_root()}")
     print(f"state                {cache_root()}")
     return 0
 

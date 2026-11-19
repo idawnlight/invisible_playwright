@@ -37,6 +37,7 @@ class InvisiblePlaywright(_session.CommonLaunch):
         profile_dir: Optional[Union[str, Path]] = None,
         prep_recaptcha: bool = False,
         show_cursor: Optional[bool] = None,
+        backend: Optional[str] = None,
     ) -> None:
         # See sync launcher: `zoom.stealth.fpp.hw_seed` is int32_t - clamp.
         # One place decides the seed, and a profile directory remembers it
@@ -72,11 +73,22 @@ class InvisiblePlaywright(_session.CommonLaunch):
         self._prep_recaptcha = bool(prep_recaptcha) and self._profile_dir is None
         # No `fixed_gpu_class=` - see the note on the same call in `launcher.py`.
         # The GPU class is derived from the persona `invisible_core` chooses.
-        self._profile: Profile = generate_profile(self.seed, pin=self._pin)
+        self._backend: str = _session.resolve_backend(backend)
+        if self._backend == "chromium":
+            from ._cdp.engine import DesktopHardwareProfile
+
+            self._chromium_hw: Any = DesktopHardwareProfile.from_seed(
+                self.seed, pin=self._pin
+            )
+            self._profile: Profile = generate_profile(self.seed, pin=None)
+        else:
+            self._chromium_hw = None
+            self._profile = generate_profile(self.seed, pin=self._pin)
         self._pw: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
         self._persistent_context: Optional[BrowserContext] = None
         self._virtual_display: Any = None
+        self._openbox: Any = None
         # Identity for this session's browser tree, and the guard that ties it
         # to this process's lifetime. Declared here rather than in __aenter__ so
         # _teardown - which runs on the failure path too - always finds them.
@@ -129,17 +141,31 @@ class InvisiblePlaywright(_session.CommonLaunch):
         self._srflx_declared = _geo.srflx_to_declare()
         # binary_path= never reaches ensure_binary(), so the engine check lives
         # on the resolved executable rather than inside the fetcher.
-        executable = resolve_executable(self._binary_path)
+        if self._backend == "chromium":
+            from ._cdp.engine import resolve_chromium_executable
+
+            executable = resolve_chromium_executable(self._binary_path)
+        else:
+            executable = resolve_executable(self._binary_path)
         try:
             # the REAL result of _resolve_headless (did it create an
             # alternate desktop or not?) must be known BEFORE composing the
             # prefs, not after: B172, 2026-08-24.
             pw_headless = self._resolve_headless()
             prefs = self._build_prefs()
-            playwright_proxy = _configure_proxy_shared(self._proxy, prefs)
+            playwright_proxy = (
+                dict(self._proxy)
+                if (self._backend == "chromium" and self._proxy)
+                else _configure_proxy_shared(self._proxy, prefs)
+            )
             self._session_token = SessionToken.mint()
             env = self._build_env(prefs)
             self._pw = await async_playwright().start()
+            btype = (
+                self._pw.chromium
+                if self._backend == "chromium"
+                else self._pw.firefox
+            )
             if self._profile_dir is not None:
                 # See sync launcher for the persistent-context rationale.
                 self._profile_dir.mkdir(parents=True, exist_ok=True)
@@ -148,7 +174,7 @@ class InvisiblePlaywright(_session.CommonLaunch):
                 # firefox-5 ships the C++ overrideTimezone IDL method (C7
                 # closure), so locale + timezone_id now propagate cleanly
                 # to the persistent context without hanging the launch.
-                self._persistent_context = await self._pw.firefox.launch_persistent_context(
+                self._persistent_context = await btype.launch_persistent_context(
                     user_data_dir=str(self._profile_dir),
                     executable_path=str(executable),
                     headless=pw_headless,
@@ -161,7 +187,7 @@ class InvisiblePlaywright(_session.CommonLaunch):
                 self._bind_process_tree()
                 self._arm_cursor_engine(self._persistent_context)
                 return self._persistent_context
-            self._browser = await self._pw.firefox.launch(
+            self._browser = await btype.launch(
                 executable_path=str(executable),
                 headless=pw_headless,
                 firefox_user_prefs=prefs,
@@ -171,7 +197,7 @@ class InvisiblePlaywright(_session.CommonLaunch):
             )
             # See the sync launcher: browser.version comes from the connection
             # initializer, costs no round trip, and cannot be spoofed by a pref.
-            assert_wire_version(self._browser)
+            assert_wire_version(self._browser, backend=self._backend)
             self._bind_process_tree()
         except BaseException:
             await self._teardown()
@@ -356,6 +382,12 @@ class InvisiblePlaywright(_session.CommonLaunch):
             if self._pw is not None:
                 await close(self._pw.stop())
                 self._pw = None
+            if self._openbox is not None:
+                try:
+                    self._openbox.stop()
+                except Exception:
+                    pass
+                self._openbox = None
             if self._virtual_display is not None:
                 # Synchronous, so it cannot be cancelled mid-call the way the
                 # three awaits above can.

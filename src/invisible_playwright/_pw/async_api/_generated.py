@@ -17126,14 +17126,7 @@ class Playwright(AsyncBase):
         -------
         BrowserType
         """
-        # MODIFIED by invisible_playwright: the chromium module has been removed
-        # from the vendored driver, so `_impl_obj.chromium` no longer exists.
-        # Refuses with a line that explains it, instead of an AttributeError.
-        raise NotImplementedError(
-            "invisible_playwright drives Firefox ONLY: support for chromium "
-            "has been REMOVED from the driver, not disabled. Use "
-            "playwright.firefox."
-        )
+        return mapping.from_impl(self._impl_obj.chromium)
 
     @property
     def firefox(self) -> "BrowserType":

@@ -7,9 +7,10 @@ nav_order: 1
 
 # Installation
 
-This guide installs `invisible_playwright 0.43.3`, `invisible_core 159.49.2`,
-and Firefox 159.0 from the `firefox-159.0-r1` engine release. The Python tags
-are `v0.43.3` and `v159.49.2`.
+This guide installs `invisible_playwright 0.44.0`, `invisible_core 160.49.0`,
+and Firefox 160.0 from the `firefox-160.0-r1` engine release (with parallel
+`backend="chromium"` support for `chromium-157.0.8103.78-r1`). The Python tags
+are `v0.44.0` and `v160.49.0`.
 
 Supported platforms: **Linux x86_64**. Use Python **3.11 or newer** and Git.
 
@@ -37,11 +38,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v159.49.2" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.43.3"
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.49.0" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.44.0"
 ```
 
-The wrapper requires `invisible-core==159.49.2`; supplying both references
+The wrapper requires `invisible-core==160.49.0`; supplying both references
 selects the fork's paired core directly. Its Playwright Python client is bundled.
 
 ## First launch
@@ -64,7 +65,7 @@ python smoke.py
 ```
 
 On first launch, the core downloads Firefox from
-[idawnlight/firefox_antidetect_patch](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-159.0-r1),
+[idawnlight/firefox_antidetect_patch](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r1),
 checks the archive's SHA256, unpacks it, and starts the browser. Later launches
 check and reuse the cached engine. The normal installation uses the release
 record bundled with the core; it needs no `binary_path` or environment settings.

@@ -35,8 +35,22 @@ from invisible_core.launch import (FontManifestMismatch,
                                    cached_font_manifest_path,
                                    verify_font_manifest)
 
-__all__ = ["build_prefs", "true_headless_requested", "TRUE_HEADLESS_ENV",
+__all__ = ["BACKEND_ENV", "SUPPORTED_BACKENDS", "resolve_backend",
+           "build_prefs", "true_headless_requested", "TRUE_HEADLESS_ENV",
            "ProxyEgressDrifted", "egress_ancora_valido"]
+
+BACKEND_ENV = "INVPW_BACKEND"
+SUPPORTED_BACKENDS = ("firefox", "chromium")
+
+
+def resolve_backend(backend: Optional[str] = None) -> str:
+    chosen = backend if backend is not None else os.environ.get(BACKEND_ENV, "firefox")
+    norm = str(chosen).strip().lower()
+    if norm not in SUPPORTED_BACKENDS:
+        raise ValueError(
+            f"Unsupported backend {chosen!r}; expected one of {SUPPORTED_BACKENDS}"
+        )
+    return norm
 
 #: Opt-in to real headless. Read HERE rather than in one of the two classes,
 #: because reading it in one of them is exactly how it came to work on the async
@@ -353,6 +367,10 @@ class CommonLaunch:
     `__init__`. They already did, identically, which is why this works at all.
     """
 
+    @property
+    def backend(self) -> str:
+        return getattr(self, "_backend", "firefox")
+
     def _resolve_headless(self) -> bool:
         """Translate the user's ``headless`` flag.
 
@@ -378,9 +396,32 @@ class CommonLaunch:
         if vd is not None:
             vd.start()
             self._virtual_display = vd
+            if getattr(self, "_backend", "firefox") == "chromium":
+                d_env = vd.launch_env() or {}
+                if d_env.get("DISPLAY"):
+                    from ._cdp.engine import OpenboxWorkarea
+
+                    wm = OpenboxWorkarea(d_env)
+                    wm.start()
+                    self._openbox = wm
         return False
 
     def _default_context_kwargs(self) -> Dict[str, Any]:
+        if getattr(self, "_backend", "firefox") == "chromium":
+            pin = getattr(self, "_pin", None) or {}
+            kwargs_chr: Dict[str, Any] = {}
+            if "viewport.width" in pin or "viewport.height" in pin:
+                kwargs_chr["viewport"] = {
+                    "width": int(pin.get("viewport.width") or 1280),
+                    "height": int(pin.get("viewport.height") or 720),
+                }
+            else:
+                kwargs_chr["no_viewport"] = True
+            if self._timezone:
+                kwargs_chr["timezone_id"] = self._timezone
+            if self._locale is not None:
+                kwargs_chr["locale"] = self._locale.primary
+            return kwargs_chr
         # The screen and viewport in CSS pixels, derived once in the core:
         # the profile's screen is the PANEL, and until wrapper 0.28.0 the
         # panel's device pixels went out here as CSS (screen.width 1920 at
@@ -411,17 +452,23 @@ class CommonLaunch:
         return kwargs
 
     def _build_env(self, prefs: Dict[str, Any]) -> Dict[str, str]:
-        """Env for the Firefox subprocess, then stamped with this session's token.
-
-        The body is `build_env`, shared with the async class - it was
-        written twice, identically, and the WebRTC pair is a contract with the
-        binary, so two landing sites meant two chances to miss a change.
-
-        The token stamp stays here because it is the only genuinely per-session
-        part: children inherit the environment, so every process in the tree
-        carries it and teardown can find its own tree and only its own.
-        """
+        """Env for the browser subprocess, then stamped with this session's token."""
         vd = self._virtual_display
+        if getattr(self, "_backend", "firefox") == "chromium":
+            env = dict(os.environ)
+            env.pop("INVPW_DESKTOP", None)
+            if vd is not None:
+                for k, v in (vd.launch_env() or {}).items():
+                    if v is None:
+                        env.pop(k, None)
+                    else:
+                        env[k] = v
+            hw = getattr(self, "_chromium_hw", None)
+            if hw is not None:
+                env["INVISIBLE_CHROMIUM_PROFILE"] = hw.to_json()
+            if self._timezone:
+                env["TZ"] = self._timezone
+            return self._session_token.stamp(env)
         return self._session_token.stamp(
             build_env(srflx_declared=self._srflx_declared,
                       profile=self._profile,
@@ -429,13 +476,15 @@ class CommonLaunch:
                       display_env=vd.launch_env() if vd is not None else None))
 
     def _build_prefs(self) -> Dict[str, Any]:
-        """Fingerprint prefs plus humanize toggle (always set explicitly).
-
-        The body lives in `build_prefs`, which the async class calls
-        too. It used to be twenty lines here and the SAME twenty inlined into
-        `async_api.__aenter__` - identical calls in identical order, differing
-        only in their comments, which is how the two entry points drift.
-        """
+        """Fingerprint prefs plus humanize toggle (always set explicitly)."""
+        if getattr(self, "_backend", "firefox") == "chromium":
+            out: Dict[str, Any] = {}
+            if self._humanize:
+                out[SESSION_SEED_PREF] = int(self.seed)
+                cap = _cursor_max_seconds(self._humanize)
+                if cap is not None:
+                    out[MOTION_BUDGET_PREF] = round(cap * 1000)
+            return out
         return build_prefs(
             profile=self._profile,
             locale=self._locale,

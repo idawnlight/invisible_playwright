@@ -15,21 +15,31 @@ import pytest
 
 import invisible_playwright
 from invisible_core.juggler.protocol import COMMANDS, EVENTS
+from invisible_playwright._cdp.cdp_names import (
+    COMMANDS as CDP_COMMANDS,
+    EVENTS as CDP_EVENTS,
+)
 
 pytestmark = pytest.mark.unit
 
-_PATTERN = re.compile(r"""["']((?:Browser|Page|Network|Runtime|Heap)\.[a-z]\w*)["']""")
+_PATTERN = re.compile(
+    r"""["']((?:Browser|DOM|Emulation|Fetch|Heap|HeapProfiler|Input|Network|Page|Runtime|Storage|Target)\.[a-z]\w*)["']"""
+)
 
 
 def _unknown_names(root: pathlib.Path) -> dict:
     unknown: dict = {}
+    juggler_names = set(COMMANDS) | set(EVENTS)
+    cdp_and_juggler = juggler_names | CDP_COMMANDS | CDP_EVENTS
     for source in sorted(root.rglob("*.py")):
+        parts = source.relative_to(root).parts
         # `_pw/` is the vendored Playwright client: it speaks Playwright's
         # protocol, whose method names share these domain prefixes.
-        if "_pw" in source.relative_to(root).parts:
+        if "_pw" in parts:
             continue
+        allowed = cdp_and_juggler if "_cdp" in parts else juggler_names
         for name in _PATTERN.findall(source.read_text(encoding="utf-8")):
-            if name not in COMMANDS and name not in EVENTS:
+            if name not in allowed:
                 unknown.setdefault(name, []).append(source.name)
     return unknown
 
