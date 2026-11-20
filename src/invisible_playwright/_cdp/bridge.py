@@ -312,7 +312,7 @@ def _build_intrinsics_bootstrap_js(ev_name: str) -> str:
         f" addEventListener({json.dumps(ev_name)}, (ev) => {{"
         "   ev.stopImmediatePropagation();"
         "   if (ev && typeof ev.detail === 'function') ev.detail(intr);"
-        " }, { capture: true, once: true });"
+        " }, { capture: true });"
         "})();"
     )
 
@@ -320,11 +320,50 @@ def _build_intrinsics_bootstrap_js(ev_name: str) -> str:
 class _PosixSpawnProcess:
     """Popen-compatible process handle around an `os.posix_spawn(setsid=True)` child."""
 
-    def __init__(self, pid: int, stderr_fd: int) -> None:
+    def __init__(
+        self,
+        pid: int,
+        stderr_fd: int,
+        *,
+        guardian_pid: Optional[int] = None,
+        guardian_write_fd: int = -1,
+    ) -> None:
         self.pid = pid
         self.stderr = os.fdopen(stderr_fd, "rb", buffering=0) if stderr_fd >= 0 else None
         self.returncode: Optional[int] = None
         self._wait_lock = threading.Lock()
+        self._guardian_pid = guardian_pid
+        self._guardian_write_fd = guardian_write_fd
+        self._guardian_lock = threading.Lock()
+
+    def close_guardian(self) -> None:
+        with self._guardian_lock:
+            wfd = self._guardian_write_fd
+            self._guardian_write_fd = -1
+            gpid = self._guardian_pid
+            self._guardian_pid = None
+        if wfd >= 0:
+            try:
+                os.close(wfd)
+            except OSError:
+                pass
+        if gpid is not None:
+            deadline = time.monotonic() + 2.0
+            while True:
+                try:
+                    wpid, _ = os.waitpid(gpid, os.WNOHANG)
+                    if wpid != 0:
+                        break
+                except ChildProcessError:
+                    break
+                if time.monotonic() >= deadline:
+                    try:
+                        os.kill(gpid, signal.SIGKILL)
+                        os.waitpid(gpid, 0)
+                    except OSError:
+                        pass
+                    break
+                time.sleep(0.01)
 
     def poll(self) -> Optional[int]:
         with self._wait_lock:
@@ -367,6 +406,10 @@ class _PosixSpawnProcess:
 
     def kill(self) -> None:
         if self.poll() is not None:
+            try:
+                os.killpg(self.pid, signal.SIGKILL)
+            except OSError:
+                pass
             return
         try:
             os.killpg(self.pid, signal.SIGKILL)
@@ -780,6 +823,12 @@ class _PageSessionState:
     obj_sessions: Dict[str, str] = field(default_factory=dict)
     # requestId -> CDP session_id
     req_sessions: Dict[str, str] = field(default_factory=dict)
+    # requestId -> (frame_id, is_navigation)
+    req_frames: Dict[str, tuple[str, bool]] = field(default_factory=dict)
+    # requestId -> exact Blink ResourceType ("Fetch" vs "XHR") from Network.requestWillBeSent
+    req_types: Dict[str, str] = field(default_factory=dict)
+    responded_requests: set[str] = field(default_factory=set)
+    finished_requests: set[str] = field(default_factory=set)
     # (session_id, utility_ctx_id) where __invpwLanding is already bootstrapped
     landing_ready: set[tuple[str, str]] = field(default_factory=set)
     # (session_id, int(utility_ctx_id)) internal contexts excluded from user console/pageerror
@@ -802,6 +851,7 @@ class _PageSessionState:
     main_world_to_frame: Dict[tuple[str, int], str] = field(default_factory=dict)
     # CDP Fetch requestId <-> Network requestId tracking
     paused_requests: Dict[str, str] = field(default_factory=dict)
+    paused_sessions: Dict[str, str] = field(default_factory=dict)
     pending_fetch_events: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     attachment_requests: set[str] = field(default_factory=set)
     nav_loaders: Dict[str, str] = field(default_factory=dict)
@@ -836,6 +886,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         self._launch_proxy_server = proxy_server
         self._persistent = persistent
         self._lock = threading.RLock()
+        self._ctx_cv = threading.Condition()
         self._contexts: Dict[Optional[str], _ContextState] = {
             None: _ContextState(context_id=None, cdp_context_id=None)
         }
@@ -995,7 +1046,53 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 file_actions=file_actions,
                 setsid=True,
             )
-            proc: Any = _PosixSpawnProcess(pid, err_read_fd)
+            guardian_pid: Optional[int] = None
+            life_w = -1
+            if os.path.exists("/bin/sh"):
+                life_r, life_w = os.pipe()
+                try:
+                    lr_src, gs = _dup_above_fd(life_r, 3)
+                    g_script = (
+                        f"reap() {{ trap '' TERM INT HUP; kill -KILL -{pid} 2>/dev/null || true; "
+                        f"i=0; while kill -0 -{pid} 2>/dev/null && [ \"$i\" -lt 250 ]; do "
+                        f"sleep 0.01 2>/dev/null || sleep 1; i=$((i + 1)); done; exit 0; }}; "
+                        f"trap reap TERM INT HUP; IFS= read -r _ || true; reap"
+                    )
+                    guardian_pid = os.posix_spawn(
+                        "/bin/sh",
+                        ["/bin/sh", "-c", g_script],
+                        launch_env,
+                        file_actions=[
+                            (os.POSIX_SPAWN_DUP2, lr_src, 0),
+                            (os.POSIX_SPAWN_OPEN, 1, os.devnull, os.O_WRONLY, 0),
+                            (os.POSIX_SPAWN_OPEN, 2, os.devnull, os.O_WRONLY, 0),
+                        ],
+                        setsid=True,
+                    )
+                except BaseException:
+                    if life_w >= 0:
+                        try:
+                            os.close(life_w)
+                        except OSError:
+                            pass
+                        life_w = -1
+                finally:
+                    for gfd in {life_r, *(gs if "gs" in locals() else [])}:
+                        try:
+                            os.close(gfd)
+                        except OSError:
+                            pass
+                    if "lr_src" in locals() and lr_src != life_r:
+                        try:
+                            os.close(lr_src)
+                        except OSError:
+                            pass
+            proc: Any = _PosixSpawnProcess(
+                pid,
+                err_read_fd,
+                guardian_pid=guardian_pid,
+                guardian_write_fd=life_w,
+            )
             err_read_fd = -1
         except BaseException:
             os.close(p_write_fd)
@@ -1042,6 +1139,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     proc.wait(timeout=2.0)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+            proc.close_guardian()
             raise
 
     @property
@@ -2816,10 +2914,13 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     )
                 return
             state.paused_requests[net_id] = fetch_id
+            state.paused_sessions[net_id] = raw_sid
             state.req_sessions[net_id] = raw_sid
             req_obj = params.get("request") or {}
             fid = params.get("frameId") or state.main_frame_id
             is_nav = params.get("resourceType") == "Document"
+            if net_id:
+                state.req_frames[net_id] = (fid, is_nav)
             nav_id = f"nav-{net_id}" if is_nav else None
             if is_nav and nav_id:
                 state.nav_loaders[fid] = nav_id
@@ -2842,7 +2943,11 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     for k, v in (req_obj.get("headers") or {}).items()
                 ],
                 "frameId": fid,
-                "resourceType": (params.get("resourceType") or "Other").lower(),
+                "resourceType": (
+                    state.req_types.get(net_id)
+                    or params.get("resourceType")
+                    or "Other"
+                ),
                 "isIntercepted": True,
                 **({"navigationId": nav_id} if nav_id else {}),
                 **({"postData": post_b64} if post_b64 is not None else {}),
@@ -2853,13 +2958,17 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         if method == "Network.requestWillBeSent":
             ctx = self._get_ctx(state.context_id)
             req_id = params.get("requestId")
+            fid = params.get("frameId") or state.main_frame_id
+            is_nav = params.get("type") == "Document"
             if req_id:
-                state.req_sessions[req_id] = raw_sid
+                if raw_sid != page_sid or req_id not in state.req_sessions:
+                    state.req_sessions[req_id] = raw_sid
+                state.req_frames[req_id] = (fid, is_nav)
+                if params.get("type"):
+                    state.req_types[req_id] = str(params["type"])
             if state.intercepting or ctx.intercepting:
                 return
             req_obj = params.get("request") or {}
-            fid = params.get("frameId") or state.main_frame_id
-            is_nav = params.get("type") == "Document"
             nav_id = params.get("loaderId") if is_nav else None
             if is_nav and nav_id:
                 state.nav_loaders[fid] = nav_id
@@ -2882,7 +2991,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     for k, v in (req_obj.get("headers") or {}).items()
                 ],
                 "frameId": fid,
-                "resourceType": (params.get("type") or "Other").lower(),
+                "resourceType": params.get("type") or "Other",
                 "isIntercepted": False,
                 **({"navigationId": nav_id} if nav_id else {}),
                 **({"postData": post_b64} if post_b64 is not None else {}),
@@ -2894,7 +3003,13 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             resp = params.get("response") or {}
             req_id = params.get("requestId")
             if req_id:
-                state.req_sessions[req_id] = raw_sid
+                if raw_sid != page_sid or req_id not in state.req_sessions:
+                    state.req_sessions[req_id] = raw_sid
+                with self._ctx_cv:
+                    self._ctx_cv.notify_all()
+                if req_id in state.responded_requests:
+                    return
+                state.responded_requests.add(req_id)
             raw_headers = resp.get("headers") or {}
             for hk, hv in raw_headers.items():
                 if (
@@ -2923,9 +3038,16 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             req_id = params.get("requestId")
             state.paused_requests.pop(req_id, None)
             if req_id:
+                if raw_sid != page_sid:
+                    state.req_sessions[req_id] = raw_sid
                 state.attachment_requests.discard(req_id)
                 state.attempted_auth.discard(f"{req_id}:Proxy")
                 state.attempted_auth.discard(f"{req_id}:Server")
+                with self._ctx_cv:
+                    self._ctx_cv.notify_all()
+                if req_id in state.finished_requests:
+                    return
+                state.finished_requests.add(req_id)
             self.dispatch_event(
                 "Network.requestFinished",
                 {"requestId": req_id, "responseEndTime": params.get("timestamp") or 0},
@@ -4257,12 +4379,55 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         if method == "Network.getResponseBody":
             req_id = p["requestId"]
             req_sid = state.req_sessions.get(req_id, session_id)
-            res = self._raw.send(
-                "Network.getResponseBody",
-                {"requestId": req_id},
-                session=req_sid,
-                timeout=timeout,
-            )
+            res: Optional[Dict[str, Any]] = None
+            try:
+                res = self._raw.send(
+                    "Network.getResponseBody",
+                    {"requestId": req_id},
+                    session=req_sid,
+                    timeout=timeout,
+                )
+            except juggler_conn.ProtocolError as b_exc:
+                req_fid, is_nav = state.req_frames.get(req_id, ("", False))
+                if "No resource with given identifier found" not in str(b_exc) or (
+                    not is_nav and not state.child_sessions
+                ):
+                    raise
+                last_err: Exception = b_exc
+                wait_cap = min(float(timeout) if timeout else 2.5, 2.5)
+                deadline = time.monotonic() + wait_cap
+                while not self._closed and session_id in self._pages:
+                    cand_sids: List[str] = []
+                    cur_rsid = state.req_sessions.get(req_id)
+                    if cur_rsid and cur_rsid != req_sid:
+                        cand_sids.append(cur_rsid)
+                    fsid = state.frame_sessions.get(req_fid) if req_fid else None
+                    if fsid and fsid not in cand_sids and fsid != req_sid:
+                        cand_sids.append(fsid)
+                    for csid in list(state.child_sessions):
+                        if csid not in cand_sids and csid != req_sid:
+                            cand_sids.append(csid)
+                    for csid in cand_sids:
+                        try:
+                            res = self._raw.send(
+                                "Network.getResponseBody",
+                                {"requestId": req_id},
+                                session=csid,
+                                timeout=min(1.5, max(0.2, deadline - time.monotonic())),
+                            )
+                            state.req_sessions[req_id] = csid
+                            break
+                        except juggler_conn.ProtocolError as c_exc:
+                            last_err = c_exc
+                    if res is not None:
+                        break
+                    rem = deadline - time.monotonic()
+                    if rem <= 0:
+                        break
+                    with self._ctx_cv:
+                        self._ctx_cv.wait(timeout=min(0.025, rem))
+                if res is None:
+                    raise last_err
             body = res.get("body") or ""
             if not res.get("base64Encoded"):
                 body = base64.b64encode(body.encode("utf-8")).decode("ascii")
@@ -4270,7 +4435,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
 
         if method == "Network.resumeInterceptedRequest":
             net_id = p["requestId"]
-            req_sid = state.req_sessions.get(net_id, session_id)
+            req_sid = state.paused_sessions.pop(
+                net_id, state.req_sessions.get(net_id, session_id)
+            )
             fetch_id = state.paused_requests.pop(net_id, net_id)
             cp: Dict[str, Any] = {"requestId": fetch_id}
             if p.get("url"):
@@ -4288,7 +4455,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
 
         if method == "Network.fulfillInterceptedRequest":
             net_id = p["requestId"]
-            req_sid = state.req_sessions.get(net_id, session_id)
+            req_sid = state.paused_sessions.pop(
+                net_id, state.req_sessions.get(net_id, session_id)
+            )
             fetch_id = state.paused_requests.pop(net_id, net_id)
             fp: Dict[str, Any] = {
                 "requestId": fetch_id,
@@ -4305,7 +4474,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
 
         if method == "Network.abortInterceptedRequest":
             net_id = p["requestId"]
-            req_sid = state.req_sessions.get(net_id, session_id)
+            req_sid = state.paused_sessions.pop(
+                net_id, state.req_sessions.get(net_id, session_id)
+            )
             fetch_id = state.paused_requests.pop(net_id, net_id)
             reason = _ABORT_REASON_MAP.get(
                 str(p.get("errorCode") or "failed").lower(), "Failed"
@@ -4324,6 +4495,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         if self._closed:
             return
         self._closed = True
+        with self._ctx_cv:
+            self._ctx_cv.notify_all()
         try:
             self._raw.send("Browser.close", timeout=2.5)
         except Exception:
@@ -4343,6 +4516,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         self._process.wait(timeout=2.0)
                     except subprocess.TimeoutExpired:
                         pass
+        if hasattr(self._process, "close_guardian"):
+            self._process.close_guardian()
         if self._process.stderr:
             try:
                 self._process.stderr.close()

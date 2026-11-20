@@ -1526,3 +1526,226 @@ async def _run_caller_observer_isolation_and_isolated_handles(
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+@pytest.mark.parametrize("backend", ["firefox", "chromium"])
+@pytest.mark.parametrize("with_route", [False, True])
+def test_dual_backend_oopif_resource_types_and_document_response_body(
+    backend: str, with_route: bool
+) -> None:
+    asyncio.run(_run_oopif_resource_types_and_document_response_body(backend, with_route))
+
+
+async def _run_oopif_resource_types_and_document_response_body(
+    backend: str, with_route: bool
+) -> None:
+    png_1x1 = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+
+    class AssetHandler(BaseHTTPRequestHandler):
+        frame_port = 0
+
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            if self.path == "/":
+                body = (
+                    "<!doctype html><html><body>"
+                    f"<iframe id='bframe' src='http://localhost:{AssetHandler.frame_port}/bframe'></iframe>"
+                    "</body></html>"
+                ).encode("utf-8")
+                mime = "text/html; charset=utf-8"
+            elif self.path == "/bframe":
+                body = (
+                    "<!doctype html><html><head>"
+                    "<link rel='stylesheet' href='/style.css'>"
+                    "</head><body>"
+                    "<img id='tile' src='/tile.png'>"
+                    "<script src='/app.js'></script>"
+                    "</body></html>"
+                ).encode("utf-8")
+                mime = "text/html; charset=utf-8"
+            elif self.path == "/style.css":
+                body = b"body { margin: 0; }"
+                mime = "text/css"
+            elif self.path == "/tile.png":
+                body = png_1x1
+                mime = "image/png"
+            elif self.path == "/app.js":
+                body = (
+                    b"Promise.all(["
+                    b"  fetch('/api-fetch').then(r => r.text()),"
+                    b"  new Promise(res => { const x = new XMLHttpRequest(); x.onload = () => res(x.responseText); x.open('GET', '/api-xhr'); x.send(); })"
+                    b"]).then(() => { document.body.dataset.ready = 'yes'; });"
+                )
+                mime = "application/javascript"
+            elif self.path == "/api-fetch":
+                body = b'{"ok":"fetch"}'
+                mime = "application/json"
+            elif self.path == "/api-xhr":
+                body = b'{"ok":"xhr"}'
+                mime = "application/json"
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+    s_main = ThreadingHTTPServer(("127.0.0.1", 0), AssetHandler)
+    s_frame = ThreadingHTTPServer(("127.0.0.1", 0), AssetHandler)
+    AssetHandler.frame_port = s_frame.server_port
+    for s in (s_main, s_frame):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+
+    try:
+        async with InvisiblePlaywright(
+            backend=backend,
+            headless=True,
+            seed=42,
+            humanize=False,
+            locale="en-US",
+            timezone="UTC",
+        ) as browser:
+            context = await browser.new_context()
+            if with_route:
+                await context.route("**/*", lambda route: route.continue_())
+            page = await context.new_page()
+
+            seen_types: Dict[str, str] = {}
+            body_results: Dict[str, bytes] = {}
+            body_errors: List[tuple[str, str]] = []
+            body_tasks: List[asyncio.Task[None]] = []
+
+            async def _read_finished(req: Any) -> None:
+                path = "/" + req.url.split("/", 3)[-1]
+                seen_types[path] = req.resource_type
+                resp = await req.response()
+                assert resp is not None
+                try:
+                    body_results[path] = await resp.body()
+                except Exception as exc:
+                    body_errors.append((path, repr(exc)))
+
+            page.on(
+                "requestfinished",
+                lambda r: body_tasks.append(asyncio.create_task(_read_finished(r))),
+            )
+
+            await page.goto(
+                f"http://127.0.0.1:{s_main.server_port}/", wait_until="load"
+            )
+            frame = next(f for f in page.frames if "/bframe" in f.url)
+            await frame.locator("body[data-ready='yes']").wait_for(timeout=30000)
+            if body_tasks:
+                await asyncio.gather(*body_tasks)
+
+            assert not body_errors, f"Unexpected response.body() errors: {body_errors}"
+            assert seen_types["/"] == "document"
+            assert seen_types["/bframe"] == "document"
+            assert seen_types["/style.css"] == "stylesheet"
+            assert seen_types["/tile.png"] == "image"
+            assert seen_types["/app.js"] == "script"
+            assert seen_types["/api-fetch"] == "fetch"
+            assert seen_types["/api-xhr"] == "xhr"
+            assert b"<img id='tile'" in body_results["/bframe"]
+            assert body_results["/tile.png"] == png_1x1
+            assert body_results["/api-fetch"] == b'{"ok":"fetch"}'
+            assert body_results["/api-xhr"] == b'{"ok":"xhr"}'
+            await context.close()
+    finally:
+        for s in (s_main, s_frame):
+            s.shutdown()
+            s.server_close()
+
+
+def test_chromium_sigkill_launcher_reaps_process_group_for_immediate_rmtree(
+    tmp_path: Path,
+) -> None:
+    import psutil
+    import shutil
+    import signal
+    import subprocess
+    import sys
+
+    worker_tmp = tmp_path / "google-browser-worker-sigkill-rmtree-check"
+    worker_tmp.mkdir(parents=True, exist_ok=True)
+    token = f"sigkill_tok_{os.urandom(8).hex()}"
+    child_env = dict(
+        os.environ,
+        TMPDIR=str(worker_tmp),
+        TMP=str(worker_tmp),
+        TEMP=str(worker_tmp),
+        INVPW_TEST_WORKER_TOKEN=token,
+    )
+    script = (
+        "import asyncio, sys\n"
+        "from invisible_playwright.async_api import InvisiblePlaywright\n"
+        "async def main():\n"
+        "    async with InvisiblePlaywright(backend='chromium', headless=True, seed=42, humanize=False, locale='en-US', timezone='UTC') as b:\n"
+        "        p = await b.new_page()\n"
+        "        await p.goto('data:text/html,<h1>ready</h1>')\n"
+        "        sys.stdout.write('READY\\n')\n"
+        "        sys.stdout.flush()\n"
+        "        await asyncio.Future()\n"
+        "asyncio.run(main())\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script],
+        env=child_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        line = proc.stdout.readline().strip()
+        assert line == "READY"
+
+        # Record Chromium descendants before SIGKILL (their /proc/environ is overwritten by setproctitle)
+        chrome_identities = []
+        for p in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                cmd = " ".join(p.info["cmdline"] or [])
+                if str(worker_tmp) in cmd:
+                    chrome_identities.append((p.pid, p.create_time()))
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        assert chrome_identities
+
+        # Send SIGKILL to worker, reap token-tagged guardians just like worker.py, then immediately rmtree(worker_tmp)
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=30)
+
+        tagged = []
+        for p in psutil.process_iter(["pid"]):
+            try:
+                if p.environ().get("INVPW_TEST_WORKER_TOKEN") == token:
+                    p.terminate()
+                    tagged.append(p)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        psutil.wait_procs(tagged, timeout=30)
+
+        # Strict non-ignoring rmtree must succeed with zero ENOTEMPTY
+        shutil.rmtree(worker_tmp, ignore_errors=False)
+        assert not worker_tmp.exists()
+
+        surviving = []
+        for pid, ctime in chrome_identities:
+            try:
+                p = psutil.Process(pid)
+                if p.is_running() and p.status() != psutil.STATUS_ZOMBIE and abs(p.create_time() - ctime) < 1.0:
+                    surviving.append(pid)
+            except psutil.NoSuchProcess:
+                pass
+        assert surviving == []
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=30)

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.2] - 2026-11-20
+
+### Fixed
+- **Chromium `request.resource_type` mapping (`_juggler/_marshal.py`, `_cdp/bridge.py`)**: Mapped Chromium CDP `ResourceType` values (`Document`, `Stylesheet`, `Image`, `Media`, `Font`, `Script`, `TextTrack`, `XHR`, `Fetch`, `EventSource`, `WebSocket`, `Manifest`, `Ping`, `CSPViolationReport`, etc.) in `_marshal._resource_type` to match Playwright's `crNetworkManager.ts::toResourceType` 1-to-1 across both `Fetch.requestPaused` (`route()`) and `Network.requestWillBeSent` paths instead of falling back to `"other"`.
+- **Chromium cross-site OOPIF navigation `response.body()`**: When `Network.loadingFinished` fires on the parent session before the committed OOPIF renderer's `InspectorNetworkAgent` finishes buffering the transferred document stream, `Network.getResponseBody` awaits child-session readiness via `_ctx_cv` and reads from the committed child CDP session instead of failing with `No resource with given identifier found`, while deduplicating cross-session `responseReceived`/`requestFinished` events and preserving `paused_sessions` for `Fetch.*` interception replies.
+- **Chromium `SIGKILL` process-group reap & container `ENOTEMPTY` profile cleanup**: Spawns a lightweight POSIX life-pipe guardian around Chromium's process group (`setsid=True`) that preserves inherited worker tokens in `/proc/<pid>/environ` (which Chromium's `setproctitle` overwrites on its own processes), delivers immediate `SIGKILL` to the entire Chromium process group when the launcher exits via `SIGKILL`, and waits for the process group to exit before returning so immediate `shutil.rmtree()` of `Default/` never races a shutting-down Chromium thread.
+- **Concurrent caller intrinsics extraction**: Kept the random-event capture listener repeatable (`{capture: true}` without `once: true`) so concurrent early `framenavigated` `evaluate_handle` calls and context-creation pre-capture never race to consume a single-shot listener.
+
 ## [0.57.1] - 2026-11-20
 
 ### Added

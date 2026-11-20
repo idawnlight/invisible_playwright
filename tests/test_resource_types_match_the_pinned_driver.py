@@ -43,3 +43,43 @@ def test_every_cause_the_driver_knows_has_the_same_resource_type_here():
 def test_a_beacon_is_a_beacon_and_a_csp_report_a_cspreport():
     assert _marshal._resource_type({"cause": "TYPE_BEACON"}) == "beacon"
     assert _marshal._resource_type({"cause": "TYPE_CSP_REPORT"}) == "cspreport"
+
+
+def _cdp_driver_table():
+    spec = importlib.util.find_spec("playwright")
+    if spec is None or not spec.submodule_search_locations:
+        pytest.fail("the pinned Playwright driver is not installed: the dev extra pins it", pytrace=False)
+    bundle = pathlib.Path(list(spec.submodule_search_locations)[0]) / "driver" / "package" / "lib" / "coreBundle.js"
+    text = bundle.read_text(encoding="utf-8", errors="replace")
+    idx = text.index('case "CSPViolationReport":')
+    start = text.rindex("function toResourceType(", 0, idx)
+    end = text.index("\n}\n", idx) + 2
+    block = text[start:end]
+    mapping = {}
+    pending_cases = []
+    for line in block.splitlines():
+        m_case = re.search(r'case "([A-Za-z]+)":', line)
+        if m_case:
+            pending_cases.append(m_case.group(1))
+            continue
+        if "default:" in line:
+            pending_cases.append("Other")
+            continue
+        m_ret = re.search(r'return "([a-z]+)";', line)
+        if m_ret and pending_cases:
+            for c in pending_cases:
+                mapping[c] = m_ret.group(1)
+            pending_cases.clear()
+    return mapping
+
+
+def test_every_cdp_resource_type_the_driver_knows_has_the_same_resource_type_here():
+    driver = _cdp_driver_table()
+    assert len(driver) >= 15, driver
+    ours = {
+        cdp_type: _marshal._resource_type({"resourceType": cdp_type})
+        for cdp_type in driver
+    }
+    assert ours == driver, {
+        k: (ours[k], driver[k]) for k in driver if ours[k] != driver[k]
+    }

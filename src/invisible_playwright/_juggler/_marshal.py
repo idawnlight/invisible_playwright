@@ -206,6 +206,43 @@ _CAUSE_TO_RESOURCE_TYPE = {
 _INTERNAL_CAUSE_TO_RESOURCE_TYPE = {
     "TYPE_INTERNAL_EVENTSOURCE": "eventsource",
 }
+_CDP_TO_RESOURCE_TYPE = {
+    "Document": "document",
+    "Stylesheet": "stylesheet",
+    "Image": "image",
+    "Media": "media",
+    "Font": "font",
+    "Script": "script",
+    "TextTrack": "texttrack",
+    "XHR": "xhr",
+    "Fetch": "fetch",
+    "EventSource": "eventsource",
+    "WebSocket": "websocket",
+    "Manifest": "manifest",
+    "Ping": "ping",
+    "CSPViolationReport": "cspreport",
+    "Prefetch": "other",
+    "SignedExchange": "other",
+    "Preflight": "other",
+    "FedCM": "other",
+    "Other": "other",
+    "document": "document",
+    "stylesheet": "stylesheet",
+    "image": "image",
+    "media": "media",
+    "font": "font",
+    "script": "script",
+    "texttrack": "texttrack",
+    "xhr": "xhr",
+    "fetch": "fetch",
+    "eventsource": "eventsource",
+    "websocket": "websocket",
+    "manifest": "manifest",
+    "ping": "ping",
+    "cspreport": "cspreport",
+    "beacon": "beacon",
+    "other": "other",
+}
 
 
 def _resource_type(params: Dict) -> str:
@@ -216,9 +253,13 @@ def _resource_type(params: Dict) -> str:
     in the driver, so `request.resource_type` agrees across transports."""
     internal = params.get("internalCause") or ""
     cause = params.get("cause") or ""
-    return (_INTERNAL_CAUSE_TO_RESOURCE_TYPE.get(internal)
-            or _CAUSE_TO_RESOURCE_TYPE.get(cause)
-            or "other")
+    cdp_type = params.get("resourceType") or ""
+    return (
+        _INTERNAL_CAUSE_TO_RESOURCE_TYPE.get(internal)
+        or _CAUSE_TO_RESOURCE_TYPE.get(cause)
+        or _CDP_TO_RESOURCE_TYPE.get(cdp_type)
+        or "other"
+    )
 
 
 def _button(name: Optional[str]) -> int:
