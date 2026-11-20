@@ -813,6 +813,10 @@ class _PageSessionState:
     installed_doc_scripts: Dict[str, List[str]] = field(default_factory=dict)
     # OOPIF child CDP session ids attached beneath this page
     child_sessions: set[str] = field(default_factory=set)
+    # Dedicated worker CDP session ids attached beneath this page or its OOPIFs
+    worker_sessions: set[str] = field(default_factory=set)
+    # worker_sid -> owning frame_id for requests initiated inside that worker
+    worker_frames: Dict[str, str] = field(default_factory=dict)
     # child_sid -> root frame_id of that OOPIF session
     session_root_frame: Dict[str, str] = field(default_factory=dict)
     # frame_id -> CDP session_id owning that frame (defaults to session_id)
@@ -827,6 +831,8 @@ class _PageSessionState:
     req_frames: Dict[str, tuple[str, bool]] = field(default_factory=dict)
     # requestId -> exact Blink ResourceType ("Fetch" vs "XHR") from Network.requestWillBeSent
     req_types: Dict[str, str] = field(default_factory=dict)
+    sent_requests: set[str] = field(default_factory=set)
+    unpaused_requests: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     responded_requests: set[str] = field(default_factory=set)
     finished_requests: set[str] = field(default_factory=set)
     # (session_id, utility_ctx_id) where __invpwLanding is already bootstrapped
@@ -1731,6 +1737,71 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             self._record_bridge_error(f"_init_oopif_session({fid})", exc)
             self._raw.post("Runtime.runIfWaitingForDebugger", session=child_sid)
 
+    def _init_worker_session(
+        self,
+        parent_session_id: Optional[str],
+        child_sid: str,
+        target_info: Dict[str, Any],
+    ) -> None:
+        state: Optional[_PageSessionState] = None
+        parent_fid = str(target_info.get("parentFrameId") or "")
+        with self._lock:
+            if parent_session_id:
+                state = self._pages.get(parent_session_id) or self._child_to_page.get(
+                    parent_session_id
+                )
+        if state is None and parent_fid:
+            state = self._find_page_for_frame(parent_session_id, parent_fid)
+        if state is None:
+            self._raw.post("Runtime.runIfWaitingForDebugger", session=child_sid)
+            return
+
+        worker_fid = (
+            parent_fid
+            or (
+                state.worker_frames.get(parent_session_id)
+                if parent_session_id
+                else None
+            )
+            or (
+                state.session_root_frame.get(parent_session_id)
+                if parent_session_id
+                else None
+            )
+            or state.main_frame_id
+        )
+        with self._lock:
+            self._child_to_page[child_sid] = state
+            state.worker_sessions.add(child_sid)
+            state.worker_frames[child_sid] = worker_fid
+
+        try:
+            self._raw.post("Network.enable", session=child_sid)
+            ctx = self._get_ctx(state.context_id)
+            if ctx.cache_disabled or state.intercepting or ctx.intercepting:
+                self._raw.post(
+                    "Network.setCacheDisabled",
+                    {"cacheDisabled": True},
+                    session=child_sid,
+                )
+            if ctx.extra_headers:
+                self._raw.post(
+                    "Network.setExtraHTTPHeaders",
+                    {"headers": dict(ctx.extra_headers)},
+                    session=child_sid,
+                )
+            self._raw.post(
+                "Target.setAutoAttach",
+                {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True},
+                session=child_sid,
+            )
+            self._raw.post("Runtime.runIfWaitingForDebugger", session=child_sid)
+        except juggler_conn.TargetClosedError:
+            pass
+        except Exception as exc:
+            self._record_bridge_error(f"_init_worker_session({child_sid})", exc)
+            self._raw.post("Runtime.runIfWaitingForDebugger", session=child_sid)
+
     def _announce_frame_tree(
         self,
         state: _PageSessionState,
@@ -2293,22 +2364,41 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 self._init_attached_page(child_sid, info)
             elif t_type == "iframe" and child_sid:
                 self._init_oopif_session(session_id, child_sid, info)
+            elif t_type == "worker" and child_sid:
+                self._init_worker_session(session_id, child_sid, info)
             elif child_sid and params.get("waitingForDebugger"):
                 self._raw.post("Runtime.runIfWaitingForDebugger", session=child_sid)
             return
 
         if method == "Target.detachedFromTarget":
             child_sid = params.get("sessionId")
+            aborted_worker_reqs: List[tuple[str, str]] = []
             if child_sid:
                 with self._lock:
                     st = self._pages.pop(child_sid, None)
                     if st:
                         self._target_to_session.pop(st.target_id, None)
-                        for sub_sid in list(st.child_sessions):
+                        for sub_sid in [
+                            *list(st.child_sessions),
+                            *list(st.worker_sessions),
+                        ]:
                             self._child_to_page.pop(sub_sid, None)
                     else:
                         parent_st = self._child_to_page.pop(child_sid, None)
                         if parent_st is not None:
+                            was_worker = child_sid in parent_st.worker_sessions
+                            parent_st.worker_sessions.discard(child_sid)
+                            parent_st.worker_frames.pop(child_sid, None)
+                            if was_worker:
+                                for r_id in list(parent_st.sent_requests):
+                                    if (
+                                        r_id not in parent_st.finished_requests
+                                        and parent_st.req_sessions.get(r_id) == child_sid
+                                    ):
+                                        parent_st.finished_requests.add(r_id)
+                                        aborted_worker_reqs.append(
+                                            (parent_st.session_id, r_id)
+                                        )
                             parent_st.child_sessions.discard(child_sid)
                             parent_st.session_root_frame.pop(child_sid, None)
                             parent_st.fetch_enabled_sessions.discard(child_sid)
@@ -2337,6 +2427,16 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                             for fid, f_sid in list(parent_st.frame_sessions.items()):
                                 if f_sid == child_sid:
                                     parent_st.frame_sessions[fid] = parent_st.session_id
+                for p_sid, r_id in aborted_worker_reqs:
+                    self.dispatch_event(
+                        "Network.requestFailed",
+                        {
+                            "requestId": r_id,
+                            "errorCode": "net::ERR_ABORTED",
+                            "responseEndTime": 0,
+                        },
+                        p_sid,
+                    )
                 if st:
                     self.dispatch_event(
                         "Browser.detachedFromTarget",
@@ -2917,10 +3017,18 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             state.paused_sessions[net_id] = raw_sid
             state.req_sessions[net_id] = raw_sid
             req_obj = params.get("request") or {}
-            fid = params.get("frameId") or state.main_frame_id
+            fid = (
+                params.get("frameId")
+                or (state.req_frames.get(net_id) or ("", False))[0]
+                or state.worker_frames.get(raw_sid)
+                or state.session_root_frame.get(raw_sid)
+                or state.main_frame_id
+            )
             is_nav = params.get("resourceType") == "Document"
             if net_id:
+                state.unpaused_requests.pop(net_id, None)
                 state.req_frames[net_id] = (fid, is_nav)
+                state.sent_requests.add(net_id)
             nav_id = f"nav-{net_id}" if is_nav else None
             if is_nav and nav_id:
                 state.nav_loaders[fid] = nav_id
@@ -2958,7 +3066,12 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         if method == "Network.requestWillBeSent":
             ctx = self._get_ctx(state.context_id)
             req_id = params.get("requestId")
-            fid = params.get("frameId") or state.main_frame_id
+            fid = (
+                params.get("frameId")
+                or state.worker_frames.get(raw_sid)
+                or state.session_root_frame.get(raw_sid)
+                or state.main_frame_id
+            )
             is_nav = params.get("type") == "Document"
             if req_id:
                 if raw_sid != page_sid or req_id not in state.req_sessions:
@@ -2966,17 +3079,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 state.req_frames[req_id] = (fid, is_nav)
                 if params.get("type"):
                     state.req_types[req_id] = str(params["type"])
-            if state.intercepting or ctx.intercepting:
-                return
             req_obj = params.get("request") or {}
             nav_id = params.get("loaderId") if is_nav else None
-            if is_nav and nav_id:
-                state.nav_loaders[fid] = nav_id
-                self.dispatch_event(
-                    "Page.navigationStarted",
-                    {"frameId": fid, "navigationId": nav_id},
-                    page_sid,
-                )
             post_b64 = None
             if req_obj.get("postData") is not None:
                 post_b64 = base64.b64encode(
@@ -2996,6 +3100,21 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 **({"navigationId": nav_id} if nav_id else {}),
                 **({"postData": post_b64} if post_b64 is not None else {}),
             }
+            if state.intercepting or ctx.intercepting:
+                if req_id and req_id not in state.sent_requests:
+                    state.unpaused_requests[req_id] = j_req
+                return
+            if req_id:
+                if req_id in state.sent_requests and not params.get("redirectResponse"):
+                    return
+                state.sent_requests.add(req_id)
+            if is_nav and nav_id:
+                state.nav_loaders[fid] = nav_id
+                self.dispatch_event(
+                    "Page.navigationStarted",
+                    {"frameId": fid, "navigationId": nav_id},
+                    page_sid,
+                )
             self.dispatch_event("Network.requestWillBeSent", j_req, page_sid)
             return
 
@@ -3010,6 +3129,10 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 if req_id in state.responded_requests:
                     return
                 state.responded_requests.add(req_id)
+                unpaused = state.unpaused_requests.pop(req_id, None)
+                if unpaused is not None and req_id not in state.sent_requests:
+                    state.sent_requests.add(req_id)
+                    self.dispatch_event("Network.requestWillBeSent", unpaused, page_sid)
             raw_headers = resp.get("headers") or {}
             for hk, hv in raw_headers.items():
                 if (
@@ -3048,6 +3171,10 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 if req_id in state.finished_requests:
                     return
                 state.finished_requests.add(req_id)
+                unpaused = state.unpaused_requests.pop(req_id, None)
+                if unpaused is not None and req_id not in state.sent_requests:
+                    state.sent_requests.add(req_id)
+                    self.dispatch_event("Network.requestWillBeSent", unpaused, page_sid)
             self.dispatch_event(
                 "Network.requestFinished",
                 {"requestId": req_id, "responseEndTime": params.get("timestamp") or 0},
@@ -3060,9 +3187,20 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             state.paused_requests.pop(req_id, None)
             was_attachment = bool(req_id and req_id in state.attachment_requests)
             if req_id:
+                if raw_sid != page_sid:
+                    state.req_sessions[req_id] = raw_sid
                 state.attachment_requests.discard(req_id)
                 state.attempted_auth.discard(f"{req_id}:Proxy")
                 state.attempted_auth.discard(f"{req_id}:Server")
+                with self._ctx_cv:
+                    self._ctx_cv.notify_all()
+                if req_id in state.finished_requests:
+                    return
+                state.finished_requests.add(req_id)
+                unpaused = state.unpaused_requests.pop(req_id, None)
+                if unpaused is not None and req_id not in state.sent_requests:
+                    state.sent_requests.add(req_id)
+                    self.dispatch_event("Network.requestWillBeSent", unpaused, page_sid)
             err_text = params.get("errorText") or "net::ERR_FAILED"
             if params.get("type") == "Document":
                 fid = params.get("frameId")
@@ -4390,7 +4528,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             except juggler_conn.ProtocolError as b_exc:
                 req_fid, is_nav = state.req_frames.get(req_id, ("", False))
                 if "No resource with given identifier found" not in str(b_exc) or (
-                    not is_nav and not state.child_sessions
+                    not is_nav and not state.child_sessions and not state.worker_sessions
                 ):
                     raise
                 last_err: Exception = b_exc
@@ -4404,7 +4542,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     fsid = state.frame_sessions.get(req_fid) if req_fid else None
                     if fsid and fsid not in cand_sids and fsid != req_sid:
                         cand_sids.append(fsid)
-                    for csid in list(state.child_sessions):
+                    for csid in [*list(state.child_sessions), *list(state.worker_sessions)]:
                         if csid not in cand_sids and csid != req_sid:
                             cand_sids.append(csid)
                     for csid in cand_sids:

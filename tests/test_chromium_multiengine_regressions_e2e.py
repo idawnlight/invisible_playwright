@@ -1749,3 +1749,208 @@ def test_chromium_sigkill_launcher_reaps_process_group_for_immediate_rmtree(
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=30)
+
+
+@pytest.mark.parametrize("backend", ["firefox", "chromium"])
+@pytest.mark.parametrize("with_route", [False, True])
+def test_dual_backend_dedicated_worker_lifecycle_oopif_subrequests_and_failure(
+    backend: str, with_route: bool
+) -> None:
+    asyncio.run(
+        _run_dedicated_worker_lifecycle_oopif_subrequests_and_failure(
+            backend, with_route
+        )
+    )
+
+
+async def _run_dedicated_worker_lifecycle_oopif_subrequests_and_failure(
+    backend: str, with_route: bool
+) -> None:
+    worker_js = (
+        b"importScripts('/recaptcha/worker-import.js');"
+        b"self.onmessage = async (ev) => {"
+        b"  if (ev.data === 'ping') {"
+        b"    const sub = await fetch('/recaptcha/worker-sub').then(r => r.text());"
+        b"    const nw = new Worker('/recaptcha/nested-worker.js');"
+        b"    const nested = await new Promise(res => { nw.onmessage = e => res(e.data); nw.postMessage('hi'); });"
+        b"    nw.terminate();"
+        b"    self.postMessage({ reply: 'pong:' + self.IMPORTED_TAG + ':' + sub + ':' + nested });"
+        b"  }"
+        b"};"
+    )
+
+    class WorkerHandler(BaseHTTPRequestHandler):
+        frame_port = 0
+
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            if self.path == "/recaptcha/reset-worker.js":
+                self.close_connection = True
+                return
+            if self.path == "/":
+                body = (
+                    "<!doctype html><html><body>"
+                    "<script>"
+                    "window.topWorkerReply = null;"
+                    "const tw = new Worker('/top-worker.js');"
+                    "tw.onmessage = e => { window.topWorkerReply = e.data; document.documentElement.dataset.topDone = 'yes'; };"
+                    "tw.postMessage('go');"
+                    "</script>"
+                    f"<iframe id='anchor' src='http://localhost:{WorkerHandler.frame_port}/recaptcha/anchor'></iframe>"
+                    "</body></html>"
+                ).encode("utf-8")
+                mime = "text/html; charset=utf-8"
+            elif self.path == "/top-worker.js":
+                body = b"self.onmessage = e => self.postMessage('top:' + e.data);"
+                mime = "application/javascript"
+            elif self.path == "/recaptcha/anchor":
+                body = (
+                    "<!doctype html><html><body><div>anchor</div>"
+                    "<script>"
+                    "window.oopifWorkerResult = null;"
+                    "window.deadWorkerFailed = false;"
+                    "const w = new Worker('/recaptcha/enterprise/webworker.js');"
+                    "w.onmessage = e => {"
+                    "  window.oopifWorkerResult = e.data;"
+                    "  const bad = new Worker('/recaptcha/reset-worker.js');"
+                    "  bad.onerror = () => { window.deadWorkerFailed = true; document.body.dataset.allDone = 'yes'; };"
+                    "};"
+                    "w.postMessage('ping');"
+                    "</script></body></html>"
+                ).encode("utf-8")
+                mime = "text/html; charset=utf-8"
+            elif self.path == "/recaptcha/enterprise/webworker.js":
+                body = worker_js
+                mime = "application/javascript"
+            elif self.path == "/recaptcha/worker-import.js":
+                body = b"self.IMPORTED_TAG = 'imp';"
+                mime = "application/javascript"
+            elif self.path == "/recaptcha/worker-sub":
+                body = b"subok"
+                mime = "text/plain"
+            elif self.path == "/recaptcha/nested-worker.js":
+                body = b"self.onmessage = e => self.postMessage('nested:' + e.data);"
+                mime = "application/javascript"
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+    s_main = ThreadingHTTPServer(("127.0.0.1", 0), WorkerHandler)
+    s_frame = ThreadingHTTPServer(("127.0.0.1", 0), WorkerHandler)
+    WorkerHandler.frame_port = s_frame.server_port
+    for s in (s_main, s_frame):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+
+    try:
+        async with InvisiblePlaywright(
+            backend=backend,
+            headless=True,
+            seed=42,
+            humanize=False,
+            locale="en-US",
+            timezone="UTC",
+        ) as browser:
+            context = await browser.new_context()
+            if with_route:
+                await context.route("**/*", lambda route: route.continue_())
+            page = await context.new_page()
+
+            pending: set[Any] = set()
+            started_counts: Dict[str, int] = {}
+            finished_urls: Dict[str, Any] = {}
+            failed_urls: Dict[str, Optional[str]] = {}
+            all_settled = asyncio.Event()
+
+            def _check_settled() -> None:
+                if (
+                    not pending
+                    and any("/recaptcha/worker-sub" in u for u in finished_urls)
+                    and any("/recaptcha/reset-worker.js" in u for u in failed_urls)
+                ):
+                    all_settled.set()
+
+            def on_req(req: Any) -> None:
+                pending.add(req)
+                started_counts[req.url] = started_counts.get(req.url, 0) + 1
+
+            def on_fin(req: Any) -> None:
+                pending.discard(req)
+                finished_urls[req.url] = req
+                _check_settled()
+
+            def on_fail(req: Any) -> None:
+                pending.discard(req)
+                failed_urls[req.url] = req.failure
+                _check_settled()
+
+            page.on("request", on_req)
+            page.on("requestfinished", on_fin)
+            page.on("requestfailed", on_fail)
+
+            await page.goto(
+                f"http://127.0.0.1:{s_main.server_port}/", wait_until="load"
+            )
+            await page.locator("html[data-top-done='yes']").wait_for(
+                state="attached", timeout=30000
+            )
+            frame = next(f for f in page.frames if "/recaptcha/anchor" in f.url)
+            await frame.locator("body[data-all-done='yes']").wait_for(
+                state="attached", timeout=30000
+            )
+            await all_settled.wait()
+
+            assert pending == set(), f"Unsettled pending requests: {[r.url for r in pending]}"
+            assert await page.evaluate("window.topWorkerReply") == "top:go"
+            assert await frame.evaluate("window.oopifWorkerResult") == {
+                "reply": "pong:imp:subok:nested:hi"
+            }
+            assert await frame.evaluate("window.deadWorkerFailed") is True
+
+            top_w_url = f"http://127.0.0.1:{s_main.server_port}/top-worker.js"
+            oopif_w_url = (
+                f"http://localhost:{s_frame.server_port}/recaptcha/enterprise/webworker.js"
+            )
+            sub_url = f"http://localhost:{s_frame.server_port}/recaptcha/worker-sub"
+            imp_url = (
+                f"http://localhost:{s_frame.server_port}/recaptcha/worker-import.js"
+            )
+            nested_url = (
+                f"http://localhost:{s_frame.server_port}/recaptcha/nested-worker.js"
+            )
+            reset_url = (
+                f"http://localhost:{s_frame.server_port}/recaptcha/reset-worker.js"
+            )
+
+            for u in (top_w_url, oopif_w_url, sub_url, imp_url):
+                assert started_counts.get(u) == 1, f"Duplicate or missing request for {u}: {started_counts}"
+                assert u in finished_urls, f"Missing requestfinished for {u}"
+            if backend == "chromium":
+                assert started_counts.get(nested_url) == 1
+                assert nested_url in finished_urls
+
+            assert started_counts.get(reset_url) == 1
+            assert reset_url in failed_urls and failed_urls[reset_url]
+
+            assert finished_urls[oopif_w_url].resource_type == "script"
+            assert finished_urls[oopif_w_url].frame == frame
+            assert finished_urls[sub_url].resource_type == "fetch"
+            assert finished_urls[sub_url].frame == frame
+
+            w_resp = await finished_urls[oopif_w_url].response()
+            assert w_resp is not None and await w_resp.body() == worker_js
+            sub_resp = await finished_urls[sub_url].response()
+            assert sub_resp is not None and await sub_resp.body() == b"subok"
+
+            await context.close()
+    finally:
+        for s in (s_main, s_frame):
+            s.shutdown()
+            s.server_close()

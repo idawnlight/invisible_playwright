@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.3] - 2026-11-20
+
+### Fixed
+- **Chromium dedicated `Worker` network lifecycle & cross-site OOPIF worker ownership (`_cdp/bridge.py`)**: Subscribes `Target.attachedToTarget(type="worker")` sessions (created by top-level pages, cross-site OOPIFs such as `recaptcha/enterprise/webworker.js`, or nested workers) to non-blocking `Network.enable` + `Target.setAutoAttach` before `Runtime.runIfWaitingForDebugger` and maps them to their owning page/frame (`worker_sessions`, `worker_frames`). Worker entry scripts (`worker.js`) and in-worker subrequests (`fetch()`, `importScripts()`, nested `new Worker()`) now deliver paired `response` + `requestfinished`/`requestfailed` events and `response.body()` under the original `Request` identity with zero duplicates, and in-flight worker requests aborted by `worker.terminate()` / target detach cleanly emit `requestfailed`.
+
 ## [0.57.2] - 2026-11-20
 
 ### Fixed
