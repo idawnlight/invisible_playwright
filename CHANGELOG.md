@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.4] - 2026-11-20
+
+### Fixed
+- **Chromium mid-navigation `page.evaluate(fn, arg)` world/epoch consistency (`_cdp/bridge.py`)**: `Runtime.callFunction` in `caller:` contexts now invokes `Runtime.callFunctionOn` directly against `args[0]["objectId"]` (the evaluated function handle itself) with `args[1:]` instead of resolving a fresh `window` handle across `state.main_world_to_frame`, and `_resolve_caller_window` / `_parse_util_ctx` strictly enforce caller epoch matching instead of crossing into a replacement document's main world. Navigations occurring between `_run_callers_code`'s two phases now either finish cleanly in the originating world or raise standard Playwright `Execution context was destroyed` instead of `Runtime.callFunctionOn: Argument should belong to the same JavaScript world as target object`.
+
 ## [0.57.3] - 2026-11-20
 
 ### Fixed

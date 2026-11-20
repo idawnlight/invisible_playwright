@@ -1171,7 +1171,12 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
     def _parse_util_ctx(
         self, state: _PageSessionState, ctx_id: str
     ) -> tuple[str, int]:
-        if ":" in ctx_id and not ctx_id.startswith("caller:"):
+        if ctx_id.startswith("caller:"):
+            v8_pair = state.caller_v8_contexts.get(ctx_id)
+            if v8_pair is not None:
+                return v8_pair
+            raise juggler_conn.ProtocolError("Execution context was destroyed!")
+        if ":" in ctx_id:
             sid_part, int_part = ctx_id.rsplit(":", 1)
             return sid_part, int(int_part)
         sid = state.ctx_sessions.get(ctx_id) or state.session_id
@@ -3582,13 +3587,20 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             return cached
         parts = caller_ctx.split(":")
         fid = parts[1] if len(parts) >= 2 else state.main_frame_id
-        frame_sid = self._session_for_frame(state, fid)
+        cur_caller = state.caller_contexts.get(fid)
+        if cur_caller is not None and cur_caller != caller_ctx:
+            raise juggler_conn.ProtocolError("Execution context was destroyed!")
+        v8_pair = state.caller_v8_contexts.get(caller_ctx)
+        frame_sid = (
+            v8_pair[0] if v8_pair is not None else self._session_for_frame(state, fid)
+        )
         oid: Optional[str] = None
-        main_v8_ctx: Optional[int] = None
-        for (cand_sid, cand_v8), cand_fid in list(state.main_world_to_frame.items()):
-            if cand_fid == fid and cand_sid == frame_sid:
-                if main_v8_ctx is None or cand_v8 > main_v8_ctx:
-                    main_v8_ctx = cand_v8
+        main_v8_ctx: Optional[int] = v8_pair[1] if v8_pair is not None else None
+        if main_v8_ctx is None and cur_caller is None:
+            for (cand_sid, cand_v8), cand_fid in list(state.main_world_to_frame.items()):
+                if cand_fid == fid and cand_sid == frame_sid:
+                    if main_v8_ctx is None or cand_v8 > main_v8_ctx:
+                        main_v8_ctx = cand_v8
 
         if main_v8_ctx is not None:
             try:
@@ -3607,6 +3619,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 self._record_result_object(state, frame_sid, res_obj)
             except juggler_conn.ProtocolError:
                 state.main_world_to_frame.pop((frame_sid, main_v8_ctx), None)
+                if v8_pair is not None:
+                    raise juggler_conn.ProtocolError("Execution context was destroyed!")
                 oid = None
 
         if not oid and (fid == state.main_frame_id or frame_sid != state.session_id):
@@ -4221,13 +4235,31 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         if (args and isinstance(args[0], dict))
                         else None
                     )
-                    if first_oid and len(args) == 1:
+                    v8_pair = state.caller_v8_contexts.get(ctx_id)
+                    if first_oid:
                         call_sid = self._session_for_object(state, first_oid)
                         res = self._raw.send(
                             "Runtime.callFunctionOn",
                             {
                                 "objectId": first_oid,
-                                "functionDeclaration": f"function() {{ return ({decl})(this); }}",
+                                "functionDeclaration": (
+                                    f"function(...__a) {{ return ({decl}).call(globalThis, this, ...__a); }}"
+                                ),
+                                "arguments": args[1:],
+                                "returnByValue": by_value,
+                                "awaitPromise": True,
+                            },
+                            session=call_sid,
+                            timeout=timeout,
+                        )
+                    elif v8_pair is not None:
+                        call_sid, call_int = v8_pair
+                        res = self._raw.send(
+                            "Runtime.callFunctionOn",
+                            {
+                                "executionContextId": call_int,
+                                "functionDeclaration": decl,
+                                "arguments": args,
                                 "returnByValue": by_value,
                                 "awaitPromise": True,
                             },
@@ -4272,6 +4304,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         "Cannot find context",
                         "Execution context was destroyed",
                         "Cannot find object with id",
+                        "Argument should belong to the same JavaScript world",
                     )
                 ):
                     raise juggler_conn.ProtocolError(

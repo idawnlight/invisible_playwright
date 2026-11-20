@@ -1954,3 +1954,76 @@ async def _run_dedicated_worker_lifecycle_oopif_subrequests_and_failure(
         for s in (s_main, s_frame):
             s.shutdown()
             s.server_close()
+
+
+@pytest.mark.parametrize("backend", ["firefox", "chromium"])
+def test_dual_backend_mid_evaluate_navigation_reports_context_destroyed(
+    backend: str,
+) -> None:
+    asyncio.run(_run_mid_evaluate_navigation_reports_context_destroyed(backend))
+
+
+async def _run_mid_evaluate_navigation_reports_context_destroyed(
+    backend: str,
+) -> None:
+    class NavRaceHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            if self.path.startswith("/start"):
+                body = b"<!doctype html><title>start</title><div id='node'>src</div>"
+            else:
+                body = b"<!doctype html><title>end</title><div id='node'>dst</div>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), NavRaceHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        async with InvisiblePlaywright(
+            backend=backend,
+            headless=True,
+            seed=42,
+            humanize=False,
+            locale="en-US",
+            timezone="UTC",
+        ) as browser:
+            page = await browser.new_page()
+            for idx in range(5):
+                await page.goto(
+                    f"http://127.0.0.1:{srv.server_port}/start?i={idx}",
+                    wait_until="load",
+                )
+                # Verify normal locator.evaluate(fn, arg) with both node adoption and argument passing
+                tag_res = await page.locator("#node").evaluate(
+                    "(el, extra) => ({ text: el.textContent, k: extra.k })",
+                    {"k": idx},
+                )
+                assert tag_res == {"text": "src", "k": idx}
+
+                # Trigger navigation between phase 1 (returning function handle) and phase 2 (invoking function with arg)
+                try:
+                    val = await page.evaluate(
+                        "(() => { location.href = '/end'; return ({capture_html}) => ({ url: location.href, html: capture_html ? document.title : null }); })()",
+                        {"capture_html": True},
+                    )
+                    assert val["html"] in ("start", "end")
+                except Exception as exc:
+                    msg = str(exc)
+                    assert "same JavaScript world" not in msg
+                    assert "Execution context was destroyed" in msg
+                await page.wait_for_url("**/end", timeout=30000)
+                await page.wait_for_load_state("load")
+                after = await page.evaluate(
+                    "({capture_html}) => ({ title: document.title, ok: capture_html })",
+                    {"capture_html": True},
+                )
+                assert after == {"title": "end", "ok": True}
+    finally:
+        srv.shutdown()
+        srv.server_close()

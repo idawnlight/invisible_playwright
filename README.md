@@ -13,7 +13,7 @@ native stealth browser engines:
   `llvmpipe` WebGL1/2 parameters while driving `--remote-debugging-pipe` with
   `navigator.webdriver === false` and zero `Runtime.enable` leaks.
 
-This release pairs `invisible_core 160.78.1` with `invisible_playwright 0.57.3`
+This release pairs `invisible_core 160.78.1` with `invisible_playwright 0.57.4`
 and bundles the Playwright Python 1.61 client (both `sync_api` and `async_api`).
 
 ## Install
@@ -31,7 +31,7 @@ python3 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.78.1" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.57.3"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.57.4"
 ```
 
 See [the installation guide](docs/installation.md) for Ubuntu/Linux system
