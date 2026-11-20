@@ -23,6 +23,7 @@ import base64
 from contextlib import ExitStack
 import gc
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
 import json
 from pathlib import Path
 import select
@@ -1283,6 +1284,244 @@ async def _run_true_cross_site_oopif_127_to_localhost(with_route: bool) -> None:
             if with_route:
                 assert any("localhost" in u for u in routed_urls)
 
+            await context.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_chromium_long_tmpdir_singleton_socket_launch_and_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deep_tmp = (
+        tmp_path
+        / "google-browser-worker-nested-directory-exceeding-unix-sun-path-limit"
+    )
+    deep_tmp.mkdir(parents=True, exist_ok=True)
+    assert len(str(deep_tmp).encode("utf-8")) > 65
+    monkeypatch.setenv("TMPDIR", str(deep_tmp))
+    monkeypatch.setenv("TMP", str(deep_tmp))
+    monkeypatch.setenv("TEMP", str(deep_tmp))
+    tempfile.tempdir = None
+    try:
+        asyncio.run(_run_long_tmpdir_singleton_socket_launch())
+    finally:
+        tempfile.tempdir = None
+
+
+async def _run_long_tmpdir_singleton_socket_launch() -> None:
+    before_short = {
+        n for n in os.listdir("/tmp") if n.startswith(f"ipw_t_{os.getpid()}_")
+    }
+    async with InvisiblePlaywright(
+        backend="chromium",
+        headless=True,
+        seed=42,
+        humanize=False,
+        locale="en-US",
+        timezone="UTC",
+    ) as browser:
+        page = await browser.new_page()
+        assert await page.evaluate("navigator.webdriver") is False
+        assert await page.evaluate("21 * 2") == 42
+    after_short = {
+        n for n in os.listdir("/tmp") if n.startswith(f"ipw_t_{os.getpid()}_")
+    }
+    assert after_short <= before_short
+
+
+def test_chromium_target_blank_noopener_popup_and_window_open() -> None:
+    asyncio.run(_run_target_blank_noopener_popup_and_window_open())
+
+
+async def _run_target_blank_noopener_popup_and_window_open() -> None:
+    class PopupHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            if self.path == "/":
+                body = (
+                    b"<!doctype html><html><body>"
+                    b"<a id='immediate' target='_blank' href='/popup?immediate'>Immediate</a>"
+                    b"<button id='wopen' onclick=\"window.open('/popup?wopen','_blank')\">Open</button>"
+                    b"</body></html>"
+                )
+            else:
+                body = (
+                    f"<!doctype html><html><head><title>Popup {self.path}</title></head>"
+                    f"<body><div id='p'>{self.path}</div></body></html>"
+                ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), PopupHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        async with InvisiblePlaywright(
+            backend="chromium",
+            headless=True,
+            seed=42,
+            humanize=0.2,
+            locale="en-US",
+            timezone="UTC",
+        ) as browser:
+            context = await browser.new_context()
+            page = await context.new_page()
+            seen_popups: List[Any] = []
+            page.on("popup", lambda p: seen_popups.append(p))
+
+            await page.goto(
+                f"http://127.0.0.1:{srv.server_port}/", wait_until="load"
+            )
+
+            async with context.expect_page() as p1_info:
+                await page.locator("#immediate").click()
+            pop1 = await p1_info.value
+            await pop1.wait_for_load_state("load")
+            assert pop1.url.endswith("/popup?immediate")
+            assert pop1 in context.pages
+            assert pop1 in seen_popups
+            await pop1.close()
+            assert len(context.pages) == 1
+
+            async with page.expect_popup() as p2_info:
+                await page.locator("#wopen").click()
+            pop2 = await p2_info.value
+            await pop2.wait_for_load_state("load")
+            assert pop2.url.endswith("/popup?wopen")
+            await pop2.close()
+            assert len(context.pages) == 1
+            await context.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+@pytest.mark.parametrize("backend", ["firefox", "chromium"])
+def test_dual_backend_caller_observer_isolation_and_isolated_handles(
+    backend: str,
+) -> None:
+    asyncio.run(_run_caller_observer_isolation_and_isolated_handles(backend))
+
+
+async def _run_caller_observer_isolation_and_isolated_handles(
+    backend: str,
+) -> None:
+    class ObserverHandler(BaseHTTPRequestHandler):
+        port_ref = 0
+
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            p = ObserverHandler.port_ref
+            if self.path == "/":
+                body = (
+                    "<!doctype html><html><body>"
+                    f"<iframe id='xf' width='400' height='300' src='http://localhost:{p}/frame'></iframe>"
+                    "</body></html>"
+                ).encode("utf-8")
+            else:
+                body = (
+                    "<!doctype html><html><body data-obs-calls='0' data-qs-calls='0'>"
+                    "<div id='status' data-step='init'>ready</div>"
+                    "<button id='mut' onclick=\"document.getElementById('status').setAttribute('data-step','clicked')\">Mutate</button>"
+                    "<script>"
+                    "window.pageCustomValue = 99;"
+                    "const NativeMO = window.MutationObserver;"
+                    "window.MutationObserver = class extends NativeMO {"
+                    "  constructor(cb) {"
+                    "    super(cb);"
+                    "    document.body.dataset.obsCalls = String(1 + Number(document.body.dataset.obsCalls));"
+                    "  }"
+                    "};"
+                    "const nativeQS = Document.prototype.querySelector;"
+                    "Document.prototype.querySelector = function(sel) {"
+                    "  document.body.dataset.qsCalls = String(1 + Number(document.body.dataset.qsCalls));"
+                    "  return nativeQS.call(this, sel);"
+                    "};"
+                    "</script></body></html>"
+                ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), ObserverHandler)
+    ObserverHandler.port_ref = srv.server_port
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        async with InvisiblePlaywright(
+            backend=backend,
+            headless=True,
+            seed=42,
+            humanize=False,
+            locale="en-US",
+            timezone="UTC",
+        ) as browser:
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(
+                f"http://127.0.0.1:{srv.server_port}/", wait_until="load"
+            )
+            frame = next(f for f in page.frames if "localhost" in f.url)
+
+            # 1. Default caller evaluate_handle sees page globals AND uses pristine MutationObserver
+            #    without adding any own keys on window.
+            has_invpw_keys = await frame.evaluate(
+                "Reflect.ownKeys(window).some(k => String(k).includes('invpw'))"
+            )
+            assert has_invpw_keys is False
+            assert await frame.evaluate("window.pageCustomValue") == 99
+
+            obs_handle = await frame.evaluate_handle(
+                """() => {
+                    const seen = [];
+                    const obs = new MutationObserver(recs => {
+                        for (const r of recs) seen.push(r.attributeName);
+                    });
+                    obs.observe(document.getElementById('status'), { attributes: true });
+                    return {
+                        drain: () => seen.splice(0),
+                        close: () => { obs.disconnect(); return seen.splice(0); }
+                    };
+                }"""
+            )
+            assert await frame.locator("body").get_attribute("data-obs-calls") == "0"
+            await frame.locator("#mut").click()
+            drained = await obs_handle.evaluate("h => h.drain()")
+            assert "data-step" in drained
+            await obs_handle.evaluate("h => h.close()")
+            await obs_handle.dispose()
+            assert await frame.locator("body").get_attribute("data-obs-calls") == "0"
+
+            # 2. Public isolated=True handle & Frame.evaluate_read bypass even prototype monkey-patching
+            iso_handle = await frame.evaluate_handle(
+                """() => {
+                    const el = document.querySelector('#status');
+                    return { step: el.getAttribute('data-step'), hasPageCustom: 'pageCustomValue' in window };
+                }""",
+                isolated=True,
+            )
+            assert await frame.locator("body").get_attribute("data-qs-calls") == "0"
+            assert await iso_handle.json_value() == {
+                "step": "clicked",
+                "hasPageCustom": False,
+            }
+            assert await iso_handle.evaluate("o => o.step") == "clicked"
+            await iso_handle.dispose()
+
+            read_val = await frame.evaluate_read(
+                "() => document.querySelector('#status').textContent",
+                isolated=True,
+            )
+            assert read_val == "ready"
+            assert await frame.locator("body").get_attribute("data-qs-calls") == "0"
             await context.close()
     finally:
         srv.shutdown()

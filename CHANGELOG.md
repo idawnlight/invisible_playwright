@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.1] - 2026-11-20
+
+### Added
+- **Public isolated execution world API (`isolated=True`) & `Frame.evaluate_read()`**: Added `isolated: bool = False` keyword parameter to `Page.evaluate`, `Page.evaluate_handle`, `Page.evaluate_read`, `Frame.evaluate`, `Frame.evaluate_handle`, and newly exposed public `Frame.evaluate_read` across both `sync_api` and `async_api`, plus `JSHandle.evaluate_handle` support on isolated handles across main frames and cross-site OOPIFs on both Firefox and Chromium.
+
+### Fixed
+- **Chromium Unix domain socket `sun_path` overflow under nested worker `TMPDIR`**: When the inherited `TMPDIR` exceeds 52 bytes on POSIX (where Chromium's `org.chromium.Chromium.XXXXXX/SingletonSocket` suffix would exceed the 107-byte `sockaddr_un.sun_path` limit and trigger `FATAL: process_singleton_posix.cc:315: Socket path too long`), `_cdp/dispatcher.py` allocates a short PID-attributed `/tmp/ipw_t_<pid>_*` socket directory swept on `SIGKILL` and removed by `SessionRemoval` on close.
+- **Chromium `<a target="_blank">` (`noopener`) popup delivery**: Made `_init_attached_page` 100% non-blocking via pipelined `post()` frames (`main_frame_id = target_id` upfront, immediate `Runtime.runIfWaitingForDebugger`) and deferred `Page.ready` on in-flight `openerId` popups until initial `Page.frameNavigated` commit so `context.on("page")`, `page.on("popup")`, and `context.pages` deliver popups reliably without blocking `invpw-cdp-events`.
+- **Chromium caller-world native constructor isolation (`MutationObserver`, `XMLSerializer`, etc.)**: Captures pristine native browser constructors at `DidClearWindowObject` with zero `window` keys or lingering listeners and binds them lexically via CSP-safe `Runtime.callFunctionOn` in `CALLER_WORLD`, preventing caller DOM observers from triggering page-wrapped `window.MutationObserver` while keeping page globals accessible.
+- **Cold-cache GeoIP download (`invisible_core==160.78.1`)**: Updates `GEOIP_REPO` to `daijro/geoip-all-in-one` after `CamoufoxCloud/geoip-all-in-one` began returning HTTP 404.
+
 ## [0.57.0] - 2026-11-20
 
 ### Fixed

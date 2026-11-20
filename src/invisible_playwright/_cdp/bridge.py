@@ -277,6 +277,46 @@ def _wrap_binding_script(native: str, ev_name: str, script: str) -> str:
     return wrapper + script
 
 
+_INTRINSICS_NAMES = (
+    "MutationObserver",
+    "ResizeObserver",
+    "IntersectionObserver",
+    "PerformanceObserver",
+    "XMLSerializer",
+    "DOMParser",
+    "CustomEvent",
+    "Event",
+    "TreeWalker",
+    "NodeFilter",
+    "Range",
+    "getComputedStyle",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "setTimeout",
+    "clearTimeout",
+    "setInterval",
+    "clearInterval",
+    "queueMicrotask",
+)
+_INTRINSICS_DESTRUCTURE = ", ".join(_INTRINSICS_NAMES)
+
+
+def _build_intrinsics_bootstrap_js(ev_name: str) -> str:
+    fields = ", ".join(
+        f"{n}: typeof {n} !== 'undefined' ? {n} : undefined"
+        for n in _INTRINSICS_NAMES
+    )
+    return (
+        "(() => {"
+        f" const intr = {{ {fields} }};"
+        f" addEventListener({json.dumps(ev_name)}, (ev) => {{"
+        "   ev.stopImmediatePropagation();"
+        "   if (ev && typeof ev.detail === 'function') ev.detail(intr);"
+        " }, { capture: true, once: true });"
+        "})();"
+    )
+
+
 class _PosixSpawnProcess:
     """Popen-compatible process handle around an `os.posix_spawn(setsid=True)` child."""
 
@@ -754,6 +794,10 @@ class _PageSessionState:
     caller_contexts: Dict[str, str] = field(default_factory=dict)
     # caller_ctx -> cached window objectId in that frame's main world
     caller_windows: Dict[str, str] = field(default_factory=dict)
+    # caller_ctx -> (session_id, V8 main-world int executionContextId)
+    caller_v8_contexts: Dict[str, tuple[str, int]] = field(default_factory=dict)
+    # caller_ctx -> RemoteObject objectId of pristine native constructors captured at DidClearWindowObject
+    caller_intrinsics: Dict[str, str] = field(default_factory=dict)
     # (session_id, V8 main-world int executionContextId) -> frame_id
     main_world_to_frame: Dict[tuple[str, int], str] = field(default_factory=dict)
     # CDP Fetch requestId <-> Network requestId tracking
@@ -764,6 +808,7 @@ class _PageSessionState:
     screencast_ack_ids: "collections.deque[int]" = field(
         default_factory=lambda: collections.deque(maxlen=64)
     )
+    ready_emitted: bool = False
     dialog_open: bool = False
     window_opened_seq: int = 0
     epoch: int = 0
@@ -808,6 +853,10 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         self._closed = False
         self._version_product = ""
         self._user_agent = ""
+        self._intrinsics_ev = f"__invpw_intr_{secrets.token_hex(16)}"
+        self._intrinsics_bootstrap = _build_intrinsics_bootstrap_js(
+            self._intrinsics_ev
+        )
 
         self._ev_queue: "queue.Queue[Any]" = queue.Queue()
         self._ev_worker = threading.Thread(
@@ -1423,20 +1472,27 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             self._target_to_session[target_id] = session_id
 
         try:
-            self._raw.send("Page.enable", session=session_id)
-            self._raw.send(
+            # In Chromium DevTools, a page target's targetId is identical to its
+            # initial root frameId (devtools_frame_token_). A popup created by
+            # `<a target="_blank" href="...">` (noopener) attaches at
+            # NavigationThrottle::WillStartRequest before a renderer RenderFrame
+            # exists, so any blocking self._raw.send(...) here on invpw-cdp-events
+            # deadlocks behind Runtime.runIfWaitingForDebugger. Pipeline every
+            # setup frame via non-blocking post().
+            state.main_frame_id = target_id
+            state.frame_sessions[target_id] = session_id
+
+            self._raw.post("Page.enable", session=session_id)
+            self._raw.post(
                 "Page.setLifecycleEventsEnabled", {"enabled": True}, session=session_id
             )
-            self._raw.send("DOM.enable", session=session_id)
-            self._raw.send("Network.enable", session=session_id)
-            self._raw.send("Runtime.enable", {}, session=session_id)
+            self._raw.post("DOM.enable", session=session_id)
+            self._raw.post("Network.enable", session=session_id)
+            self._raw.post("Runtime.enable", {}, session=session_id)
             state.runtime_enabled_sessions.add(session_id)
-            self._ensure_utility_world_script(state, session_id, use_post=False)
-            try:
-                self._raw.send("Inspector.enable", session=session_id)
-            except juggler_conn.ProtocolError:
-                pass
-            self._raw.send(
+            self._ensure_utility_world_script(state, session_id, use_post=True)
+            self._raw.post("Inspector.enable", session=session_id)
+            self._raw.post(
                 "Target.setAutoAttach",
                 {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True},
                 session=session_id,
@@ -1444,19 +1500,16 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
 
             ctx = self._get_ctx(cid)
             self._apply_ctx_to_session(
-                state, ctx, session_id, is_main=True, use_post=False
+                state, ctx, session_id, is_main=True, use_post=True
             )
 
-            tree_resp = self._raw.send("Page.getFrameTree", session=session_id)
-            root_tree = tree_resp["frameTree"]
-            main_frame = root_tree["frame"]
-            state.main_frame_id = main_frame["id"]
-            state.frame_sessions[state.main_frame_id] = session_id
+            raw_url = target_info.get("url") or ""
+            is_inflight_popup = bool(target_info.get("openerId")) and not raw_url
 
             juggler_info = {
                 "targetId": target_id,
                 "type": "page",
-                "url": target_info.get("url") or "about:blank",
+                "url": raw_url or "about:blank",
                 "browserContextId": cid,
             }
             if target_info.get("openerId"):
@@ -1468,11 +1521,41 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 None,
             )
 
-            initial_fids: List[str] = []
-            self._announce_frame_tree(
-                state, root_tree, parent_id=None, collected_fids=initial_fids
+            init_nav_id = f"init-{target_id}"
+            state.nav_loaders[target_id] = init_nav_id
+            self.dispatch_event(
+                "Page.frameAttached",
+                {"frameId": target_id, "parentFrameId": None},
+                session_id,
             )
+            if not is_inflight_popup:
+                self.dispatch_event(
+                    "Page.navigationCommitted",
+                    {
+                        "frameId": target_id,
+                        "navigationId": init_nav_id,
+                        "url": raw_url or "about:blank",
+                        "name": "",
+                    },
+                    session_id,
+                )
+                for ev_name in ("DOMContentLoaded", "load"):
+                    self.dispatch_event(
+                        "Page.eventFired",
+                        {"frameId": target_id, "name": ev_name},
+                        session_id,
+                    )
+
+            def _on_renderer_ready(_res: Dict[str, Any]) -> None:
+                if not is_inflight_popup and not state.ready_emitted:
+                    self._ev_queue.put(("ev", session_id, "__invpw.pageReady", {}))
+
             self._raw.post("Runtime.runIfWaitingForDebugger", session=session_id)
+            self._raw.post(
+                "Runtime.evaluate",
+                {"expression": self._intrinsics_bootstrap, "returnByValue": True},
+                session=session_id,
+            )
             for _native, (wrapped, _ev) in list(ctx.bindings.items()):
                 if wrapped:
                     self._raw.post(
@@ -1480,9 +1563,12 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         {"expression": wrapped, "returnByValue": True},
                         session=session_id,
                     )
-            for init_fid in initial_fids:
-                self._request_utility_world(state, init_fid, sid=session_id)
-            self.dispatch_event("Page.ready", {}, session_id)
+            self._request_utility_world(state, target_id, sid=session_id)
+            self._raw.post(
+                "Page.getFrameTree",
+                session=session_id,
+                on_result=_on_renderer_ready,
+            )
         except juggler_conn.TargetClosedError:
             with self._lock:
                 self._pages.pop(session_id, None)
@@ -1595,15 +1681,18 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         if sid in state.utility_world_sessions:
             return
         state.utility_world_sessions.add(sid)
-        params = {"source": "", "worldName": UTILITY_WORLD}
-        if use_post:
-            self._raw.post(
-                "Page.addScriptToEvaluateOnNewDocument", params, session=sid
-            )
-        else:
-            self._raw.send(
-                "Page.addScriptToEvaluateOnNewDocument", params, session=sid
-            )
+        for doc_params in (
+            {"source": "", "worldName": UTILITY_WORLD},
+            {"source": self._intrinsics_bootstrap},
+        ):
+            if use_post:
+                self._raw.post(
+                    "Page.addScriptToEvaluateOnNewDocument", doc_params, session=sid
+                )
+            else:
+                self._raw.send(
+                    "Page.addScriptToEvaluateOnNewDocument", doc_params, session=sid
+                )
 
     def _request_utility_world(
         self,
@@ -1622,6 +1711,78 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             },
             session=frame_sid,
         )
+
+    def _intrinsics_extract_expression(self) -> str:
+        return (
+            "(() => {"
+            " let captured = null;"
+            " try {"
+            f"   dispatchEvent(new CustomEvent({json.dumps(self._intrinsics_ev)},"
+            "     { detail: (v) => { captured = v; } }));"
+            " } catch {}"
+            " return captured;"
+            "})()"
+        )
+
+    def _capture_caller_intrinsics_async(
+        self,
+        state: _PageSessionState,
+        caller_id: str,
+        raw_sid: str,
+        v8_ctx_id: int,
+    ) -> None:
+        def _on_res(res: Dict[str, Any]) -> None:
+            robj = res.get("result") or {}
+            oid = robj.get("objectId")
+            if oid and state.caller_v8_contexts.get(caller_id) == (raw_sid, v8_ctx_id):
+                state.caller_intrinsics[caller_id] = oid
+                state.obj_sessions[oid] = raw_sid
+
+        self._raw.post(
+            "Runtime.evaluate",
+            {
+                "expression": self._intrinsics_extract_expression(),
+                "contextId": v8_ctx_id,
+                "returnByValue": False,
+            },
+            session=raw_sid,
+            on_result=_on_res,
+        )
+
+    def _ensure_caller_intrinsics(
+        self,
+        state: _PageSessionState,
+        caller_id: str,
+        eval_sid: str,
+        v8_ctx_id: Optional[int],
+        *,
+        timeout: Optional[float],
+    ) -> Optional[str]:
+        existing = state.caller_intrinsics.get(caller_id)
+        if existing:
+            return existing
+        if v8_ctx_id is None:
+            return None
+        try:
+            res = self._raw.send(
+                "Runtime.evaluate",
+                {
+                    "expression": self._intrinsics_extract_expression(),
+                    "contextId": v8_ctx_id,
+                    "returnByValue": False,
+                },
+                session=eval_sid,
+                timeout=timeout,
+            )
+            robj = res.get("result") or {}
+            oid = robj.get("objectId")
+            if oid:
+                state.caller_intrinsics[caller_id] = oid
+                state.obj_sessions[oid] = eval_sid
+                return oid
+        except (juggler_conn.TargetClosedError, juggler_conn.ProtocolError):
+            pass
+        return None
 
     def _ensure_raw_binding(
         self,
@@ -2144,6 +2305,12 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         raw_sid = session_id
         page_sid = state.session_id
 
+        if method == "__invpw.pageReady":
+            if not state.ready_emitted:
+                state.ready_emitted = True
+                self.dispatch_event("Page.ready", {}, page_sid)
+            return
+
         if method == "Inspector.targetCrashed":
             if raw_sid == page_sid:
                 self.dispatch_event("Page.crashed", {}, page_sid)
@@ -2229,9 +2396,12 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 state.epoch += 1
                 caller_id = f"caller:{fid_str}:{state.epoch}"
                 state.caller_contexts[fid_str] = caller_id
+                state.caller_v8_contexts[caller_id] = (raw_sid, new_id)
                 state.session_v8_to_juggler[(raw_sid, new_id)] = caller_id
                 if old_caller and old_caller != caller_id:
                     state.caller_windows.pop(old_caller, None)
+                    state.caller_v8_contexts.pop(old_caller, None)
+                    state.caller_intrinsics.pop(old_caller, None)
                     for k, jv in list(state.session_v8_to_juggler.items()):
                         if jv == old_caller and k != (raw_sid, new_id):
                             state.session_v8_to_juggler.pop(k, None)
@@ -2240,6 +2410,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         {"executionContextId": old_caller},
                         page_sid,
                     )
+                self._capture_caller_intrinsics_async(
+                    state, caller_id, raw_sid, new_id
+                )
                 self.dispatch_event(
                     "Runtime.executionContextCreated",
                     {
@@ -2289,6 +2462,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 if j_id:
                     if j_id.startswith("caller:"):
                         state.caller_windows.pop(j_id, None)
+                        state.caller_v8_contexts.pop(j_id, None)
+                        state.caller_intrinsics.pop(j_id, None)
                         for fk, fv in list(state.caller_contexts.items()):
                             if fv == j_id:
                                 state.caller_contexts.pop(fk, None)
@@ -2322,6 +2497,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     continue
                 if j_id.startswith("caller:"):
                     state.caller_windows.pop(j_id, None)
+                    state.caller_v8_contexts.pop(j_id, None)
+                    state.caller_intrinsics.pop(j_id, None)
                     for fk, fv in list(state.caller_contexts.items()):
                         if fv == j_id:
                             state.caller_contexts.pop(fk, None)
@@ -2491,6 +2668,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             caller_id = state.caller_contexts.pop(fid, None)
             if caller_id:
                 state.caller_windows.pop(caller_id, None)
+                state.caller_v8_contexts.pop(caller_id, None)
+                state.caller_intrinsics.pop(caller_id, None)
                 for k, jv in list(state.session_v8_to_juggler.items()):
                     if jv == caller_id:
                         state.session_v8_to_juggler.pop(k, None)
@@ -2521,6 +2700,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 },
                 page_sid,
             )
+            if not state.ready_emitted and fid == state.main_frame_id:
+                state.ready_emitted = True
+                self.dispatch_event("Page.ready", {}, page_sid)
             if params.get("type") == "BackForwardCacheRestore":
                 self._request_utility_world(state, fid, sid=raw_sid)
                 for ev_name in ("DOMContentLoaded", "load"):
@@ -3645,37 +3827,99 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 if ctx_id.startswith("caller:"):
                     parts = ctx_id.split(":")
                     fid = parts[1] if len(parts) >= 2 else state.main_frame_id
-                    frame_sid = self._session_for_frame(state, fid)
-                    if fid == state.main_frame_id or frame_sid != session_id:
-                        eval_sid = frame_sid
-                        res = self._raw.send(
-                            "Runtime.evaluate",
-                            {
-                                "expression": expr,
-                                "returnByValue": by_value,
-                                "awaitPromise": True,
-                            },
-                            session=eval_sid,
-                            timeout=timeout,
+                    v8_pair = state.caller_v8_contexts.get(ctx_id)
+                    v8_ctx_id = v8_pair[1] if v8_pair else None
+                    frame_sid = (
+                        v8_pair[0] if v8_pair else self._session_for_frame(state, fid)
+                    )
+                    eval_sid = frame_sid
+                    intr_oid = self._ensure_caller_intrinsics(
+                        state, ctx_id, eval_sid, v8_ctx_id, timeout=timeout
+                    )
+                    res = None
+                    if intr_oid:
+                        decl = (
+                            "function() {\n"
+                            "  return (function(__invpw_i) {\n"
+                            f"    const {{ {_INTRINSICS_DESTRUCTURE} }} = __invpw_i;\n"
+                            f"    return (\n{expr}\n    );\n"
+                            "  }).call(globalThis, this);\n"
+                            "}"
                         )
-                    else:
-                        win_oid = self._resolve_caller_window(
-                            state, ctx_id, timeout=timeout
-                        )
-                        eval_sid = self._session_for_object(state, win_oid)
-                        res = self._raw.send(
-                            "Runtime.callFunctionOn",
-                            {
-                                "objectId": win_oid,
-                                "functionDeclaration": (
-                                    f"function() {{ return (0, eval)({json.dumps(expr)}); }}"
-                                ),
-                                "returnByValue": by_value,
-                                "awaitPromise": True,
-                            },
-                            session=eval_sid,
-                            timeout=timeout,
-                        )
+                        try:
+                            cand = self._raw.send(
+                                "Runtime.callFunctionOn",
+                                {
+                                    "objectId": intr_oid,
+                                    "functionDeclaration": decl,
+                                    "returnByValue": by_value,
+                                    "awaitPromise": True,
+                                },
+                                session=eval_sid,
+                                timeout=timeout,
+                            )
+                            exc_det = cand.get("exceptionDetails") or {}
+                            exc_desc = str(
+                                (exc_det.get("exception") or {}).get("description")
+                                or exc_det.get("text")
+                                or ""
+                            )
+                            if "SyntaxError" not in exc_desc:
+                                res = cand
+                        except juggler_conn.ProtocolError as i_exc:
+                            if any(
+                                m in str(i_exc)
+                                for m in (
+                                    "Cannot find object",
+                                    "Cannot find context",
+                                    "Execution context was destroyed",
+                                )
+                            ):
+                                state.caller_intrinsics.pop(ctx_id, None)
+                            else:
+                                raise
+                    if res is None:
+                        if fid == state.main_frame_id or frame_sid != session_id:
+                            res = self._raw.send(
+                                "Runtime.evaluate",
+                                {
+                                    "expression": expr,
+                                    "returnByValue": by_value,
+                                    "awaitPromise": True,
+                                },
+                                session=eval_sid,
+                                timeout=timeout,
+                            )
+                        elif v8_ctx_id is not None:
+                            res = self._raw.send(
+                                "Runtime.evaluate",
+                                {
+                                    "expression": expr,
+                                    "contextId": v8_ctx_id,
+                                    "returnByValue": by_value,
+                                    "awaitPromise": True,
+                                },
+                                session=eval_sid,
+                                timeout=timeout,
+                            )
+                        else:
+                            win_oid = self._resolve_caller_window(
+                                state, ctx_id, timeout=timeout
+                            )
+                            eval_sid = self._session_for_object(state, win_oid)
+                            res = self._raw.send(
+                                "Runtime.callFunctionOn",
+                                {
+                                    "objectId": win_oid,
+                                    "functionDeclaration": (
+                                        f"function() {{ return (0, eval)({json.dumps(expr)}); }}"
+                                    ),
+                                    "returnByValue": by_value,
+                                    "awaitPromise": True,
+                                },
+                                session=eval_sid,
+                                timeout=timeout,
+                            )
                 else:
                     eval_sid, eval_int = self._parse_util_ctx(state, ctx_id)
                     res = self._raw.send(

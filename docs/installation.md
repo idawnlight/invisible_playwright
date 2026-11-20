@@ -7,8 +7,8 @@ nav_order: 1
 
 # Installation
 
-This guide installs `invisible_playwright 0.57.0` and `invisible_core 160.78.0`
-(tags `v0.57.0` and `v160.78.0`), supporting both native stealth engines out of
+This guide installs `invisible_playwright 0.57.1` and `invisible_core 160.78.1`
+(tags `v0.57.1` and `v160.78.1`), supporting both native stealth engines out of
 the box:
 
 - **Firefox 160.0** (`backend="firefox"`, default) from
@@ -53,11 +53,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.78.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.57.0"
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.78.1" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.57.1"
 ```
 
-The wrapper requires `invisible-core==160.78.0`; supplying both references
+The wrapper requires `invisible-core==160.78.1`; supplying both references
 selects the exact paired core directly. Add `[remote]` to `invisible-playwright`
 (or `pip install "websockets>=13"`) if you plan to serve a browser over
 WebSocket with `launch_server()`. The Playwright Python client is bundled

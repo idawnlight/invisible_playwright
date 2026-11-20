@@ -340,46 +340,56 @@ class Frame(ChannelOwner):
     async def frame_element(self) -> ElementHandle:
         return from_channel(await self._channel.send("frameElement", None))
 
-    async def evaluate(self, expression: str, arg: Serializable = None) -> Any:
+    async def evaluate(
+        self,
+        expression: str,
+        arg: Serializable = None,
+        isolated: bool = None,
+    ) -> Any:
+        params: Dict[str, Any] = dict(
+            expression=expression,
+            arg=serialize_argument(arg),
+        )
+        if isolated is not None:
+            params["isolated"] = bool(isolated)
         return parse_result(
-            await self._channel.send(
-                "evaluateExpression",
-                None,
-                dict(
-                    expression=expression,
-                    arg=serialize_argument(arg),
-                ),
-            )
+            await self._channel.send("evaluateExpression", None, params)
         )
 
-    async def evaluate_read(self, expression: str, arg: Serializable = None) -> Any:
+    async def evaluate_read(
+        self,
+        expression: str,
+        arg: Serializable = None,
+        isolated: bool = None,
+    ) -> Any:
         """FORK: `evaluate` for a read without effects, which the caller
         declares: made again on the page that replaced the one it went to,
         where `evaluate` raises ([B285])."""
+        params: Dict[str, Any] = dict(
+            expression=expression,
+            arg=serialize_argument(arg),
+            repeatable=True,
+        )
+        if isolated is not None:
+            params["isolated"] = bool(isolated)
         return parse_result(
-            await self._channel.send(
-                "evaluateExpression",
-                None,
-                dict(
-                    expression=expression,
-                    arg=serialize_argument(arg),
-                    repeatable=True,
-                ),
-            )
+            await self._channel.send("evaluateExpression", None, params)
         )
 
     async def evaluate_handle(
-        self, expression: str, arg: Serializable = None
+        self,
+        expression: str,
+        arg: Serializable = None,
+        isolated: bool = None,
     ) -> JSHandle:
+        params: Dict[str, Any] = dict(
+            expression=expression,
+            arg=serialize_argument(arg),
+        )
+        if isolated is not None:
+            params["isolated"] = bool(isolated)
         return from_channel(
-            await self._channel.send(
-                "evaluateExpressionHandle",
-                None,
-                dict(
-                    expression=expression,
-                    arg=serialize_argument(arg),
-                ),
-            )
+            await self._channel.send("evaluateExpressionHandle", None, params)
         )
 
     async def query_selector(

@@ -3717,7 +3717,11 @@ class Frame(AsyncBase):
         return mapping.from_impl(await self._impl_obj.frame_element())
 
     async def evaluate(
-        self, expression: str, arg: typing.Optional[typing.Any] = None
+        self,
+        expression: str,
+        arg: typing.Optional[typing.Any] = None,
+        *,
+        isolated: typing.Optional[bool] = None,
     ) -> typing.Any:
         """Frame.evaluate
 
@@ -3768,12 +3772,37 @@ class Frame(AsyncBase):
 
         return mapping.from_maybe_impl(
             await self._impl_obj.evaluate(
-                expression=expression, arg=mapping.to_impl(arg)
+                expression=expression, arg=mapping.to_impl(arg), isolated=isolated
+            )
+        )
+
+    async def evaluate_read(
+        self,
+        expression: str,
+        arg: typing.Optional[typing.Any] = None,
+        *,
+        isolated: typing.Optional[bool] = None,
+    ) -> typing.Any:
+        """Frame.evaluate_read
+
+        `frame.evaluate()` for a side-effect-free read that retries across an
+        in-flight navigation; pass `isolated=True` to execute inside the
+        frame's isolated DOM world without touching page-overridden globals or
+        prototypes.
+        """
+
+        return mapping.from_maybe_impl(
+            await self._impl_obj.evaluate_read(
+                expression=expression, arg=mapping.to_impl(arg), isolated=isolated
             )
         )
 
     async def evaluate_handle(
-        self, expression: str, arg: typing.Optional[typing.Any] = None
+        self,
+        expression: str,
+        arg: typing.Optional[typing.Any] = None,
+        *,
+        isolated: typing.Optional[bool] = None,
     ) -> "JSHandle":
         """Frame.evaluate_handle
 
@@ -3822,7 +3851,7 @@ class Frame(AsyncBase):
 
         return mapping.from_impl(
             await self._impl_obj.evaluate_handle(
-                expression=expression, arg=mapping.to_impl(arg)
+                expression=expression, arg=mapping.to_impl(arg), isolated=isolated
             )
         )
 
@@ -9235,7 +9264,11 @@ class Page(AsyncContextManager):
         )
 
     async def evaluate(
-        self, expression: str, arg: typing.Optional[typing.Any] = None
+        self,
+        expression: str,
+        arg: typing.Optional[typing.Any] = None,
+        *,
+        isolated: typing.Optional[bool] = None,
     ) -> typing.Any:
         """Page.evaluate
 
@@ -9288,12 +9321,16 @@ class Page(AsyncContextManager):
 
         return mapping.from_maybe_impl(
             await self._impl_obj.evaluate(
-                expression=expression, arg=mapping.to_impl(arg)
+                expression=expression, arg=mapping.to_impl(arg), isolated=isolated
             )
         )
 
     async def evaluate_read(
-        self, expression: str, arg: typing.Optional[typing.Any] = None
+        self,
+        expression: str,
+        arg: typing.Optional[typing.Any] = None,
+        *,
+        isolated: typing.Optional[bool] = None,
     ) -> typing.Any:
         """Page.evaluate_read
 
@@ -9320,12 +9357,16 @@ class Page(AsyncContextManager):
 
         return mapping.from_maybe_impl(
             await self._impl_obj.evaluate_read(
-                expression=expression, arg=mapping.to_impl(arg)
+                expression=expression, arg=mapping.to_impl(arg), isolated=isolated
             )
         )
 
     async def evaluate_handle(
-        self, expression: str, arg: typing.Optional[typing.Any] = None
+        self,
+        expression: str,
+        arg: typing.Optional[typing.Any] = None,
+        *,
+        isolated: typing.Optional[bool] = None,
     ) -> "JSHandle":
         """Page.evaluate_handle
 
@@ -9374,7 +9415,7 @@ class Page(AsyncContextManager):
 
         return mapping.from_impl(
             await self._impl_obj.evaluate_handle(
-                expression=expression, arg=mapping.to_impl(arg)
+                expression=expression, arg=mapping.to_impl(arg), isolated=isolated
             )
         )
 

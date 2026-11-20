@@ -468,16 +468,29 @@ class Page(ChannelOwner):
     ) -> None:
         return await self._main_frame.dispatch_event(**locals_to_params(locals()))
 
-    async def evaluate(self, expression: str, arg: Serializable = None) -> Any:
-        return await self._main_frame.evaluate(expression, arg)
+    async def evaluate(
+        self,
+        expression: str,
+        arg: Serializable = None,
+        isolated: bool = None,
+    ) -> Any:
+        return await self._main_frame.evaluate(expression, arg, isolated=isolated)
 
-    async def evaluate_read(self, expression: str, arg: Serializable = None) -> Any:
-        return await self._main_frame.evaluate_read(expression, arg)
+    async def evaluate_read(
+        self,
+        expression: str,
+        arg: Serializable = None,
+        isolated: bool = None,
+    ) -> Any:
+        return await self._main_frame.evaluate_read(expression, arg, isolated=isolated)
 
     async def evaluate_handle(
-        self, expression: str, arg: Serializable = None
+        self,
+        expression: str,
+        arg: Serializable = None,
+        isolated: bool = None,
     ) -> JSHandle:
-        return await self._main_frame.evaluate_handle(expression, arg)
+        return await self._main_frame.evaluate_handle(expression, arg, isolated=isolated)
 
     async def eval_on_selector(
         self,

@@ -2,17 +2,45 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+import shutil
+import tempfile
+from typing import Any, Dict, Optional
 
 from invisible_core import parse_proxy
 from invisible_core.juggler import SessionFiles
 from invisible_core.juggler.keyboard import KEYBOARD_LAYOUT_PREF, profiles_pref
+from invisible_core.process import alive
 
 from .._juggler._marshal import _caller_timeout
 from .._juggler._reaped import SessionRemoval
 from .._juggler.dispatcher import Dispatcher, ProtocolException
 from .bridge import CDPBridgeConnection
 from .engine import detect_needs_no_sandbox
+
+_SHORT_TMP_PREFIX = "ipw_t_"
+# Chromium's ProcessSingletonPosix creates `<TMPDIR>/org.chromium.Chromium.XXXXXX/SingletonSocket`
+# (+45 bytes) and calls LOG(FATAL) if `sun_path` exceeds 107 bytes.
+_POSIX_TMP_MAX_BYTES = 52
+
+
+def _sweep_short_tmps(root: str = "/tmp") -> None:
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    my_pid = os.getpid()
+    for name in names:
+        if not name.startswith(_SHORT_TMP_PREFIX):
+            continue
+        head = name[len(_SHORT_TMP_PREFIX) :].split("_", 1)[0]
+        if not head.isdigit():
+            continue
+        pid = int(head)
+        if pid == my_pid or alive(pid):
+            continue
+        path = os.path.join(root, name)
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
 
 
 class ChromiumBrowserTypeDispatcher(Dispatcher):
@@ -66,11 +94,26 @@ class ChromiumBrowserTypeDispatcher(Dispatcher):
             params.get("userDataDir"),
             _launch_environment(params.get("env")),
         )
+        env, profile = files.env, files.profile
+        short_tmp: Optional[str] = None
+        if os.name == "posix" and os.path.isdir("/tmp"):
+            _sweep_short_tmps("/tmp")
+            cur_tmp = env.get("TMPDIR") or ""
+            if len(cur_tmp.encode("utf-8")) > _POSIX_TMP_MAX_BYTES:
+                short_tmp = tempfile.mkdtemp(
+                    prefix=f"{_SHORT_TMP_PREFIX}{os.getpid()}_", dir="/tmp"
+                )
+                env = dict(env, TMP=short_tmp, TEMP=short_tmp, TMPDIR=short_tmp)
+
+        def _remove_session_files() -> None:
+            files.remove()
+            if short_tmp:
+                shutil.rmtree(short_tmp, ignore_errors=True)
+
         session_token = getattr(getattr(files, "token", None), "value", "")
-        removal = SessionRemoval(files.remove, session_token)
+        removal = SessionRemoval(_remove_session_files, session_token)
         self.server.note_session_token(session_token)
         self.server.after_shutdown(removal.after_shutdown)
-        env, profile = files.env, files.profile
 
         launch_prefs = dict(params.get("firefoxUserPrefs") or {})
         pointer_draws = session_draws_pointer(launch_prefs)

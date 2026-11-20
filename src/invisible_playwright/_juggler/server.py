@@ -529,7 +529,8 @@ class _Predicate:
 
 
 def _run_callers_code(injected: InjectedScript, frame_id: str, params: Dict,
-                      receivers=(), *, by_value: bool) -> Dict:
+                      receivers=(), *, by_value: bool,
+                      world: str = "caller") -> Dict:
     """THE ONE PLACE the caller's code runs ([B340]), the way Playwright's
     utility script runs it: the caller's text is evaluated as a script in the
     caller's world (`_as_script`), and when what it produced is a function,
@@ -547,7 +548,8 @@ def _run_callers_code(injected: InjectedScript, frame_id: str, params: Dict,
     function's reference is released after its call, and an object read by
     value after the read, so a call leaves nothing behind in the page.
     """
-    context = injected.caller_context(frame_id)
+    context = (injected.context_id(frame_id) if world == "isolated"
+               else injected.caller_context(frame_id))
     remote = injected.evaluate_raw(context, _as_script(params["expression"]))
     if remote.get("type") == "function":
         try:
@@ -578,6 +580,7 @@ class ElementHandleDispatcher(Dispatcher):
         "boundingBox": "op_bounding_box",
         "checkHitTarget": "op_check_hit_target",
         "evaluateExpression": "op_evaluate",
+        "evaluateExpressionHandle": "op_evaluate_handle",
         "textContent": "op_text_content",
         "innerText": "op_inner_text",
         "innerHTML": "op_inner_html",
@@ -652,20 +655,27 @@ class ElementHandleDispatcher(Dispatcher):
     def page(self) -> "PageDispatcher":
         return self.frame.page
 
+    def _handle_context(self) -> str:
+        if self.world == "isolated":
+            return self.injected.context_id(self.frame.frame_id)
+        return self.injected.caller_context(self.frame.frame_id)
+
     def _in_caller(self, declaration: str, *args: Dict, by_value: bool) -> Dict:
-        """`declaration` called in the caller's world, where this handle
-        lives, with `null` where the utility world passes the injected script:
-        the same declarations serve both worlds, so there is one of each."""
+        """`declaration` called in the handle's non-element world, with `null`
+        where the utility world passes the injected script: the same
+        declarations serve both worlds, so there is one of each."""
         return self.injected.call_raw(
-            self.injected.caller_context(self.frame.frame_id), declaration,
+            self._handle_context(), declaration,
             [{"value": None}, {"objectId": self.object_id}] + list(args),
             by_value=by_value)
 
     def op_dispose(self, params: Dict) -> Any:
-        if self.world == "caller":
+        if self.world in ("caller", "isolated"):
             if self.object_id:
-                self.injected.release(
-                    self.injected.caller_context(self.frame.frame_id), self.object_id)
+                try:
+                    self.injected.release(self._handle_context(), self.object_id)
+                except Exception:
+                    pass
             self.dispose()
             return None
         try:
@@ -724,12 +734,31 @@ class ElementHandleDispatcher(Dispatcher):
         It was found by diffing the protocol against the Node driver: the
         driver's `click` carried a `position` and ours did not.
         """
-        if self.world == "caller":
+        if self.world in ("caller", "isolated"):
             return {"value": _serialize(_remote_value(_run_callers_code(
                 self.injected, self.frame.frame_id, params, [self.object_id],
-                by_value=True)))}
+                by_value=True, world=self.world)))}
         return {"value": _serialize(self.frame._call_on_elements(
             self.frame.frame_id, [self.object_id], params))}
+
+    def op_evaluate_handle(self, params: Dict) -> Any:
+        target_world = "isolated" if self.world == "isolated" else "caller"
+        if self.world in ("caller", "isolated"):
+            remote = _run_callers_code(
+                self.injected, self.frame.frame_id, params, [self.object_id],
+                by_value=False, world=target_world)
+            return {"handle": self.frame._handle_from_caller(remote, world=target_world).channel}
+        context = self.injected.caller_context(self.frame.frame_id)
+        copy = self.injected.node_to_caller(self.frame.frame_id, self.object_id)
+        if not copy:
+            raise ProtocolException("Element is not attached to the DOM")
+        try:
+            remote = _run_callers_code(
+                self.injected, self.frame.frame_id, params, [copy],
+                by_value=False, world="caller")
+            return {"handle": self.frame._handle_from_caller(remote, world="caller").channel}
+        finally:
+            self.injected.release(context, copy)
 
     def op_text_content(self, params: Dict) -> Any:
         return {"value": self.injected.text_content(
@@ -752,10 +781,10 @@ class ElementHandleDispatcher(Dispatcher):
             self.frame.frame_id, self.object_id, params["name"])}
 
     def op_get_property(self, params: Dict) -> Any:
-        if self.world == "caller":
+        if self.world in ("caller", "isolated"):
             remote = self._in_caller("(injected, o, n) => o[n]",
                                    {"value": params["name"]}, by_value=False)
-            return {"handle": self.frame._handle_from_caller(remote).channel}
+            return {"handle": self.frame._handle_from_caller(remote, world=self.world).channel}
         object_id = self.injected.call(
             self.frame.frame_id,
             "(injected, o, n) => o[n]",
@@ -768,14 +797,14 @@ class ElementHandleDispatcher(Dispatcher):
         large object this is the most expensive call in the file, which is why
         `json_value` exists and should be preferred when the values are
         serialisable."""
-        if self.world == "caller":
+        if self.world in ("caller", "isolated"):
             names = self._in_caller(
                 "(injected, o) => o === Object(o) ? Object.keys(o) : []",
                 by_value=True).get("value") or []
             return {"properties": [
                 {"name": name, "value": self.frame._handle_from_caller(self._in_caller(
                     "(injected, o, n) => o[n]", {"value": name},
-                    by_value=False)).channel}
+                    by_value=False), world=self.world).channel}
                 for name in names]}
         names = self.injected.call(
             self.frame.frame_id,
@@ -801,9 +830,12 @@ class ElementHandleDispatcher(Dispatcher):
         caller can act on - it is an evaluation failure on a handle they were
         just given.
         """
-        if self.world == "caller":
+        if self.world in ("caller", "isolated"):
             if not self.object_id:
                 return {"value": _serialize(_remote_value(self.remote))}
+            if self.world == "isolated":
+                return {"value": _serialize(_remote_value(self._in_caller(
+                    "(injected, o) => o", by_value=True)))}
             return {"value": _serialize(self.injected.json_value_in(
                 self.frame.frame_id, "caller", self.object_id))}
         return {"value": _serialize(self.injected.call(
@@ -1325,9 +1357,11 @@ class FrameDispatcher(Dispatcher):
         # its caller declares free of effects: made again on the page that
         # replaced the one it went to. Everything else is the caller's code,
         # sent once ([B285]).
+        target_world = "isolated" if params.get("isolated") is True else "caller"
         def attempt(deadline=None):
             return _remote_value(_run_callers_code(
-                self.injected, self.frame_id, params, by_value=True))
+                self.injected, self.frame_id, params, by_value=True,
+                world=target_world))
         if params.get("repeatable") is True:
             return {"value": _serialize(self.injected.in_current_world(
                 attempt, timeout=30.0))}
@@ -1745,20 +1779,21 @@ class FrameDispatcher(Dispatcher):
             for copy in adopted:
                 self.injected.release(context, copy)
 
-    def _handle_from_caller(self, remote: Dict) -> "ElementHandleDispatcher":
+    def _handle_from_caller(self, remote: Dict, *,
+                            world: str = "caller") -> "ElementHandleDispatcher":
         """A handle for a value the CALLER'S code produced in its world.
         THE ONE PLACE such a handle is made [B324].
 
         A node is adopted into the utility world, where every element read and
         action of this server runs - the same node, as `add_script_tag` and
         `fileChooserOpened` hand theirs back - and its caller-world objectId is
-        released. Any other object, and a primitive, stays in the caller's
-        world, and its handle's operations run there. Until 0.36.0
-        `evaluate_handle` made every result a utility handle, and
-        `wait_for_function` one of the page's world that only `json_value`
-        honoured."""
+        released. Any other object, and a primitive, stays in the world that
+        produced it (`caller` or `isolated`), and its handle's operations run
+        there."""
         object_id = remote.get("objectId")
         if object_id and remote.get("subtype") == "node":
+            if world == "isolated":
+                return ElementHandleDispatcher(self.server, self, object_id)
             adopted = self.injected.adopt(self.frame_id, object_id)
             if not adopted:
                 raise ProtocolException(
@@ -1766,7 +1801,7 @@ class FrameDispatcher(Dispatcher):
             self.injected.release(self.injected.caller_context(self.frame_id), object_id)
             return ElementHandleDispatcher(self.server, self, adopted)
         return ElementHandleDispatcher(self.server, self, object_id or "",
-                                       world="caller", remote=remote)
+                                       world=world, remote=remote)
 
     def op_wait_for_function(self, params: Dict) -> Any:
         """Poll the CALLER'S expression until it is truthy.
@@ -2235,9 +2270,10 @@ class FrameDispatcher(Dispatcher):
                 self.injected.dispose(frame_id, object_id)
 
     def op_evaluate_handle(self, params: Dict) -> Any:
+        target_world = "isolated" if params.get("isolated") is True else "caller"
         remote = _run_callers_code(self.injected, self.frame_id, params,
-                                   by_value=False)
-        return {"handle": self._handle_from_caller(remote).channel}
+                                   by_value=False, world=target_world)
+        return {"handle": self._handle_from_caller(remote, world=target_world).channel}
 
 
 class DialogDispatcher(Dispatcher):
