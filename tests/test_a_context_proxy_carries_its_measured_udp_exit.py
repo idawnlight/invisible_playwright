@@ -57,7 +57,6 @@ class _Connection(EventListeners):
 
 @pytest.fixture(autouse=True)
 def _fresh(monkeypatch):
-    monkeypatch.setattr(_udp_exit, "_cache", {})
     # The fake gateway answers the exit question the way the product asks it (api.ipify.org through socks5h), but
     # these tests are about the measurement, so the TCP exit is the gateway's own declaration.
     monkeypatch.setattr(_geo, "discover_egress_ip", lambda proxy=None, **kw: EXIT)
@@ -115,19 +114,12 @@ def test_the_caller_never_declares_udp_on_a_context_proxy():
         assert _context_proxy(_apply({"proxy": dict(gw.proxy, udp="coherent")}, [gw]))[1]["udp"] == "no"
 
 
-def test_one_proxy_is_measured_once_however_many_contexts_are_given_it():
+def test_a_proxy_is_measured_again_for_every_context_given_it():
+    """Nothing is kept by the core: three contexts given one proxy are three measurements."""
     with coherent() as gw:
-        for _ in range(3):
+        for n in range(1, 4):
             assert _context_proxy(_apply({"proxy": dict(gw.proxy)}, [gw]))[1]["udp"] == "coherent"
-        assert gw.associates == 1
-
-
-def test_the_cache_is_keyed_without_the_secret():
-    with coherent(user="a", password="hunter2-zzz") as gw:
-        _apply({"proxy": gw.proxy}, [gw])
-    assert _udp_exit._cache
-    for key in _udp_exit._cache:
-        assert "hunter2-zzz" not in repr(key)
+            assert gw.associates == n
 
 
 def test_the_credentials_are_used_on_the_socket_and_nowhere_else(caplog):
@@ -201,7 +193,8 @@ def test_op_launch_reads_the_list_before_the_prefs_are_cleaned_and_writes_a_prof
     source = inspect.getsource(server.BrowserTypeDispatcher.op_launch)
     assert source.index("session_udp_stun_servers(launch_prefs)") < source.index("take_session_motion(launch_prefs)")
     assert source.index("take_session_motion(launch_prefs)") < source.index("write_user_js(")
-    assert "launch_proxy_command(params[\"proxy\"], udp_stun_servers)" in source
+    assert source.index("session_udp_exit(launch_prefs)") < source.index("take_session_motion(launch_prefs)")
+    assert "launch_proxy_command(params[\"proxy\"], udp_exit=udp_exit)" in source
     assert "parse_proxy(params[\"proxy\"]).as_engine_command()" not in source
 
 
@@ -236,7 +229,7 @@ def test_no_stun_address_reaches_the_browsers_environment_argv_prefs_or_pipe():
                              executable=None, base_env={})
     # ...and what the engine is given: the prefs after the server took its own keys out, the environment, the pipe.
     browser_prefs, _seed, _budget = take_session_motion(prefs)
-    pipe = repr(_udp_exit.launch_proxy_command({"server": "socks5://10.0.0.1:1080"}, servers))
+    pipe = repr(_udp_exit.launch_proxy_command({"server": "socks5://10.0.0.1:1080"}, udp_exit="coherent"))
     given = repr(browser_prefs) + repr(env) + pipe
     for needle in servers + ["198.51.100.5", "203.0.113.9"]:
         assert needle not in given, needle
@@ -247,5 +240,58 @@ def test_no_stun_address_reaches_the_browsers_environment_argv_prefs_or_pipe():
 def test_a_hand_made_launch_proxy_cannot_claim_a_coherent_udp():
     """`launch(proxy={..., "udp": "coherent"})` through a bare client: nothing was measured, so `unmeasured`."""
     with mismatched() as gw:
-        command = _udp_exit.launch_proxy_command(dict(gw.proxy, udp="coherent"), STUN)
+        command = _udp_exit.launch_proxy_command(dict(gw.proxy, udp="coherent"))
     assert command["udp"] == "unmeasured"
+    with mismatched() as gw:
+        command = _udp_exit.launch_proxy_command(dict(gw.proxy, udp="coherent"), udp_exit="no")
+    assert command["udp"] == "no", "the verdict handed over is what is declared, not what the proxy dict claims"
+
+
+# the verdict travels in the prefs: the core keeps none ---------------------------------------------------------
+def test_the_verdict_of_the_geo_step_reaches_the_server_in_the_prefs_and_is_declared_at_launch():
+    from invisible_core import decide_session_locale
+    from invisible_playwright import InvisiblePlaywright
+    from invisible_playwright._juggler.server import UDP_EXIT_PREF, session_udp_exit
+    proxy = {"server": "socks5://10.0.0.1:1080"}
+    for verdict in ("coherent", "no", "unmeasured"):
+        session = InvisiblePlaywright(seed=7, binary_path="firefox")
+        session._timezone, session._locale = "Asia/Tokyo", decide_session_locale("en-US")
+        session._udp_exit = verdict
+        prefs = session._build_prefs()
+        assert prefs[UDP_EXIT_PREF] == verdict
+        assert session_udp_exit(prefs) == verdict
+        assert _udp_exit.launch_proxy_command(proxy, udp_exit=session_udp_exit(prefs))["udp"] == verdict
+        rest, _seed, _budget = take_session_motion(prefs)
+        assert UDP_EXIT_PREF not in rest, "the verdict must not be written into the profile"
+
+
+def test_a_session_that_measured_nothing_writes_no_verdict_and_the_proxy_is_unmeasured():
+    from invisible_core import decide_session_locale
+    from invisible_playwright import InvisiblePlaywright
+    from invisible_playwright._juggler.server import UDP_EXIT_PREF, session_udp_exit
+    session = InvisiblePlaywright(seed=7, binary_path="firefox")
+    session._timezone, session._locale = "Asia/Tokyo", decide_session_locale("en-US")
+    prefs = session._build_prefs()
+    assert UDP_EXIT_PREF not in prefs and session_udp_exit(prefs) is None
+    assert _udp_exit.launch_proxy_command({"server": "socks5://10.0.0.1:1080"}, udp_exit=session_udp_exit(prefs))["udp"] == "unmeasured"
+
+
+def test_a_caller_cannot_claim_a_verdict_among_its_own_prefs():
+    from invisible_core import decide_session_locale
+    from invisible_playwright import InvisiblePlaywright
+    from invisible_playwright._juggler.server import UDP_EXIT_PREF, session_udp_exit
+    session = InvisiblePlaywright(seed=7, binary_path="firefox", extra_prefs={UDP_EXIT_PREF: "coherent"})
+    session._timezone, session._locale = "Asia/Tokyo", decide_session_locale("en-US")
+    assert UDP_EXIT_PREF not in session._build_prefs(), "a verdict nobody measured travelled to the server"
+    session._udp_exit = "no"
+    assert session._build_prefs()[UDP_EXIT_PREF] == "no"
+    assert session_udp_exit({UDP_EXIT_PREF: "yes"}) is None, "a value the core does not declare is not read"
+
+
+def test_every_entry_point_keeps_the_verdict_of_its_geo_step():
+    import importlib
+    import inspect
+    for module in ("launcher", "async_api", "_juggler.remote", "_session"):
+        source = inspect.getsource(importlib.import_module("invisible_playwright." + module))
+        assert "._udp_exit = " in source and ".udp_exit" in source, module
+

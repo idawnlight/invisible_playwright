@@ -90,7 +90,7 @@ def test_behind_a_socks5_proxy_that_cannot_carry_the_udp_nothing_is_sent_direct(
     try:
         monkeypatch.setattr(_geo, "discover_egress_ip", egress_by_proxy(gateway))
         found = _gather(lambda: _launch_behind(gateway, binary_path=binary), witness)
-        assert declared_udp(gateway.proxy, measure_servers(gateway)) == declared, "the scenario is not the one it says"
+        assert declared_udp(gateway.proxy) == declared, "the scenario is not the one it says"
     finally:
         gateway.close()
     leaked = witness.heard_from_other_than([EXIT_ADDRESS])
@@ -143,7 +143,7 @@ def test_the_control_behind_a_coherent_gateway_the_witness_hears_the_exit_only(m
     try:
         monkeypatch.setattr(_geo, "discover_egress_ip", egress_by_proxy(gateway))
         _gather(lambda: _launch_behind(gateway, binary_path=binary), witness)
-        assert declared_udp(gateway.proxy, measure_servers(gateway)) == "coherent"
+        assert declared_udp(gateway.proxy) == "coherent"
     finally:
         gateway.close()
     heard = witness.heard()

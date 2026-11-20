@@ -313,7 +313,7 @@ def test_chromium_authenticated_http_connect_tls_and_cross_site_oopif() -> None:
 async def _run_authenticated_http_connect_tls_and_cross_site_oopif() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cert_path, key_path = _generate_san_cert(
-            Path(tmp), ["site-a.example.test", "site-b.example.test"]
+            Path(tmp), ["site-a.test", "site-b.test"]
         )
         anchor_html = (
             b'<!doctype html><body><div id="anchor" style="width:44px;height:44px;border:1px solid #000"></div>'
@@ -330,18 +330,18 @@ async def _run_authenticated_http_connect_tls_and_cross_site_oopif() -> None:
             f'<!doctype html><body style="margin:80px 100px">'
             f'<h1 id="top">Top A</h1>'
             f'<iframe id="xframe" width="500" height="720" '
-            f'src="https://site-b.example.test:{tls_origin.port}/anchor"></iframe>'
+            f'src="https://site-b.test:{tls_origin.port}/anchor"></iframe>'
             f"<script>console.log('top-ready', true);</script></body>"
         ).encode("utf-8")
-        tls_origin.routes[f"site-a.example.test/"] = top_html
-        tls_origin.routes[f"site-b.example.test/anchor"] = anchor_html
+        tls_origin.routes[f"site-a.test/"] = top_html
+        tls_origin.routes[f"site-b.test/anchor"] = anchor_html
 
         proxy = _AuthenticatingHTTPProxy(
             expected_user="svc-user",
             expected_pass="svc-secret",
             host_map={
-                "site-a.example.test": ("127.0.0.1", tls_origin.port),
-                "site-b.example.test": ("127.0.0.1", tls_origin.port),
+                "site-a.test": ("127.0.0.1", tls_origin.port),
+                "site-b.test": ("127.0.0.1", tls_origin.port),
             },
         )
         try:
@@ -364,27 +364,27 @@ async def _run_authenticated_http_connect_tls_and_cross_site_oopif() -> None:
                 page.on("console", lambda m: seen_console.append((m.type, m.text)))
 
                 await page.goto(
-                    f"https://site-a.example.test:{tls_origin.port}/",
+                    f"https://site-a.test:{tls_origin.port}/",
                     wait_until="load",
                 )
                 assert await page.locator("#top").text_content() == "Top A"
 
-                child = next(f for f in page.frames if "site-b.example.test" in f.url)
+                child = next(f for f in page.frames if "site-b.test" in f.url)
                 await child.locator("#anchor").click()
                 clicks = await child.evaluate("window.clicks")
                 assert clicks == [
                     {
                         "trusted": True,
-                        "origin": f"https://site-b.example.test:{tls_origin.port}",
+                        "origin": f"https://site-b.test:{tls_origin.port}",
                     }
                 ]
 
                 # Both top-level and cross-site OOPIF negotiated end-to-end TLS over HTTP CONNECT
-                assert f"site-a.example.test:{tls_origin.port}" in proxy.authorized_connects
-                assert f"site-b.example.test:{tls_origin.port}" in proxy.authorized_connects
+                assert f"site-a.test:{tls_origin.port}" in proxy.authorized_connects
+                assert f"site-b.test:{tls_origin.port}" in proxy.authorized_connects
                 assert proxy.challenges_sent >= 1
-                assert "site-a.example.test" in tls_origin.sni_seen
-                assert "site-b.example.test" in tls_origin.sni_seen
+                assert "site-a.test" in tls_origin.sni_seen
+                assert "site-b.test" in tls_origin.sni_seen
                 assert ("log", "top-ready true") in seen_console
                 assert ("log", "oopif-ready 99") in seen_console
                 await context.close()
@@ -1099,5 +1099,191 @@ async def _run_async_route_cancellation(
         assert unhandled == [], f"Unhandled asyncio loop exceptions: {unhandled}"
     finally:
         loop.set_exception_handler(prev_handler)
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_chromium_invalid_auth_immediate_sequential_navigations() -> None:
+    asyncio.run(_run_invalid_auth_immediate_sequential_navigations())
+
+
+async def _run_invalid_auth_immediate_sequential_navigations() -> None:
+    class NeverHitOrigin(BaseHTTPRequestHandler):
+        hit = False
+
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            NeverHitOrigin.hit = True
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"unreachable")
+
+    http_origin = ThreadingHTTPServer(("127.0.0.1", 0), NeverHitOrigin)
+    threading.Thread(target=http_origin.serve_forever, daemon=True).start()
+    proxy = _AuthenticatingHTTPProxy(
+        expected_user="valid-user",
+        expected_pass="valid-pass",
+        host_map={
+            "auth-http.example.test": ("127.0.0.1", http_origin.server_port),
+            "auth-https.example.test": ("127.0.0.1", http_origin.server_port),
+        },
+    )
+    try:
+        async with InvisiblePlaywright(
+            backend="chromium",
+            headless=True,
+            seed=42,
+            humanize=False,
+            locale="en-US",
+            timezone="UTC",
+            proxy={
+                "server": f"http://127.0.0.1:{proxy.port}",
+                "username": "valid-user",
+                "password": "WRONG-PASSWORD",
+            },
+        ) as browser:
+            for round_idx in range(3):
+                context = await browser.new_context(ignore_https_errors=True)
+                page = await context.new_page()
+                err1 = None
+                try:
+                    await page.goto(
+                        f"http://auth-http.example.test:{http_origin.server_port}/r{round_idx}",
+                    )
+                except PlaywrightError as exc:
+                    err1 = exc
+                # Immediate second navigation on the exact same page after HTTP 407 failure
+                err2 = None
+                try:
+                    await page.goto(
+                        f"https://auth-https.example.test:{http_origin.server_port}/r{round_idx}",
+                    )
+                except PlaywrightError as exc:
+                    err2 = exc
+                assert not NeverHitOrigin.hit
+                assert err1 is not None
+                assert err2 is not None
+                await page.close()
+                reopened = await context.new_page()
+                assert await reopened.evaluate("1 + 1") == 2
+                await context.close()
+    finally:
+        proxy.close()
+        http_origin.shutdown()
+        http_origin.server_close()
+
+
+@pytest.mark.parametrize("with_route", [False, True])
+def test_chromium_true_cross_site_oopif_127_to_localhost(with_route: bool) -> None:
+    asyncio.run(_run_true_cross_site_oopif_127_to_localhost(with_route))
+
+
+async def _run_true_cross_site_oopif_127_to_localhost(with_route: bool) -> None:
+    class CrossSiteHandler(BaseHTTPRequestHandler):
+        port_ref = 0
+
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            p = CrossSiteHandler.port_ref
+            if self.path == "/":
+                body = (
+                    "<!doctype html><html><body>"
+                    f"<iframe id='same' src='http://127.0.0.1:{p}/same'></iframe>"
+                    f"<iframe id='cross' src='http://localhost:{p}/cross'></iframe>"
+                    "<script>"
+                    "console.log('main-log', 1);"
+                    "queueMicrotask(() => { throw new Error('main-boom'); });"
+                    "</script></body></html>"
+                ).encode("utf-8")
+            elif self.path == "/same":
+                body = (
+                    "<!doctype html><html><body>"
+                    "<script>"
+                    "console.warn('same-warn', 2);"
+                    "queueMicrotask(() => { throw new Error('same-boom'); });"
+                    "</script></body></html>"
+                ).encode("utf-8")
+            else:
+                body = (
+                    "<!doctype html><html><body style='margin:0'>"
+                    "<button id='xbtn' style='width:120px;height:48px'"
+                    " onclick='window.__clicked=(window.__clicked||0)+1;this.textContent=String(window.__clicked)'>0</button>"
+                    "<script>"
+                    "console.error('cross-err', 3);"
+                    "queueMicrotask(() => { throw new Error('cross-boom'); });"
+                    "</script></body></html>"
+                ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), CrossSiteHandler)
+    CrossSiteHandler.port_ref = srv.server_port
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        async with InvisiblePlaywright(
+            backend="chromium",
+            headless=True,
+            seed=42,
+            humanize=False,
+            locale="en-US",
+            timezone="UTC",
+        ) as browser:
+            context = await browser.new_context()
+            routed_urls: List[str] = []
+            if with_route:
+                async def pass_route(route: Any) -> None:
+                    routed_urls.append(route.request.url)
+                    await route.continue_()
+
+                await context.route("**/*", pass_route)
+
+            page = await context.new_page()
+            consoles: List[tuple[str, str]] = []
+            errors: List[str] = []
+            all_three_errors = asyncio.Event()
+
+            def on_console(msg: Any) -> None:
+                consoles.append((msg.type, msg.text))
+
+            def on_err(exc: Any) -> None:
+                errors.append(str(exc))
+                if len(errors) >= 3:
+                    all_three_errors.set()
+
+            page.on("console", on_console)
+            page.on("pageerror", on_err)
+
+            await page.goto(
+                f"http://127.0.0.1:{srv.server_port}/",
+                wait_until="load",
+            )
+            await all_three_errors.wait()
+
+            assert ("log", "main-log 1") in consoles
+            assert ("warning", "same-warn 2") in consoles
+            assert ("error", "cross-err 3") in consoles
+            assert len(consoles) == 3, f"Unexpected duplicate/internal console events: {consoles}"
+            assert any("main-boom" in e for e in errors)
+            assert any("same-boom" in e for e in errors)
+            assert any("cross-boom" in e for e in errors)
+            assert len(errors) == 3, f"Unexpected pageerror count: {errors}"
+
+            # Also verify zero-delay trusted click inside the true cross-site localhost OOPIF
+            cross_btn = page.frame_locator("#cross").locator("#xbtn")
+            await cross_btn.click()
+            assert await cross_btn.text_content() == "1"
+
+            if with_route:
+                assert any("localhost" in u for u in routed_urls)
+
+            await context.close()
+    finally:
         srv.shutdown()
         srv.server_close()

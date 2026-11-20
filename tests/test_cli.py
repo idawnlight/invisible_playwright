@@ -7,6 +7,12 @@ import pytest
 from invisible_playwright import cli
 
 
+@pytest.fixture(autouse=True)
+def _fetch_does_not_download_the_intermediates(monkeypatch):
+    """`fetch` also looks for a newer intermediates list (`update_intermediates`), which reaches Mozilla: a test that is not about it does not."""
+    monkeypatch.setattr("invisible_playwright.cli.update_intermediates", lambda *a, **k: (None, False), raising=False)
+
+
 @pytest.mark.unit
 def test_version_subcommand():
     r = subprocess.run(
@@ -96,6 +102,46 @@ def test_fetch_prints_the_path_as_its_last_line(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert out.strip().splitlines()[-1] == str(fake)
+
+
+@pytest.mark.unit
+def test_fetch_looks_for_a_newer_intermediates_list_after_the_engine(tmp_path, monkeypatch, capsys):
+    """The known-bad is a `fetch` that only makes sure a list is cached (`ensure_intermediates`, no request on a warm cache): a user who runs `fetch` asking for
+    what is current keeps a stale list. The engine is made present, then `update_intermediates` is called (and `ensure_intermediates` is not), in that
+    order, and the path of the engine is still the last line."""
+    fake = tmp_path / "firefox.exe"
+    fake.write_text("x")
+    calls = []
+    monkeypatch.setattr("invisible_playwright.cli.ensure_binary", lambda: calls.append("engine") or fake)
+    monkeypatch.setattr("invisible_playwright.cli.update_intermediates", lambda *a, **k: calls.append("update") or (None, False), raising=False)
+    monkeypatch.setattr("invisible_playwright.cli.ensure_intermediates", lambda *a, **k: calls.append("ensure"), raising=False)
+    monkeypatch.setattr("invisible_core.download.iter_cached_engines", lambda: [])
+
+    rc = cli.main(["fetch"])
+
+    assert rc == 0
+    assert calls == ["engine", "update"]
+    assert capsys.readouterr().out.strip().splitlines()[-1] == str(fake)
+
+
+@pytest.mark.unit
+def test_a_failing_intermediates_list_is_a_warning_and_changes_neither_the_exit_nor_the_last_line(tmp_path, monkeypatch, capsys):
+    fake = tmp_path / "firefox.exe"
+    fake.write_text("x")
+
+    def refuses(*a, **k):
+        raise RuntimeError("no route to host")
+
+    monkeypatch.setattr("invisible_playwright.cli.ensure_binary", lambda: fake)
+    monkeypatch.setattr("invisible_playwright.cli.update_intermediates", refuses)
+    monkeypatch.setattr("invisible_core.download.iter_cached_engines", lambda: [])
+
+    rc = cli.main(["fetch"])
+
+    cap = capsys.readouterr()
+    assert rc == 0
+    assert "no route to host" in cap.err and "intermediates" in cap.err
+    assert cap.out.strip().splitlines()[-1] == str(fake)
 
 
 @pytest.mark.unit

@@ -75,6 +75,7 @@ from ._marshal import (_js_number, _as_script, _button, _caller_timeout,
 # here for the length of one fix. Two readings of what a proxy is would be
 # the same duplication that produced the defect, one layer down.
 from invisible_core import SessionLocale, parse_proxy
+from invisible_core._proxy import UDP_EXIT_VALUES
 from invisible_core._udp_exit import context_proxy_command, launch_proxy_command, stun_servers
 
 from invisible_core import write_user_js
@@ -258,6 +259,11 @@ COMPOSED_PREF = "invisible.server.composed"
 #: a parameter of the Python launch, never a browser declaration. The server keeps it on the browser, so the launch
 #: and every later `new_context(proxy=...)` measure with the SAME list.
 UDP_STUN_PREF = "invisible.server.udp_stun_servers"
+#: THE VERDICT OF THAT MEASUREMENT (`SessionGeo.udp_exit`: `coherent`, `no`, `unmeasured`), made by the launcher's geo step
+#: and handed to this server the same way as the list above: in the prefs, taken out in `op_launch` before the profile is
+#: written. The core keeps no verdict in memory, so this is the only road it travels: `launch_proxy_command` declares what
+#: it is given, and `unmeasured` when it is given none. Not written when nothing was measured (no proxy, or not SOCKS5).
+UDP_EXIT_PREF = "invisible.server.udp_exit"
 #: The persona's keyboards, as Windows writes its input profiles (LANGID:KLID
 #: joined by semicolons, the language's first), decided by the core from the
 #: session's language AND country (`keyboard.profiles_for`). Server-only, like
@@ -286,6 +292,7 @@ def take_session_motion(prefs: Dict) -> tuple:
     rest.pop(POINTER_PREF, None)
     rest.pop(COMPOSED_PREF, None)
     rest.pop(UDP_STUN_PREF, None)
+    rest.pop(UDP_EXIT_PREF, None)
     return (rest,
             (None if seed is None else int(seed)),
             (None if budget_ms is None else int(budget_ms) / 1000.0))
@@ -298,6 +305,13 @@ def session_udp_stun_servers(prefs: Dict) -> Optional[list]:
     if not value:
         return None
     return ["%s:%d" % server for server in stun_servers(str(value).split(","))]
+
+
+def session_udp_exit(prefs: Dict) -> Optional[str]:
+    """The verdict the launcher measured (`UDP_EXIT_PREF`), or None when it named none or a value the core does not
+    declare: such a proxy is declared `unmeasured`, never `coherent`. Read BEFORE `take_session_motion` takes the key out."""
+    value = prefs.get(UDP_EXIT_PREF)
+    return value if value in UDP_EXIT_VALUES else None
 
 
 def session_for_launch(prefs: Dict, executable: str, proxy: Optional[Dict] = None) -> tuple:
@@ -333,7 +347,8 @@ def session_for_launch(prefs: Dict, executable: str, proxy: Optional[Dict] = Non
         return dict(prefs), {}
     from invisible_playwright._session import default_session
     session_prefs, session_env = default_session(executable, proxy)
-    return dict(session_prefs, **prefs), dict(session_env)
+    # The verdict of the UDP measurement is the one `default_session` made, never one the caller wrote.
+    return dict(session_prefs, **{k: v for k, v in prefs.items() if k != UDP_EXIT_PREF}), dict(session_env)
 
 
 def session_draws_pointer(prefs: Dict) -> bool:
@@ -6222,6 +6237,7 @@ class BrowserTypeDispatcher(Dispatcher):
             params.get("firefoxUserPrefs") or {}, executable, params.get("proxy"))
         # Read BEFORE `take_session_motion` takes it out: it never reaches the profile.
         udp_stun_servers = session_udp_stun_servers(launch_prefs)
+        udp_exit = session_udp_exit(launch_prefs)
         environment = _launch_environment(params.get("env"))
         named = {e["name"] for e in params.get("env") or []}
         environment.update({k: v for k, v in session_env.items() if k not in named})
@@ -6277,9 +6293,10 @@ class BrowserTypeDispatcher(Dispatcher):
         proxy = None
         if params.get("proxy"):
             try:
-                # The measure is the one the launch's geo step remembered for this proxy and these servers (nothing is
-                # asked of the network here): `unmeasured` when there is none, never a claimed `coherent`.
-                proxy = launch_proxy_command(params["proxy"], udp_stun_servers)
+                # The measure is the one the launch's geo step made for this proxy, handed here in the prefs (nothing is
+                # asked of the network here, and nothing is remembered): `unmeasured` when there is none, never a claimed
+                # `coherent`.
+                proxy = launch_proxy_command(params["proxy"], udp_exit=udp_exit)
             except ValueError as exc:
                 raise ProtocolException("launch(proxy=...) cannot be applied: "
                                         "%s" % exc)

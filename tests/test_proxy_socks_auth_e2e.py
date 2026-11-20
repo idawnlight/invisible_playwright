@@ -22,6 +22,7 @@ import pytest
 from invisible_playwright import InvisiblePlaywright
 
 from _servers import LocalServer
+from _socks_servers import asks_the_world, declare_exit, forget_exit
 
 _USER = "ferd_socks_user"
 _PASS = "ferd_socks_pw_42"
@@ -37,9 +38,18 @@ class _Socks5AuthRecorder:
         self._srv.bind(("127.0.0.1", 0))
         self._srv.listen(16)
         self.port = self._srv.getsockname()[1]
+        # It relays a CONNECT for real, so it declares its exit: the launch behind it is told the lab's, not the address of the machine
+        # that runs the test (see tests/_lab_egress.py).
+        from _lab_egress import LAB_EGRESS_IP
+
+        declare_exit(self.server, LAB_EGRESS_IP)
         self.seen_creds: list[tuple[str, str]] = []
         self._stop = False
         threading.Thread(target=self._serve, daemon=True).start()
+
+    @property
+    def server(self) -> str:
+        return f"socks5://127.0.0.1:{self.port}"
 
     def _serve(self):
         while not self._stop:
@@ -90,6 +100,8 @@ class _Socks5AuthRecorder:
             port = struct.unpack("!H", self._recv(conn, 2))[0]
             if cmd != 0x01:                        # only CONNECT
                 conn.sendall(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00"); conn.close(); return
+            if asks_the_world(self.server, addr, port):   # the exit is declared above, not asked of the internet
+                conn.sendall(b"\x05\x02\x00\x01\x00\x00\x00\x00\x00\x00"); conn.close(); return
             try:
                 up = socket.create_connection((addr, port), timeout=30)
             except OSError:
@@ -123,6 +135,7 @@ class _Socks5AuthRecorder:
 
     def close(self):
         self._stop = True
+        forget_exit(self.server)
         try:
             self._srv.close()
         except OSError:

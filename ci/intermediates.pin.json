@@ -1,0 +1,6 @@
+{
+  "comment": "The preloaded-intermediates list every CI leg launches with (STEALTHFOX_INTERMEDIATES): EMPTY (format 1, no certificates), so a leg never asks Mozilla for the real list (the core neither downloads nor checks when the variable is set) and every run has the same bytes. Set by scripts/ci_lab_intermediates.py. To change the list, change ci/intermediates.json and sha256 here in one commit; `set` refuses to go on when they differ. The real list is looked at only by what the release proves about the product.",
+  "file": "ci/intermediates.json",
+  "sha256": "f4f6a2332a4d589a1e8aaa4e73c820644a764125bb2970667afc7351e7cb3465",
+  "bytes": 219
+}

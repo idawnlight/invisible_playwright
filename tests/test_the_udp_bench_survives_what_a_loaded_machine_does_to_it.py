@@ -185,4 +185,4 @@ def test_a_core_measure_that_is_not_coherent_is_said_outright_with_the_round_tri
 
 
 def test_what_the_core_declared_is_absent_not_an_error_when_it_measured_nothing():
-    assert declared_udp_or_absent({"server": "socks5://127.0.0.1:1"}, ["198.51.100.6:19302"]) is None
+    assert declared_udp_or_absent({"server": "socks5://127.0.0.1:1"}) is None

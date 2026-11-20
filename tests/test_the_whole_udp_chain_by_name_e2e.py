@@ -157,7 +157,7 @@ def _walk(gateway, firefox_binary, engine_at_least, prefs):
         allocated_at = gateway.turn.allocations[0][3] - t0 if gateway.turn.allocations else None
         held_starts = [a[0] for a in associations if a[0] >= held_from]
         auth = gateway.user is not None
-    declared = declared_udp(gateway.proxy, measure_servers(gateway))
+    declared = declared_udp(gateway.proxy)
     assert declared == "coherent", "the core did not measure the chain's UDP coherent (%s): the engine would not use the relay" % declared + gateway.explain(result)
     ok = result.get("status") == "DONE" and gateway.page.verdicts and gateway.page.verdicts[-1]["ok"]
     assert ok, "the page did not get a server-reflexive candidate that the TURN server saw (the page was waited for 30 s):" + gateway.explain(result)

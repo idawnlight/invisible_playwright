@@ -38,6 +38,11 @@ NS_BINDING_ABORTED, every one with the page then on /landed; firefox-46 under
 the same load, 39 of 48, ten "interrupted" and four NS_BINDING_ABORTED, the
 page on /landed every time and never on our address. `_goto` accepts those
 three answers, fast, and nothing else.
+
+Every page lands on /landed WITH THE QUERY OF ITS OWN ROUND (`_landing`), an
+address no other round has: a wait for "**/landed" was answered by the /landed
+an earlier round or test had left, before our document had even committed
+(PR #534, run 44655615997).
 """
 from __future__ import annotations
 
@@ -51,26 +56,54 @@ pytestmark = pytest.mark.e2e
 ROUNDS = 5
 
 
-def _goto(page, url, **kwargs):
-    """`page.goto`, which may answer that the previous page's own redirect won
-    (module docstring). The detector of a navigation that never answers is the timeout of the `goto` itself (each caller passes
-    one): a bound of the test stricter than it only judged the speed of the machine."""
+def _landing(url: str) -> str:
+    """Where the page of `url` sends itself: /landed with the query of its round, which no other round of the module has."""
+    return "/landed" + url[url.index("?"):]
+
+
+#: The address each page (by `id`) was last sent to, or the page it went with instead (`_goto`).
+_SENT: dict = {}
+
+
+def _goto(page, url, *, the_page_before_may_move, our_page_may_stop_ours, **kwargs) -> str:
+    """`page.goto`, and the address of the page the frame went with: `url` when `goto` answers.
+
+    - ``the_page_before_may_move``: the page sent before ours may still be moving (the rounds of the read test go on
+      while it does, module docstring). Its `location.replace` may win: `goto` says ours was interrupted by it, or
+      stopped (NS_BINDING_ABORTED), and the frame lands on the landing of THAT page, whose address is returned.
+    - ``our_page_may_stop_ours``: an engine before firefox-68, where `goto` may say NS_BINDING_ABORTED for our own
+      document, which had committed and then moved
+      (`test_networkidle_is_reached_only_on_the_page_that_replaced_a_document_still_arriving`); the frame then lands on
+      our landing.
+
+    Any other answer is red. The detector of a navigation that never answers is the timeout of the `goto` itself (each
+    caller passes one): a bound of the test stricter than it only judged the speed of the machine."""
     from invisible_playwright.sync_api import Error
 
+    before = _SENT.get(id(page)) if the_page_before_may_move else None
+    _SENT[id(page)] = url
     try:
         page.goto(url, **kwargs)
+        return url
     except Error as e:
-        if "NS_BINDING_ABORTED" in str(e):
-            # The page's own replace stopped ours: it is where it sent itself.
-            page.wait_for_url("**/landed", timeout=30_000)
+        text = str(e)
+        if "NS_BINDING_ABORTED" in text:
+            ends = tuple(_landing(u) for u in (before, url if our_page_may_stop_ours else None) if u)
+            assert ends, e
+            page.wait_for_url(lambda u: u.endswith(ends), timeout=30_000)
+            went = url if page.url.endswith(_landing(url)) else before
         else:
-            assert "is interrupted by another navigation to" in str(e), e
-            assert "/landed" in str(e).split("another navigation to")[1], e
+            assert before is not None, e
+            assert "is interrupted by another navigation to" in text, e
+            assert _landing(before) in text.split("another navigation to")[1], e
+            went = before
+        _SENT[id(page)] = went
+        return went
 
 
 def _replace_after_load(ms: int, cross_site: bool) -> bytes:
-    target = ("location.origin.replace('127.0.0.1','localhost')+'/landed'"
-              if cross_site else "'/landed'")
+    target = ("location.origin.replace('127.0.0.1','localhost')+'/landed'+location.search"
+              if cross_site else "'/landed'+location.search")
     return (("<!doctype html><html><body><p id=p>first</p><script>"
              "addEventListener('load', () => setTimeout(() => "
              "location.replace(%s), %d))</script></body></html>")
@@ -78,15 +111,18 @@ def _replace_after_load(ms: int, cross_site: bool) -> bytes:
 
 
 def _replace_without_a_timer(held: bool, cross_site: bool) -> bytes:
-    """The page of a `networkidle` case: it replaces itself with no timer in it, so how fast the machine is cannot
-    decide whether the move comes before the half second of quiet that `networkidle` waits for.
+    """The page of a `networkidle` case that moves AFTER its `load`, with no timer in it:
 
-    - ``held`` False: from inside the `load` handler itself, before `load` is even reported;
-    - ``held`` True: when the first bytes of a response the server holds open arrive. That request is in flight until
-      the navigation aborts it, so the network is not quiet for as long as the page has not moved, whatever the load
-      on the machine."""
-    target = ("location.origin.replace('127.0.0.1','localhost')+'/landed'"
-              if cross_site else "'/landed'")
+    - ``held`` False: from inside the `load` handler itself;
+    - ``held`` True: when the first bytes of a response the server holds open arrive.
+
+    The engine reports `load` before the page's own `load` handler runs, and the request that handler opens reaches the
+    client later, from the parent process. Between the document's commit and that request nothing is in flight, and on
+    a loaded machine that silence can be half a second: `networkidle` is then reached on this page, before it moves,
+    as Playwright's is (its idle timer starts at the commit and does not even wait for `load`). Which page the answer
+    comes on is the speed of the machine; the test asserts what holds on both."""
+    target = ("location.origin.replace('127.0.0.1','localhost')+'/landed'+location.search"
+              if cross_site else "'/landed'+location.search")
     if held:
         script = ("addEventListener('load', () => fetch('/hold').then(r => r.body.getReader().read())"
                   ".then(() => location.replace(%s)))" % target)
@@ -95,8 +131,18 @@ def _replace_without_a_timer(held: bool, cross_site: bool) -> bytes:
     return ("<!doctype html><html><body><p id=p>first</p><script>%s</script></body></html>" % script).encode()
 
 
+def _replace_while_the_document_is_held(cross_site: bool) -> bytes:
+    """The page of the strict `networkidle` case: the server sends this markup and keeps the document's own response
+    open (`HELD_DOCUMENTS`), and the inline script moves the page while it is still arriving. The document request is
+    in flight from before the commit until the move cuts it, and a document that never finished never has its `load`:
+    `networkidle` (which implies `load`) cannot be reached on this page, however fast or slow the machine."""
+    target = ("location.origin.replace('127.0.0.1','localhost')+'/landed'+location.search"
+              if cross_site else "'/landed'+location.search")
+    return ("<!doctype html><html><body><p id=p>first</p><script>location.replace(%s)</script>" % target).encode()
+
+
 PAGES = {
-    "/head": (b"<!doctype html><html><head><script>location.replace('/landed')"
+    "/head": (b"<!doctype html><html><head><script>location.replace('/landed'+location.search)"
               b"</script></head><body><p id=p>head</p></body></html>"),
     "/landed": b"<!doctype html><html><body><p id=p>landed</p></body></html>",
     "/withframe": (b"<!doctype html><html><body><iframe src='/landed'></iframe>"
@@ -110,6 +156,8 @@ for _ms in (0, 50, 300):
 for _name, _held in (("0", False), ("50", True)):
     PAGES["/ir" + _name] = _replace_without_a_timer(_held, False)
     PAGES["/ix" + _name] = _replace_without_a_timer(_held, True)
+# the strict networkidle cases: the document itself is held open while its script moves the page, same site and another
+HELD_DOCUMENTS = {"/hdr": _replace_while_the_document_is_held(False), "/hdx": _replace_while_the_document_is_held(True)}
 
 
 @pytest.fixture(scope="module")
@@ -127,6 +175,20 @@ def site():
                 self.end_headers()
                 try:
                     self.wfile.write(b"x" * 16384)
+                    self.wfile.flush()
+                except OSError:
+                    return
+                release.wait(60)
+                return
+            if self.path.split("?")[0] in HELD_DOCUMENTS:
+                # a document that has begun and does not end: no Content-Length, the markup at once, then the response
+                # stays open until the page has left it (or the module's teardown)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                try:
+                    self.wfile.write(HELD_DOCUMENTS[self.path.split("?")[0]])
                     self.wfile.flush()
                 except OSError:
                     return
@@ -163,10 +225,11 @@ def page(firefox_binary):
 
 @pytest.mark.parametrize("path", ["/head", "/r0", "/r50", "/r300",
                                   "/x0", "/x50", "/x300"])
-def test_a_read_right_after_goto_answers(page, site, path):
+def test_a_read_right_after_goto_answers(page, site, path, engine_reaches):
+    older = not engine_reaches("firefox-68")
     for i in range(ROUNDS):
-        _goto(page, "%s%s?i=%d" % (site, path, i), wait_until="domcontentloaded",
-              timeout=30_000)
+        _goto(page, "%s%s?i=%s-%d" % (site, path, path[1:], i), the_page_before_may_move=True,
+              our_page_may_stop_ours=older, wait_until="domcontentloaded", timeout=30_000)
         # Each read is made at once, while the page may still be moving: none
         # of them may surface the engine's refusal of a vanished world. A count
         # is of the page as it is NOW, and that can be the replacing document
@@ -192,17 +255,52 @@ def test_a_read_right_after_goto_answers(page, site, path):
             assert page.evaluate("1 + 1") == 2
         except Error as e:
             assert "Execution context was destroyed" in str(e), e
+    # The next test starts on a page that stays: the last page this frame went with has landed.
+    page.wait_for_url(lambda u, end=_landing(_SENT[id(page)]): u.endswith(end), timeout=30_000)
 
 
 @pytest.mark.parametrize("path", ["/r0", "/r50", "/x0", "/x50"])
-def test_networkidle_is_reached_on_the_page_that_replaced_ours(page, site, path):
-    """The page moves with no timer (`_replace_without_a_timer`): `networkidle` promises half a second without
-    network, and that cannot pass before the move however slow the machine is. A `networkidle` that comes back on the
-    first page, or never comes back because the new frame forgot the navigation, is still red."""
+def test_networkidle_is_reached_on_the_page_that_replaced_ours(page, site, path, engine_reaches):
+    """The page moves after its `load` with no timer (`_replace_without_a_timer`). `goto(..., "networkidle")` answers:
+    on the first page when half a second of silence came before its move (the speed of the machine decides, as in
+    Playwright), or on the page that replaced it. Either way the page then lands, and `networkidle` is reached there.
+    A `goto` that never answers because the new frame forgot the navigation ([B228]) is still red; the answer that
+    must never come on the first page is the strict case below. Each round starts on a page that stays (the round
+    before waited for its landing, and so did the test before)."""
+    older = not engine_reaches("firefox-68")
     for i in range(ROUNDS):
-        _goto(page, "%s/i%s?n=%d" % (site, path[1:], i), wait_until="networkidle",
-              timeout=30_000)
-        assert page.url.endswith("/landed"), page.url
+        url = "%s/i%s?n=%s-%d" % (site, path[1:], path[1:], i)
+        assert _goto(page, url, the_page_before_may_move=False, our_page_may_stop_ours=older,
+                     wait_until="networkidle", timeout=30_000) == url
+        assert page.url.split("?")[0].endswith(("/i" + path[1:], "/landed")), page.url
+        page.wait_for_url(lambda u, end=_landing(url): u.endswith(end), timeout=30_000)
+        page.wait_for_load_state("networkidle", timeout=30_000)
+        assert page.url.endswith(_landing(url)), page.url
+
+
+@pytest.mark.parametrize("path", ["/hdr", "/hdx"])
+def test_networkidle_is_reached_only_on_the_page_that_replaced_a_document_still_arriving(page, site, path,
+                                                                                         engine_reaches):
+    """The document is held open while its script moves the page (`_replace_while_the_document_is_held`): its request
+    is in flight until the move and it never has its `load`, so `networkidle` cannot be reached on it, whatever the
+    machine. `goto` answers on the round's landing, and nothing else: our document committed, so nothing stopped ours.
+
+    THE ENGINE'S DEFECT THIS CASE CATCHES, before firefox-68 (PR #534, run 44655615997, Linux, round 0 of /hdr): the
+    document commits in another process, whose channel to the parent starts again with the new document and holds what
+    it says until the parent's READY (juggler SimpleChannel). The parent saw at once the request of the page's own move
+    and the cut of our document request, and told our navigation aborted; the commit of our document came after, with
+    no id, and was told as a document no navigation made. `goto` said NS_BINDING_ABORTED for a page that had loaded,
+    and the old `_goto` waited for "**/landed", which the page of the test before answered at once. Closed in the
+    series by the branch `fix/a-committed-navigation-is-not-cut-by-the-parent` (firefox-68: the parent's cut waits for
+    a barrier through the channel of the process that holds the frame). On an older engine the cut is still accepted
+    (`our_page_may_stop_ours`), and the frame must land on our landing all the same. Not a skip: a required suite
+    allows none (scripts/ci_verdict.py)."""
+    older = not engine_reaches("firefox-68")
+    for i in range(ROUNDS):
+        url = "%s%s?n=%s-%d" % (site, path, path[1:], i)
+        assert _goto(page, url, the_page_before_may_move=False, our_page_may_stop_ours=older,
+                     wait_until="networkidle", timeout=30_000) == url
+        assert page.url.endswith(_landing(url)), page.url
 
 
 def test_the_frames_follow_the_documents(page, site):

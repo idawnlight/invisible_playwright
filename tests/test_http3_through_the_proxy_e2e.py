@@ -155,7 +155,7 @@ def test_a_page_behind_a_gateway_that_relays_udp_starts_on_h2_reaches_h3_within_
         protocols, walls = _visits("socks5_coherent", server, monkeypatch, egress_by_proxy(gateway), proxy=gateway.proxy,
                                   udp_stun_servers=measure_servers(gateway))
         carried = [(h, p) for h, p, _data in gateway.datagrams if (h, p) == (host, server.port)]
-        declared = declared_udp(gateway.proxy, measure_servers(gateway))
+        declared = declared_udp(gateway.proxy)
         said = _report("socks5_coherent", protocols, walls, server, gateway)
     assert declared == "coherent", "the core measured the gateway %s, not coherent: the engine would not use its relay. %s" % (declared, said)
     problems = judge_visits("socks5_coherent", protocols, walls)
@@ -180,7 +180,7 @@ def test_a_page_behind_a_socks5_proxy_that_is_not_coherent_reads_h2_on_every_vis
         protocols, walls = _visits(road, server, monkeypatch, egress_by_proxy(gateway), proxy=gateway.proxy,
                                   udp_stun_servers=measure_servers(gateway))
         to_the_server = [(h, p) for h, p, _data in gateway.datagrams if (h, p) == (host, server.port)]
-        declared = declared_udp(gateway.proxy, measure_servers(gateway))
+        declared = declared_udp(gateway.proxy)
         said = _report(road, protocols, walls, server, gateway)
     assert declared == _DECLARED[road], "the core declared udp=%s, the road is %s. %s" % (declared, _DECLARED[road], said)
     problems = judge_visits(road, protocols, walls)

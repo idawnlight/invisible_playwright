@@ -26,7 +26,6 @@ from invisible_core.seal import (
     DEFAULT_ENTRY_REL,
     JUGGLER_ENTRIES,
     EngineMismatch,
-    _reset_active_seal_for_tests,
 )
 from invisible_playwright import _engine
 
@@ -80,9 +79,7 @@ def active(tmp_path, monkeypatch):
         "playwright": {"min": "1.55.0", "max": "1.61.0"}, "assets": {},
     }, sort_keys=True), encoding="utf-8")
     monkeypatch.setenv("INVISIBLE_SEAL_FILE", str(p))
-    _reset_active_seal_for_tests()
-    yield p
-    _reset_active_seal_for_tests()
+    yield p       # the core reads the seal on every call: nothing to reset on the way in or out
 
 
 def test_sealed_tree_is_accepted(tmp_path, active):

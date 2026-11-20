@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from invisible_core.seal import _reset_active_seal_for_tests, load_seal
+from invisible_core.seal import load_seal
 from invisible_playwright import _engine
 
 
@@ -29,10 +29,8 @@ def sealed_range(tmp_path, monkeypatch):
         "build_id": "20260724001949", "source_commit": "",
         "playwright": {"min": "1.55.0", "max": "1.61.0"}, "assets": {},
     }, sort_keys=True), encoding="utf-8")
-    monkeypatch.setenv("INVISIBLE_SEAL_FILE", str(p))
-    _reset_active_seal_for_tests()
+    monkeypatch.setenv("INVISIBLE_SEAL_FILE", str(p))      # the core reads the seal on every call: nothing to reset
     yield load_seal(p)
-    _reset_active_seal_for_tests()
 
 
 def set_reported_version(monkeypatch, value: str) -> None:
@@ -76,8 +74,4 @@ def test_skew_can_be_allowed_explicitly_and_still_warns(sealed_range, monkeypatc
 def test_the_installed_client_satisfies_the_packaged_seal():
     """The range the package ships must accept the client the package pins, or
     every fresh install is dead on arrival, which is L1."""
-    _reset_active_seal_for_tests()
-    try:
-        _engine.assert_playwright_range()
-    finally:
-        _reset_active_seal_for_tests()
+    _engine.assert_playwright_range()

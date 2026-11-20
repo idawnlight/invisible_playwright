@@ -38,7 +38,7 @@ import argparse
 import sys
 
 from . import __version__
-from invisible_core import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
+from invisible_core import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION, update_intermediates
 from invisible_core.download import cache_root, engine_root, ensure_binary  # noqa: F401
 
 from ._pin import (
@@ -99,6 +99,13 @@ def _cmd_fetch(_args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    # The list of preloaded intermediate certificates the core declares to the engine: `fetch` is where the user asks for what is current, so it looks for a
+    # newer list EVERY time (a small request to the changes feed; the list is downloaded only when it changed) and puts it in the cache. A launch only reads the
+    # cache. A failure here is a warning and nothing more: it changes neither the exit code nor the last line (`update_intermediates` itself does not raise).
+    try:
+        update_intermediates()
+    except Exception as e:
+        print(f"warning: the intermediates list could not be fetched: {e}", file=sys.stderr)
     # Last line, alone, so `$(invisible-playwright fetch)` is a path.
     print(path)
     return 0

@@ -21,7 +21,7 @@ import json
 
 import pytest
 
-from invisible_core.seal import EngineMismatch, _reset_active_seal_for_tests
+from invisible_core.seal import EngineMismatch
 from invisible_playwright import _engine
 
 
@@ -40,10 +40,8 @@ def sealed(tmp_path, monkeypatch):
         "build_id": "20260724001949", "source_commit": "",
         "playwright": {"min": "1.55.0", "max": "1.61.0"}, "assets": {},
     }, sort_keys=True), encoding="utf-8")
-    monkeypatch.setenv("INVISIBLE_SEAL_FILE", str(p))
-    _reset_active_seal_for_tests()
+    monkeypatch.setenv("INVISIBLE_SEAL_FILE", str(p))      # the core reads the seal on every call: nothing to reset
     yield
-    _reset_active_seal_for_tests()
 
 
 def test_the_sealed_engine_reports_the_sealed_version(sealed):

@@ -609,7 +609,12 @@ class DohGateway(Gateway):
     username/password offered, ``first_connection_delay`` holds the first accepted connection that many seconds
     before it is answered (a gateway that is slow to say hello), and :meth:`kill` makes the gateway dead: the port
     refuses, and every open tunnel is closed.
+
+    It carries nothing past loopback, so the question of the exit cannot leave through it (``forwards_for_real`` is False: it declares
+    no exit, and the lab leaves that question to the discovery, which this gateway refuses).
     """
+
+    forwards_for_real = False
 
     def __init__(self, name: str, doh: FakeDoh, *, user: Optional[str] = None, password: Optional[str] = None,
                  first_connection_delay: float = 0.0, **gateway: object):

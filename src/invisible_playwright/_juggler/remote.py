@@ -752,6 +752,7 @@ def _launch_params(session: Any, *, virtual_display: bool, headless: bool,
     session._locale = geo.locale
     session._webrtc_egress_ip = geo.egress_ip
     session._geolocation = geo.geolocation_override()
+    session._udp_exit = geo.udp_exit
     if is_chromium:
         from invisible_playwright._cdp.engine import (
             OpenboxWorkarea,

@@ -40,6 +40,9 @@ jobs:
       - run: python -m invisible_core.hooks install
       - name: Check names and duplicate definitions
         run: python -m ruff check --select F821,F811,F601 --no-cache --output-format concise .
+      - name: The intermediates list (a fixed file of the repository)
+        shell: bash
+        run: python scripts/ci_lab_intermediates.py set --pin ci/intermediates.pin.json
       - name: Run the default suite
         run: python -m pytest -q -rs --junitxml=unit.xml
       - name: Require the default suite to run

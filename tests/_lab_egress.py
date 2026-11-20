@@ -12,9 +12,15 @@ This module is that declaration, made once per session by the autouse fixture of
 * the question with NO proxy is answered :data:`LAB_EGRESS_IP`, a public address (so the core does not refuse it as unroutable) that the GeoIP database of
   the lab (``scripts/ci_lab_geoip.py``: one record for every public address that is not one of its six exits) maps to New York, en-US. The same session
   as before on every runner, whatever its address and whatever its network;
-* the question WITH a proxy is left to what answered it before: the local gateways of the tests answer ``api.ipify.org`` themselves
-  (``tests/_socks_servers.py``), and a test that replaces the question (``tests/_udp_line.egress_by_proxy``) does it with ``monkeypatch`` for its own
-  duration, which undoes to this answer and not to the network;
+* the question WITH a proxy is answered by the proxy of the lab it goes through, never by a service of the internet. The product asks it HTTPS
+  (``https://api.ipify.org`` through the proxy), and no proxy of the tests can answer a TLS request as the service: a proxy that FORWARDS for real
+  (``Socks5TcpOnly``, the gateway of ``tests/_socks_servers.py``, the SOCKS5 server of ``test_proxy_socks_auth_e2e.py``) carried it to the
+  internet, and the launch was told the address of whatever machine ran the test, which on a GitHub runner changed (NAT) in the middle of a session:
+  ``ProxyEgressDrifted``. Such a proxy DECLARES its exit (``_socks_servers.declare_exit``) and this module answers with it, with no request at all;
+  as a backstop it refuses to forward the question (``_socks_servers.asks_the_world``), and the autouse fixture ``_no_test_asks_the_world_where_it_leaves_from``
+  of ``conftest.py`` fails the test that made it. A proxy that refuses everything past loopback (the DoH gateways, the HTTP proxy of the tests) cannot
+  carry the question anywhere: it is not declared, and its question goes to the discovery, which it refuses. A test that replaces the question
+  (``tests/_udp_line.egress_by_proxy``) does it with ``monkeypatch`` for its own duration, which undoes to this answer and not to the network;
 * the database is the lab's too: when ``STEALTHFOX_GEOIP_MMDB`` is not set (a developer's machine; the CI legs set it) it is built here, from the same table
   and the same bytes, instead of the core asking GitHub which database is the latest.
 
@@ -30,6 +36,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from _servers import LocalServer
+from _socks_servers import declared_exit_of
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,7 +51,9 @@ LAB_EGRESS_IP = _address(8, 8, 8, 8)
 
 
 class DeclaredExit:
-    """The replacement of ``discover_egress_ip``: counts the questions it answers, and passes a proxied one on to what answered it before."""
+    """The replacement of ``discover_egress_ip``: counts the questions it answers. A question with no proxy is answered :attr:`ip`; one behind a proxy
+    that forwards for real is answered the exit that proxy declared (``_socks_servers.declare_exit``); one behind a proxy that declared nothing (a
+    proxy that refuses the world) is passed on to what answered it before."""
 
     def __init__(self, original: Callable[..., str], ip: str = LAB_EGRESS_IP) -> None:
         self.original = original
@@ -56,7 +65,11 @@ class DeclaredExit:
         if not proxy:
             self.direct_questions += 1
             return self.ip
-        self.proxied_questions.append(proxy.get("server") if isinstance(proxy, dict) else proxy)
+        server = proxy.get("server") if isinstance(proxy, dict) else proxy
+        self.proxied_questions.append(server)
+        declared = declared_exit_of(server)
+        if declared is not None:
+            return declared
         return self.original(proxy, *args, **kwargs)
 
 

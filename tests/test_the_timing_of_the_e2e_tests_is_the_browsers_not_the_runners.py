@@ -10,8 +10,8 @@ red and the case it must call green:
   and by a COUNT (the exchanges the gateway, the DoH and the TURN server recorded), never by a duration;
 * the page of the key-delay test and of the typing-pause test stamp each event with `event.timeStamp` (the browser's own
   creation time), not with `performance.now()` read when the handler happens to run;
-* the pages of the `networkidle` cases of `test_a_page_that_moves_on_e2e.py` have no timer: they move from inside `load`
-  or from the first bytes of a response the server holds open;
+* the pages of the `networkidle` cases of `test_a_page_that_moves_on_e2e.py` have no timer: they move from inside `load`,
+  from the first bytes of a response the server holds open, or from the script of a document the server holds open;
 * the rate of a screencast is the rate of the frames that came, and a cap that is not honoured is above its ceiling;
 * the screenshot of a frame of another site is taken again until it is painted, and says what it saw if it never is.
 """
@@ -203,6 +203,12 @@ def test_the_networkidle_pages_of_a_page_that_moves_have_no_timer_in_them():
     # 0: inside the load handler itself; 50: when the first bytes of a response the server holds open come in
     assert "/hold" not in module.PAGES["/ir0"].decode() and "/hold" in module.PAGES["/ir50"].decode()
     assert "127.0.0.1','localhost'" in module.PAGES["/ix0"].decode()
+    # the strict cases: a document still arriving moves from its inline script, and never has a `load` of its own
+    for name, page in module.HELD_DOCUMENTS.items():
+        page = page.decode()
+        assert "setTimeout" not in page and "setInterval" not in page and "load" not in page, name
+        assert "location.replace" in page, name
+    assert "127.0.0.1','localhost'" in module.HELD_DOCUMENTS["/hdx"].decode()
     # the pages of the read-at-once test keep their timers: they are the stimulus there, and each read accepts either page
     assert "setTimeout" in module.PAGES["/r50"].decode()
 

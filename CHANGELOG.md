@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.0] - 2026-11-20
+
+### Fixed
+- **Chromium CDP event-thread head-of-line deadlocks (`invpw-cdp-events`)**: Eliminated all synchronous `Page.createIsolatedWorld` / renderer RPC waits from `_cdp/bridge.py`'s event worker thread (`_init_oopif_session`, `Page.frameNavigated`, `Page.frameAttached`, `Page.fileChooserOpened`, `Runtime.bindingCalled`):
+  - Registers `Page.addScriptToEvaluateOnNewDocument(source="", worldName=UTILITY_WORLD)` permanently on every main and OOPIF CDP session so Blink's `EnsureDOMWrapperWorld` creates and announces `UTILITY_WORLD` automatically via `Runtime.executionContextCreated` on every document commit without blocking `_ev_worker` in `InspectorPageAgent::pending_isolated_worlds_` when `frame->IsProvisional()` holds.
+  - Pipelines all OOPIF session setup commands (`Page.enable`, `Runtime.enable`, `Fetch.enable`, `Runtime.runIfWaitingForDebugger`, and initial `Page.createIsolatedWorld`) via non-blocking `post()` in FIFO session order, fixing true cross-site OOPIF initialization (`127.0.0.1` -> `localhost` and `site-a.test` -> `site-b.test`, with or without `route`) and immediate back-to-back navigations on the same page after HTTP/CONNECT proxy authentication failure.
+- **Chromium true cross-site OOPIF `Page.getContentQuads` coordinate mapping**: Transforms `DOM.getContentQuads` points returned by out-of-process iframe sessions through `Page.getFrameOrigin` into main-frame viewport coordinates so `click()`, `hover()`, `bounding_box()`, and `screenshot()` target the exact element inside site-isolated cross-site iframes.
+- **`networkidle` quiet window anchored at `navigationCommitted`**: Syncs upstream `invisible_core 160.78.0` `Lifecycle` fix so silence before a cross-process swap or redirect never satisfies the new document's `networkidle` wait.
+
+### Changed
+- Pins `invisible_core==160.78.0` paired with `firefox-160.0-r3` (`stillborn/intermediates` preloading declared intermediate CAs into `cert_storage` before Juggler readiness with zero Remote Settings `security-state/intermediates` sync, plus zero cross-session in-memory caches) and `chromium-157.0.8103.78-r1`.
+- `invisible-playwright fetch` updates the cached Mozilla intermediate CA certificate list alongside the browser binary (`update_intermediates()`).
+
+## [0.56.0] - 2026-11-20
+
+### Added
+- Absorbed upstream 0.56.0 intermediates cache integration (`ci/intermediates.json`, `scripts/ci_lab_intermediates.py`, and `cli.py` `update_intermediates()`).
+
 ## [0.55.1] - 2026-11-20
 
 ### Fixed

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
 import types
 
 import pytest
@@ -23,23 +22,37 @@ from invisible_core.launch import FontManifestMismatch
 
 from invisible_playwright import _session, async_api
 
-START_SECONDS = 0.5
+#: Safety net only, never a measure: how long a worker may wait for the test to
+#: release it, and how long the test may wait for a worker, before a hang is
+#: turned into a failure. A healthy run never comes near it.
+SAFETY_SECONDS = 30
 
 
 class SlowDisplay:
-    """Stand-in for a display whose start takes 500 ms."""
+    """Stand-in for a display whose start does not return until the test says so.
+
+    No clock decides anything: `start` announces that it is running (`entered`)
+    and then waits for `release`. While it waits, the test checks that the loop
+    still serves; only then it sets `release`.
+    """
 
     def __init__(self) -> None:
         self.started_on = None
         self.stopped = 0
-        self.release = None
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.returned = threading.Event()
+        self.stop_called = threading.Event()
 
     def start(self) -> None:
         self.started_on = threading.get_ident()
-        time.sleep(START_SECONDS)
+        self.entered.set()
+        self.release.wait(SAFETY_SECONDS)
+        self.returned.set()
 
     def stop(self) -> None:
         self.stopped += 1
+        self.stop_called.set()
 
     def launch_env(self):
         return {}
@@ -50,7 +63,7 @@ def slow(monkeypatch):
     vd = SlowDisplay()
     geo = types.SimpleNamespace(timezone="Europe/Rome",
                                 locale=SessionLocale.of("it-IT"),
-                                egress_ip=None,
+                                egress_ip=None, udp_exit=None,
                                 geolocation_override=lambda: None)
 
     def refuse(**_kw):
@@ -59,11 +72,10 @@ def slow(monkeypatch):
     monkeypatch.delenv(_session.TRUE_HEADLESS_ENV, raising=False)
     monkeypatch.setattr(_session, "make_virtual_display", lambda: vd)
     monkeypatch.setattr(_session, "build_env", refuse)
-    # Composing the prefs is its own ~100 ms of CPU on a cold process and is not
-    # the subject: the test measures the display start alone.
+    # Composing the prefs is not the subject: the test is about the display start alone.
     monkeypatch.setattr(async_api.InvisiblePlaywright, "_build_prefs", lambda _s: {})
-    # Nor is the teardown's process scan (~100 ms on a host with many
-    # processes): a stand-in that does only what this test checks, stop the display.
+    # Nor is the teardown's process scan: a stand-in that does only what this
+    # test checks, stop the display.
     async def teardown(self):
         vd, self._virtual_display = self._virtual_display, None
         if vd is not None:
@@ -76,33 +88,37 @@ def slow(monkeypatch):
 
 
 def test_a_second_browser_is_served_while_the_first_starts_its_display(slow):
-    gaps = []
+    """While the first browser's display start is in progress (blocked until the
+    test lets it return), the loop answers a second browser. If the start ran on
+    the loop, the loop would stand still inside it and the second browser could
+    answer only after the start had returned."""
+    served = {}
 
     async def second_browser():
-        # Another browser on this loop asks for a reply every 10 ms while the
-        # first one launches. A reply later than 100 ms means the loop was held.
-        last = time.perf_counter()
-        while True:
-            await asyncio.sleep(0.01)
-            now = time.perf_counter()
-            gaps.append(now - last)
-            last = now
+        # Another browser on this loop: a few round trips through the loop, each
+        # one a turn of the loop that the first browser must not be holding.
+        for _ in range(5):
+            await asyncio.sleep(0)
+        served["while_start_in_progress"] = not slow.returned.is_set()
 
     async def run():
         first = async_api.InvisiblePlaywright(seed=7, headless=True)
-        other = asyncio.ensure_future(second_browser())
-        await asyncio.sleep(0.05)
         launch = asyncio.ensure_future(first.__aenter__())
+        # The display start is running (in its worker) and waiting for the test.
+        assert await asyncio.to_thread(slow.entered.wait, SAFETY_SECONDS), "the display start never began"
+        await second_browser()
+        slow.release.set()
         with pytest.raises(FontManifestMismatch):
-            await launch
-        await asyncio.sleep(0.05)               # let the ticker record the last gap
-        other.cancel()
+            await asyncio.wait_for(launch, SAFETY_SECONDS)
         return first
 
-    first = asyncio.run(run())
-    assert len(gaps) > 5 and max(gaps) < 0.1, (
-        "the second browser waited %.0f ms for a reply: the display start ran "
-        "on the loop" % (max(gaps) * 1000))
+    try:
+        first = asyncio.run(run())
+    finally:
+        slow.release.set()
+    assert served.get("while_start_in_progress"), (
+        "the second browser was served only after the display start had returned: "
+        "the start ran on the loop")
     assert slow.started_on is not None
     assert slow.started_on != threading.get_ident(), "the start ran on the loop thread"
     # The surface is still created, and still stopped by a failed launch.
@@ -114,14 +130,20 @@ def test_a_launch_cancelled_during_the_display_start_leaves_no_display(slow):
     async def run():
         first = async_api.InvisiblePlaywright(seed=7, headless=True)
         launch = asyncio.ensure_future(first.__aenter__())
-        await asyncio.sleep(0.1)                # the start is in its worker
+        # The start is in its worker, waiting for the test.
+        assert await asyncio.to_thread(slow.entered.wait, SAFETY_SECONDS), "the display start never began"
         launch.cancel()
         with pytest.raises(asyncio.CancelledError):
             await launch
-        await asyncio.sleep(START_SECONDS + 0.3)    # the worker finishes
+        slow.release.set()                      # the worker finishes
+        # The surface it created for nobody is released on the worker's end.
+        assert await asyncio.to_thread(slow.stop_called.wait, SAFETY_SECONDS),             "a display started for a cancelled launch was left running"
         return first
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    finally:
+        slow.release.set()
     assert slow.stopped == 1, "a display started for a cancelled launch was left running"
 
 

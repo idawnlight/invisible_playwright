@@ -73,25 +73,48 @@ def egress_by_proxy(*gateways: Any, direct: Optional[str] = None) -> Callable[..
     return discover
 
 
-def declared_udp(proxy: Dict[str, Any], servers: Sequence[str]) -> str:
-    """The ``udp`` the launch measured for ``proxy`` with ``servers``: ``coherent``, ``no`` or ``unmeasured``. It is what the
-    core remembered for the proxy (and declares to the engine); an AssertionError when the launch measured nothing, so
-    ``unmeasured`` cannot be mistaken for an absent measurement."""
-    from invisible_core import _udp_exit
-    from invisible_core._proxy import parse_proxy
-
-    endpoint = parse_proxy(proxy)
-    key = _udp_exit.cache_key(endpoint, _udp_exit.stun_servers(list(servers)))
-    entry = _udp_exit._cache.get(key)
-    if entry is None:
-        raise AssertionError("the launch measured nothing for %r with %s" % (proxy.get("server"), list(servers)))
-    return entry[1]
+#: What the core rendered into an engine proxy command during the running test, by proxy server: the ``udp`` of every
+#: ``Browser.setBrowserProxy`` / ``Browser.setContextProxy`` it built, in order. The core keeps no verdict in memory, so
+#: this is where a test reads what was declared: at the one place that writes it (see :func:`record_declared`).
+DECLARED: Dict[str, List[str]] = {}
 
 
-def declared_udp_or_absent(proxy: Dict[str, Any], servers: Sequence[str]) -> Optional[str]:
-    """:func:`declared_udp`, or None when the launch measured nothing for ``proxy`` (a report must say that, not raise)."""
+def record_declared(monkeypatch: Any) -> None:
+    """Record, for the running test, the ``udp`` of every proxy command the core renders (autouse in ``conftest.py``).
+
+    It spies ``invisible_core._udp_exit._command``: the one function that builds the engine command from a proxy and a
+    verdict, whoever asks (the launch with the verdict the geo step made, a context after its own measurement). The spy
+    delegates, and changes nothing the engine is told."""
+    DECLARED.clear()
     try:
-        return declared_udp(proxy, servers)
+        from invisible_core import _udp_exit
+    except Exception:  # noqa: BLE001 - the package is absent: the tests that need it say so
+        return
+    real = _udp_exit._command
+
+    def spy(proxy: Dict[str, Any], udp: Any) -> Optional[Dict[str, Any]]:
+        command = real(proxy, udp)
+        if command is not None and "udp" in command:
+            DECLARED.setdefault(proxy.get("server"), []).append(command["udp"])
+        return command
+
+    monkeypatch.setattr(_udp_exit, "_command", spy)
+
+
+def declared_udp(proxy: Dict[str, Any]) -> str:
+    """The ``udp`` the core declared to the engine for ``proxy``, the last one of this test: ``coherent``, ``no`` or
+    ``unmeasured``. An AssertionError when nothing was declared for it, so ``unmeasured`` cannot be mistaken for an
+    absent declaration."""
+    declared = DECLARED.get(proxy.get("server"))
+    if not declared:
+        raise AssertionError("the core declared nothing for %r" % proxy.get("server"))
+    return declared[-1]
+
+
+def declared_udp_or_absent(proxy: Dict[str, Any]) -> Optional[str]:
+    """:func:`declared_udp`, or None when nothing was declared for ``proxy`` (a report must say that, not raise)."""
+    try:
+        return declared_udp(proxy)
     except AssertionError:
         return None
 

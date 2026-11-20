@@ -22,11 +22,6 @@ from invisible_core import _geo, _udp_exit
 pytestmark = pytest.mark.unit
 
 
-@pytest.fixture(autouse=True)
-def _fresh(monkeypatch):
-    monkeypatch.setattr(_udp_exit, "_cache", {})
-
-
 def test_the_measure_servers_are_ip_port_ipv4_literals_that_the_core_takes():
     for gateway in (coherent(), tcp_only(), mismatched(), silent_udp()):
         with gateway:
@@ -101,13 +96,16 @@ def test_each_proxy_has_the_tcp_exit_of_its_own_gateway():
         assert egress_by_proxy(first, direct="192.0.2.9")(None) == "192.0.2.9"
 
 
-def test_what_the_launch_declared_is_what_the_core_measured_and_an_absent_measurement_is_not_unmeasured(monkeypatch):
+def test_what_the_launch_declared_is_what_the_core_rendered_and_an_absent_declaration_is_not_unmeasured(monkeypatch):
     with silent_udp() as mute, coherent(exit_ip="198.51.100.77") as good:
         monkeypatch.setattr(_geo, "discover_egress_ip", egress_by_proxy(mute, good))
         with pytest.raises(AssertionError):
-            declared_udp(mute.proxy, measure_servers(mute))          # nothing measured yet
-        assert _udp_exit.measure_proxy_udp(good.proxy, measure_servers(good)) == "coherent"
-        assert declared_udp(good.proxy, measure_servers(good)) == "coherent"
-        # a measurement the launch made with ANOTHER list is not this one
+            declared_udp(mute.proxy)          # nothing declared yet
+        assert _udp_exit.context_proxy_command(good.proxy, measure_servers(good))["udp"] == "coherent"
+        assert declared_udp(good.proxy) == "coherent"
+        # a declaration made for ANOTHER proxy is not this one
         with pytest.raises(AssertionError):
-            declared_udp(good.proxy, ["198.51.100.8:3478"])
+            declared_udp(mute.proxy)
+        # the launch's way: a verdict handed over is the one declared, and the last one wins
+        _udp_exit.launch_proxy_command(good.proxy, udp_exit="no")
+        assert declared_udp(good.proxy) == "no"

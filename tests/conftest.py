@@ -173,27 +173,43 @@ def _offline_session_geo(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _what_the_core_declares_for_a_proxy_is_recorded(monkeypatch):
+    """The core keeps no UDP verdict in memory, so a test that wants to know what the launch declared reads it where it is
+    written: `_udp_line.record_declared` spies the one function that renders the engine's proxy command (unit and e2e)."""
+    from _udp_line import record_declared
+    record_declared(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _a_unit_test_asks_mozilla_for_no_intermediates_list(request, monkeypatch):
+    """Outside the e2e, a launch declares no intermediates list.
+
+    The core's `write_user_js` (every launch the server makes) declares Mozilla's list: on a cold cache it downloads it in line, and the line it writes would
+    differ with the cache of whoever runs the test. The function is stubbed, as the core's own suite does (tests/conftest.py of invisible-core): no list, no
+    request. The tests of `fetch` set their own; a test marked `e2e` gets the real one (the CI legs point it at the empty file of `ci/intermediates.json`)."""
+    if request.node.get_closest_marker("e2e") is not None:
+        return
+    try:
+        import invisible_core._intermediates as _im
+    except Exception:  # the package is absent: the tests that need it say so
+        return
+    monkeypatch.setattr(_im, "ensure_intermediates", lambda *a, **kw: None)
+
+
+@pytest.fixture(autouse=True)
 def _a_unit_test_does_not_depend_on_the_seal_of_whoever_runs_it(request, monkeypatch):
     """Outside the e2e, a test does not read ``INVISIBLE_SEAL_FILE``.
 
     The CI jobs export it (a LOCAL seal of the candidate, with no published assets) for the e2e tests that launch the engine under test. A unit test
     that composes a launch (``build_env``, ``launch_persistent_context``, a second browser served by a virtual display) reaches ``ensure_binary`` and
     died with ``SealError: the active seal ... is a LOCAL seal with no published assets`` only because of where it ran. Here the variable is taken out
-    of the test's environment (``monkeypatch`` puts it back), and the seal the process had already resolved is dropped, so the test resolves the
+    of the test's environment (``monkeypatch`` puts it back); the core reads the seal on every call, so the test resolves the
     packaged one; a test that wants a seal sets the variable itself, after this. The e2e tests, which are the ones that need it, keep it."""
     if request.node.get_closest_marker("e2e") is not None:
         yield
         return
-    try:
-        from invisible_core.seal import _reset_active_seal_for_tests
-    except Exception:  # the package is absent: the tests that need it say so
-        _reset_active_seal_for_tests = None
     monkeypatch.delenv("INVISIBLE_SEAL_FILE", raising=False)
-    if _reset_active_seal_for_tests is not None:
-        _reset_active_seal_for_tests()
     yield
-    if _reset_active_seal_for_tests is not None:
-        _reset_active_seal_for_tests()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -213,6 +229,23 @@ def _the_lab_declares_the_exit(request, tmp_path_factory):
 
     with pytest.MonkeyPatch.context() as patch:
         yield _lab_egress.install(patch, tmp_path_factory.mktemp("lab-geoip"))
+
+
+@pytest.fixture(autouse=True)
+def _no_test_asks_the_world_where_it_leaves_from():
+    """A test fails when the question of the exit reached a proxy of the tests that forwards for real.
+
+    The product asks "where do I leave from" through the proxy of a launch, HTTPS, to api.ipify.org and its siblings. A proxy of the tests that forwards
+    for real would have carried it to the internet, and the answer is the address of the machine that runs the test: it changes on a runner, in the
+    middle of a session (``ProxyEgressDrifted``). Each such proxy declares its exit and the lab answers with it (``tests/_lab_egress.py``); one that
+    was not declared, or a test that bypassed the lab, makes the proxy REFUSE the question (``_socks_servers.asks_the_world``), and this fixture turns
+    that into a failure with the name of the proxy and of the service, instead of a launch that works until the network of the runner changes."""
+    import _socks_servers
+
+    yield
+    asked = _socks_servers.nobody_asked_the_world()
+    if asked:
+        pytest.fail("the question of the exit went toward the internet: " + "; ".join(asked), pytrace=False)
 
 
 @pytest.fixture
@@ -342,6 +375,26 @@ def engine_at_least():
 
     def check(minimum):
         _skip_unless_engine_at_least(minimum, tag)
+    return check
+
+
+@pytest.fixture(scope="session")
+def engine_reaches():
+    """``engine_reaches("firefox-68")``: whether the engine in use is that release or a later one, for a test of a
+    required suite that asserts more on a newer engine and must not skip on an older one (a required suite allows no
+    skip, scripts/ci_verdict.py). A seal whose tag has no number fails the test, as with ``engine_at_least``."""
+    _require_package()
+    from invisible_core.seal import active_seal
+    tag = active_seal().tag
+
+    def check(minimum):
+        want, have = _engine_number(minimum), _engine_number(tag)
+        if want is None:
+            raise pytest.UsageError("engine_reaches wants 'firefox-N', got %r" % (minimum,))
+        if have is None:
+            pytest.fail("the engine's seal has no number: a candidate must be sealed as "
+                        "firefox-N-candidate (seal tag %r)" % (tag,), pytrace=False)
+        return have >= want
     return check
 
 

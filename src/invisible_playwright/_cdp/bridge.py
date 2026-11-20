@@ -493,6 +493,7 @@ class _RawCDPPipe:
         self._pending: Dict[
             int, tuple[threading.Event, List[Any], str, Optional[str]]
         ] = {}
+        self._callbacks: Dict[int, Callable[[Dict[str, Any]], None]] = {}
         self.closed = False
         self._reader = threading.Thread(
             target=self._read_loop, name="invpw-cdp-reader", daemon=True
@@ -505,16 +506,21 @@ class _RawCDPPipe:
         params: Optional[Dict[str, Any]] = None,
         *,
         session: Optional[str] = None,
+        on_result: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         with self._lock:
             if self.closed:
                 return
             self._next_id += 1
             msg_id = self._next_id
+            if on_result is not None:
+                self._callbacks[msg_id] = on_result
         try:
             self._write_frame(msg_id, method, params, session)
         except OSError:
-            pass
+            if on_result is not None:
+                with self._lock:
+                    self._callbacks.pop(msg_id, None)
 
     def send_async(
         self,
@@ -613,6 +619,7 @@ class _RawCDPPipe:
         if msg_id is not None:
             with self._lock:
                 waiter = self._pending.pop(msg_id, None)
+                cb = self._callbacks.pop(msg_id, None)
             if waiter is not None:
                 done, box, _, _ = waiter
                 if "error" in msg:
@@ -620,6 +627,11 @@ class _RawCDPPipe:
                 else:
                     box.append(("ok", msg.get("result") or {}))
                 done.set()
+            elif cb is not None and "error" not in msg:
+                try:
+                    cb(msg.get("result") or {})
+                except Exception:
+                    pass
             return
         method = msg.get("method")
         if method:
@@ -644,6 +656,7 @@ class _RawCDPPipe:
             self.closed = True
             pending = list(self._pending.values())
             self._pending.clear()
+            self._callbacks.clear()
         for done, box, _, _ in pending:
             if not box:
                 box.append(("closed", reason))
@@ -713,9 +726,12 @@ class _PageSessionState:
     page_bindings: Dict[str, tuple[str, str]] = field(default_factory=dict)
     installed_raw_bindings: Dict[str, set[str]] = field(default_factory=dict)
     runtime_enabled_sessions: set[str] = field(default_factory=set)
+    utility_world_sessions: set[str] = field(default_factory=set)
     installed_doc_scripts: Dict[str, List[str]] = field(default_factory=dict)
     # OOPIF child CDP session ids attached beneath this page
     child_sessions: set[str] = field(default_factory=set)
+    # child_sid -> root frame_id of that OOPIF session
+    session_root_frame: Dict[str, str] = field(default_factory=dict)
     # frame_id -> CDP session_id owning that frame (defaults to session_id)
     frame_sessions: Dict[str, str] = field(default_factory=dict)
     # utility_ctx_id -> CDP session_id
@@ -728,6 +744,8 @@ class _PageSessionState:
     landing_ready: set[tuple[str, str]] = field(default_factory=set)
     # (session_id, int(utility_ctx_id)) internal contexts excluded from user console/pageerror
     utility_context_keys: set[tuple[str, int]] = field(default_factory=set)
+    # (session_id, int(v8_ctx_id)) -> juggler executionContextId (utility or caller)
+    session_v8_to_juggler: Dict[tuple[str, int], str] = field(default_factory=dict)
     # auth loop guard: f"{networkId}:{source}" already answered with credentials once
     attempted_auth: set[str] = field(default_factory=set)
     # frame_id -> utility executionContextId (numeric int as str)
@@ -1413,6 +1431,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             self._raw.send("Network.enable", session=session_id)
             self._raw.send("Runtime.enable", {}, session=session_id)
             state.runtime_enabled_sessions.add(session_id)
+            self._ensure_utility_world_script(state, session_id, use_post=False)
             try:
                 self._raw.send("Inspector.enable", session=session_id)
             except juggler_conn.ProtocolError:
@@ -1424,7 +1443,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             )
 
             ctx = self._get_ctx(cid)
-            self._apply_ctx_to_session(state, ctx, session_id, is_main=True)
+            self._apply_ctx_to_session(
+                state, ctx, session_id, is_main=True, use_post=False
+            )
 
             tree_resp = self._raw.send("Page.getFrameTree", session=session_id)
             root_tree = tree_resp["frameTree"]
@@ -1447,13 +1468,20 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 None,
             )
 
-            self._announce_frame_tree(state, root_tree, parent_id=None)
+            initial_fids: List[str] = []
+            self._announce_frame_tree(
+                state, root_tree, parent_id=None, collected_fids=initial_fids
+            )
+            self._raw.post("Runtime.runIfWaitingForDebugger", session=session_id)
             for _native, (wrapped, _ev) in list(ctx.bindings.items()):
-                self._eval_script_in_live_frames(state, wrapped, timeout=5.0)
-            try:
-                self._raw.send("Runtime.runIfWaitingForDebugger", session=session_id)
-            except juggler_conn.ProtocolError:
-                pass
+                if wrapped:
+                    self._raw.post(
+                        "Runtime.evaluate",
+                        {"expression": wrapped, "returnByValue": True},
+                        session=session_id,
+                    )
+            for init_fid in initial_fids:
+                self._request_utility_world(state, init_fid, sid=session_id)
             self.dispatch_event("Page.ready", {}, session_id)
         except juggler_conn.TargetClosedError:
             with self._lock:
@@ -1476,52 +1504,61 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         fid = target_info["targetId"]
         state = self._find_page_for_frame(parent_session_id, fid)
         if state is None:
-            try:
-                self._raw.send("Runtime.runIfWaitingForDebugger", session=child_sid)
-            except Exception:
-                pass
+            self._raw.post("Runtime.runIfWaitingForDebugger", session=child_sid)
             return
         with self._lock:
             self._child_to_page[child_sid] = state
             state.child_sessions.add(child_sid)
+            state.session_root_frame[child_sid] = fid
             state.frame_sessions[fid] = child_sid
 
         try:
-            self._raw.send("Page.enable", session=child_sid)
-            self._raw.send(
+            # NEVER call blocking self._raw.send(...) inside _init_oopif_session on
+            # invpw-cdp-events: a newly attached OOPIF is paused in waitingForDebugger
+            # with a provisional LocalFrame, so synchronous renderer RPCs (especially
+            # Page.createIsolatedWorld) queue in Blink's pending_isolated_worlds_ until
+            # Runtime.runIfWaitingForDebugger and any queued Fetch.authRequired /
+            # Fetch.requestPaused events are processed. Pipelining all setup frames via
+            # post() preserves strict FIFO session order on the CDP pipe with zero
+            # head-of-line event-thread blocking.
+            self._raw.post("Page.enable", session=child_sid)
+            self._raw.post(
                 "Page.setLifecycleEventsEnabled", {"enabled": True}, session=child_sid
             )
-            self._raw.send("DOM.enable", session=child_sid)
-            self._raw.send("Network.enable", session=child_sid)
-            self._raw.send("Runtime.enable", {}, session=child_sid)
+            self._raw.post("DOM.enable", session=child_sid)
+            self._raw.post("Network.enable", session=child_sid)
+            self._raw.post("Runtime.enable", {}, session=child_sid)
             state.runtime_enabled_sessions.add(child_sid)
-            self._raw.send(
+            self._ensure_utility_world_script(state, child_sid, use_post=True)
+            self._raw.post(
                 "Target.setAutoAttach",
                 {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True},
                 session=child_sid,
             )
             ctx = self._get_ctx(state.context_id)
-            self._apply_ctx_to_session(state, ctx, child_sid, is_main=False)
-            if fid in state.nav_loaders:
-                self._mint_worlds_for_frame(state, fid)
-            self._raw.send("Runtime.runIfWaitingForDebugger", session=child_sid)
+            self._apply_ctx_to_session(
+                state, ctx, child_sid, is_main=False, use_post=True
+            )
+            self._raw.post("Runtime.runIfWaitingForDebugger", session=child_sid)
+            self._request_utility_world(state, fid, sid=child_sid)
         except juggler_conn.TargetClosedError:
             pass
         except Exception as exc:
             self._record_bridge_error(f"_init_oopif_session({fid})", exc)
-            try:
-                self._raw.send("Runtime.runIfWaitingForDebugger", session=child_sid)
-            except Exception:
-                pass
+            self._raw.post("Runtime.runIfWaitingForDebugger", session=child_sid)
 
     def _announce_frame_tree(
         self,
         state: _PageSessionState,
         node: Dict[str, Any],
         parent_id: Optional[str],
+        *,
+        collected_fids: Optional[List[str]] = None,
     ) -> None:
         frame = node["frame"]
         fid = frame["id"]
+        if collected_fids is not None:
+            collected_fids.append(fid)
         nav_id = frame.get("loaderId") or f"init-{fid}"
         state.nav_loaders[fid] = nav_id
         state.frame_sessions.setdefault(fid, state.session_id)
@@ -1531,10 +1568,6 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             {"frameId": fid, "parentFrameId": parent_id},
             state.session_id,
         )
-        try:
-            self._mint_worlds_for_frame(state, fid)
-        except juggler_conn.ProtocolError:
-            pass
         self.dispatch_event(
             "Page.navigationCommitted",
             {
@@ -1552,34 +1585,35 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 state.session_id,
             )
         for child in node.get("childFrames") or ():
-            self._announce_frame_tree(state, child, parent_id=fid)
-
-    def _mint_worlds_for_frame(self, state: _PageSessionState, frame_id: str) -> None:
-        frame_sid = self._session_for_frame(state, frame_id)
-        old_util = state.utility_contexts.pop(frame_id, None)
-        old_caller = state.caller_contexts.pop(frame_id, None)
-        for k, v in list(state.main_world_to_frame.items()):
-            if v == frame_id and k[0] != frame_sid:
-                state.main_world_to_frame.pop(k, None)
-        if old_caller:
-            state.caller_windows.pop(old_caller, None)
-            self.dispatch_event(
-                "Runtime.executionContextDestroyed",
-                {"executionContextId": old_caller},
-                state.session_id,
-            )
-        if old_util:
-            old_sid, old_int = self._parse_util_ctx(state, old_util)
-            state.ctx_sessions.pop(old_util, None)
-            state.landing_ready.discard((old_sid, old_util))
-            state.utility_context_keys.discard((old_sid, old_int))
-            self.dispatch_event(
-                "Runtime.executionContextDestroyed",
-                {"executionContextId": old_util},
-                state.session_id,
+            self._announce_frame_tree(
+                state, child, parent_id=fid, collected_fids=collected_fids
             )
 
-        res = self._raw.send(
+    def _ensure_utility_world_script(
+        self, state: _PageSessionState, sid: str, *, use_post: bool = False
+    ) -> None:
+        if sid in state.utility_world_sessions:
+            return
+        state.utility_world_sessions.add(sid)
+        params = {"source": "", "worldName": UTILITY_WORLD}
+        if use_post:
+            self._raw.post(
+                "Page.addScriptToEvaluateOnNewDocument", params, session=sid
+            )
+        else:
+            self._raw.send(
+                "Page.addScriptToEvaluateOnNewDocument", params, session=sid
+            )
+
+    def _request_utility_world(
+        self,
+        state: _PageSessionState,
+        frame_id: str,
+        *,
+        sid: Optional[str] = None,
+    ) -> None:
+        frame_sid = sid or self._session_for_frame(state, frame_id)
+        self._raw.post(
             "Page.createIsolatedWorld",
             {
                 "frameId": frame_id,
@@ -1588,48 +1622,30 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             },
             session=frame_sid,
         )
-        raw_util_int = int(res["executionContextId"])
-        util_id = (
-            str(raw_util_int)
-            if frame_sid == state.session_id
-            else f"{frame_sid}:{raw_util_int}"
-        )
-        state.epoch += 1
-        caller_id = f"caller:{frame_id}:{state.epoch}"
-        state.utility_contexts[frame_id] = util_id
-        state.ctx_sessions[util_id] = frame_sid
-        state.utility_context_keys.add((frame_sid, raw_util_int))
-        state.caller_contexts[frame_id] = caller_id
-
-        self.dispatch_event(
-            "Runtime.executionContextCreated",
-            {
-                "executionContextId": util_id,
-                "auxData": {"frameId": frame_id, "name": UTILITY_WORLD},
-            },
-            state.session_id,
-        )
-        self.dispatch_event(
-            "Runtime.executionContextCreated",
-            {
-                "executionContextId": caller_id,
-                "auxData": {"frameId": frame_id, "name": CALLER_WORLD},
-            },
-            state.session_id,
-        )
 
     def _ensure_raw_binding(
-        self, state: _PageSessionState, native: str, sid: Optional[str] = None
+        self,
+        state: _PageSessionState,
+        native: str,
+        sid: Optional[str] = None,
+        *,
+        use_post: bool = False,
     ) -> None:
         sessions = [sid] if sid else [state.session_id, *list(state.child_sessions)]
         for s in sessions:
             if s not in state.runtime_enabled_sessions:
-                self._raw.send("Runtime.enable", {}, session=s)
+                if use_post:
+                    self._raw.post("Runtime.enable", {}, session=s)
+                else:
+                    self._raw.send("Runtime.enable", {}, session=s)
                 state.runtime_enabled_sessions.add(s)
             installed = state.installed_raw_bindings.setdefault(s, set())
             if native in installed:
                 continue
-            self._raw.send("Runtime.addBinding", {"name": native}, session=s)
+            if use_post:
+                self._raw.post("Runtime.addBinding", {"name": native}, session=s)
+            else:
+                self._raw.send("Runtime.addBinding", {"name": native}, session=s)
             installed.add(native)
 
     def _eval_script_in_live_frames(
@@ -1705,7 +1721,14 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         sid: str,
         *,
         is_main: bool,
+        use_post: bool = False,
     ) -> None:
+        def _emit(m: str, p: Optional[Dict[str, Any]] = None) -> None:
+            if use_post:
+                self._raw.post(m, p, session=sid)
+            else:
+                self._raw.send(m, p, session=sid)
+
         if is_main and ctx.viewport:
             vp = ctx.viewport.get("viewportSize") or {}
             sc = ctx.viewport.get("screenSize") or {}
@@ -1722,37 +1745,49 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 if is_mobile and sc.get("width") and sc.get("height"):
                     metrics["screenWidth"] = int(sc["width"])
                     metrics["screenHeight"] = int(sc["height"])
-                self._raw.send(
-                    "Emulation.setDeviceMetricsOverride", metrics, session=sid
-                )
+                _emit("Emulation.setDeviceMetricsOverride", metrics)
         if ctx.timezone_id:
-            try:
-                self._raw.send(
+            if use_post:
+                self._raw.post(
                     "Emulation.setTimezoneOverride",
                     {"timezoneId": ctx.timezone_id},
                     session=sid,
                 )
-            except juggler_conn.ProtocolError as exc:
-                if "Timezone override is already in effect" not in str(exc):
-                    raise
+            else:
+                try:
+                    self._raw.send(
+                        "Emulation.setTimezoneOverride",
+                        {"timezoneId": ctx.timezone_id},
+                        session=sid,
+                    )
+                except juggler_conn.ProtocolError as exc:
+                    if "Timezone override is already in effect" not in str(exc):
+                        raise
         if ctx.locale:
             primary_locale = ctx.locale.split(",")[0].strip()
             if primary_locale:
-                try:
-                    self._raw.send(
+                if use_post:
+                    self._raw.post(
                         "Emulation.setLocaleOverride",
                         {"locale": primary_locale},
                         session=sid,
                     )
-                except juggler_conn.ProtocolError:
-                    pass
+                else:
+                    try:
+                        self._raw.send(
+                            "Emulation.setLocaleOverride",
+                            {"locale": primary_locale},
+                            session=sid,
+                        )
+                    except juggler_conn.ProtocolError:
+                        pass
         if ctx.user_agent or ctx.accept_languages:
             ua_params: Dict[str, Any] = {
                 "userAgent": ctx.user_agent or self._user_agent
             }
             if ctx.accept_languages:
                 ua_params["acceptLanguage"] = ctx.accept_languages
-            self._raw.send("Emulation.setUserAgentOverride", ua_params, session=sid)
+            _emit("Emulation.setUserAgentOverride", ua_params)
         if any(
             v is not None
             for v in (ctx.color_scheme, ctx.reduced_motion, ctx.forced_colors)
@@ -1770,18 +1805,12 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 features.append(
                     {"name": "forced-colors", "value": ctx.forced_colors}
                 )
-            self._raw.send(
-                "Emulation.setEmulatedMedia", {"features": features}, session=sid
-            )
+            _emit("Emulation.setEmulatedMedia", {"features": features})
         if ctx.extra_headers:
-            self._raw.send(
-                "Network.setExtraHTTPHeaders",
-                {"headers": dict(ctx.extra_headers)},
-                session=sid,
-            )
+            _emit("Network.setExtraHTTPHeaders", {"headers": dict(ctx.extra_headers)})
         if ctx.offline != state.applied_offline.get(sid, False):
             state.applied_offline[sid] = ctx.offline
-            self._raw.send(
+            _emit(
                 "Network.emulateNetworkConditions",
                 {
                     "offline": bool(ctx.offline),
@@ -1789,110 +1818,120 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     "downloadThroughput": -1,
                     "uploadThroughput": -1,
                 },
-                session=sid,
             )
         if ctx.geolocation:
-            self._raw.send(
+            _emit(
                 "Emulation.setGeolocationOverride",
                 {
                     "latitude": ctx.geolocation.get("latitude"),
                     "longitude": ctx.geolocation.get("longitude"),
                     "accuracy": ctx.geolocation.get("accuracy", 100),
                 },
-                session=sid,
             )
         if ctx.ignore_https_errors != state.applied_ignore_https.get(sid, False):
             state.applied_ignore_https[sid] = ctx.ignore_https_errors
-            self._raw.send(
+            _emit(
                 "Security.setIgnoreCertificateErrors",
                 {"ignore": bool(ctx.ignore_https_errors)},
-                session=sid,
             )
         if ctx.bypass_csp:
-            self._raw.send("Page.setBypassCSP", {"enabled": True}, session=sid)
+            _emit("Page.setBypassCSP", {"enabled": True})
         if ctx.js_disabled != state.applied_js_disabled.get(sid, False):
             state.applied_js_disabled[sid] = ctx.js_disabled
-            self._raw.send(
+            _emit(
                 "Emulation.setScriptExecutionDisabled",
                 {"value": bool(ctx.js_disabled)},
-                session=sid,
             )
         if ctx.service_workers_blocked != state.applied_sw_bypass.get(sid, False):
             state.applied_sw_bypass[sid] = ctx.service_workers_blocked
-            self._raw.send(
+            _emit(
                 "Network.setBypassServiceWorker",
                 {"bypass": bool(ctx.service_workers_blocked)},
-                session=sid,
             )
         if ctx.has_touch:
-            self._raw.send(
-                "Emulation.setTouchEmulationEnabled", {"enabled": True}, session=sid
-            )
+            _emit("Emulation.setTouchEmulationEnabled", {"enabled": True})
         if ctx.cache_disabled != state.applied_cache_disabled.get(sid, False):
             state.applied_cache_disabled[sid] = ctx.cache_disabled
-            self._raw.send(
+            _emit(
                 "Network.setCacheDisabled",
                 {"cacheDisabled": bool(ctx.cache_disabled)},
-                session=sid,
             )
         for native in list(ctx.bindings):
-            self._ensure_raw_binding(state, native, sid=sid)
+            self._ensure_raw_binding(state, native, sid=sid, use_post=use_post)
         for native in list(state.page_bindings):
-            self._ensure_raw_binding(state, native, sid=sid)
-        self._sync_doc_scripts(state, ctx, sid=sid)
-        self._sync_fetch_domain(state, ctx, sid=sid)
+            self._ensure_raw_binding(state, native, sid=sid, use_post=use_post)
+        self._sync_doc_scripts(state, ctx, sid=sid, use_post=use_post)
+        self._sync_fetch_domain(state, ctx, sid=sid, use_post=use_post)
 
     def _sync_doc_scripts(
         self,
         state: _PageSessionState,
         ctx: _ContextState,
         sid: Optional[str] = None,
+        *,
+        use_post: bool = False,
     ) -> None:
         sessions = [sid] if sid else [state.session_id, *list(state.child_sessions)]
         for s in sessions:
+            self._ensure_utility_world_script(state, s, use_post=use_post)
             installed_list = state.installed_doc_scripts.setdefault(s, [])
-            for script_id in installed_list:
-                try:
-                    self._raw.send(
+            for script_id in list(installed_list):
+                if use_post:
+                    self._raw.post(
                         "Page.removeScriptToEvaluateOnNewDocument",
                         {"identifier": script_id},
                         session=s,
                     )
-                except juggler_conn.ProtocolError:
-                    pass
+                else:
+                    try:
+                        self._raw.send(
+                            "Page.removeScriptToEvaluateOnNewDocument",
+                            {"identifier": script_id},
+                            session=s,
+                        )
+                    except juggler_conn.ProtocolError:
+                        pass
             installed_list.clear()
 
+            def _add_doc_script(
+                target_sid: str,
+                target_list: List[str],
+                script_params: Dict[str, Any],
+            ) -> None:
+                if use_post:
+                    def _record(res: Dict[str, Any]) -> None:
+                        ident = res.get("identifier")
+                        if ident:
+                            target_list.append(ident)
+
+                    self._raw.post(
+                        "Page.addScriptToEvaluateOnNewDocument",
+                        script_params,
+                        session=target_sid,
+                        on_result=_record,
+                    )
+                else:
+                    res = self._raw.send(
+                        "Page.addScriptToEvaluateOnNewDocument",
+                        script_params,
+                        session=target_sid,
+                    )
+                    if res.get("identifier"):
+                        target_list.append(res["identifier"])
+
             if ctx.service_workers_blocked:
-                res_sw = self._raw.send(
-                    "Page.addScriptToEvaluateOnNewDocument",
-                    {"source": _SW_BLOCK_SCRIPT},
-                    session=s,
-                )
-                if res_sw.get("identifier"):
-                    installed_list.append(res_sw["identifier"])
+                _add_doc_script(s, installed_list, {"source": _SW_BLOCK_SCRIPT})
 
             # Bindings are registered first so exposed functions exist before caller init scripts run.
             combined_bindings: Dict[str, tuple[str, str]] = dict(ctx.bindings)
             combined_bindings.update(state.page_bindings)
             for _native, (wrapped_src, _ev_name) in combined_bindings.items():
                 if wrapped_src:
-                    res = self._raw.send(
-                        "Page.addScriptToEvaluateOnNewDocument",
-                        {"source": wrapped_src},
-                        session=s,
-                    )
-                    if res.get("identifier"):
-                        installed_list.append(res["identifier"])
+                    _add_doc_script(s, installed_list, {"source": wrapped_src})
 
             for src in ctx.init_scripts:
                 if src:
-                    res = self._raw.send(
-                        "Page.addScriptToEvaluateOnNewDocument",
-                        {"source": src},
-                        session=s,
-                    )
-                    if res.get("identifier"):
-                        installed_list.append(res["identifier"])
+                    _add_doc_script(s, installed_list, {"source": src})
             for entry in state.page_init_scripts:
                 src = entry.get("script") or ""
                 w_name = entry.get("worldName")
@@ -1901,17 +1940,15 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 params: Dict[str, Any] = {"source": src}
                 if w_name and entry.get("worldKind") != "caller":
                     params["worldName"] = w_name
-                res = self._raw.send(
-                    "Page.addScriptToEvaluateOnNewDocument", params, session=s
-                )
-                if res.get("identifier"):
-                    installed_list.append(res["identifier"])
+                _add_doc_script(s, installed_list, params)
 
     def _sync_fetch_domain(
         self,
         state: _PageSessionState,
         ctx: _ContextState,
         sid: Optional[str] = None,
+        *,
+        use_post: bool = False,
     ) -> None:
         effective_proxy_auth = self._effective_proxy_auth(ctx)
         needs_auth = bool(effective_proxy_auth or ctx.http_credentials)
@@ -1919,21 +1956,24 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         sessions = [sid] if sid else [state.session_id, *list(state.child_sessions)]
         for s in sessions:
             if needs_intercept or needs_auth:
-                self._raw.send(
-                    "Fetch.enable",
-                    {
-                        "handleAuthRequests": needs_auth,
-                        "patterns": [{"urlPattern": "*", "requestStage": "Request"}],
-                    },
-                    session=s,
-                )
+                fetch_params = {
+                    "handleAuthRequests": needs_auth,
+                    "patterns": [{"urlPattern": "*", "requestStage": "Request"}],
+                }
+                if use_post:
+                    self._raw.post("Fetch.enable", fetch_params, session=s)
+                else:
+                    self._raw.send("Fetch.enable", fetch_params, session=s)
                 state.fetch_enabled_sessions.add(s)
             elif s in state.fetch_enabled_sessions:
                 state.fetch_enabled_sessions.discard(s)
-                try:
-                    self._raw.send("Fetch.disable", session=s)
-                except juggler_conn.ProtocolError:
-                    pass
+                if use_post:
+                    self._raw.post("Fetch.disable", session=s)
+                else:
+                    try:
+                        self._raw.send("Fetch.disable", session=s)
+                    except juggler_conn.ProtocolError:
+                        pass
 
     def _resolve_main_world_frame(
         self, state: _PageSessionState, sid: str, v8_ctx_id: int
@@ -2011,8 +2051,30 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         parent_st = self._child_to_page.pop(child_sid, None)
                         if parent_st is not None:
                             parent_st.child_sessions.discard(child_sid)
+                            parent_st.session_root_frame.pop(child_sid, None)
                             parent_st.fetch_enabled_sessions.discard(child_sid)
                             parent_st.runtime_enabled_sessions.discard(child_sid)
+                            parent_st.utility_world_sessions.discard(child_sid)
+                            parent_st.installed_doc_scripts.pop(child_sid, None)
+                            parent_st.installed_raw_bindings.pop(child_sid, None)
+                            for k in [
+                                key
+                                for key in parent_st.main_world_to_frame
+                                if key[0] == child_sid
+                            ]:
+                                parent_st.main_world_to_frame.pop(k, None)
+                            for k in [
+                                key
+                                for key in parent_st.utility_context_keys
+                                if key[0] == child_sid
+                            ]:
+                                parent_st.utility_context_keys.discard(k)
+                            for k in [
+                                key
+                                for key in parent_st.session_v8_to_juggler
+                                if key[0] == child_sid
+                            ]:
+                                parent_st.session_v8_to_juggler.pop(k, None)
                             for fid, f_sid in list(parent_st.frame_sessions.items()):
                                 if f_sid == child_sid:
                                     parent_st.frame_sessions[fid] = parent_st.session_id
@@ -2111,42 +2173,110 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             util_ctx = state.utility_contexts.get(fid)
             if backend_id and util_ctx:
                 util_sid, util_int = self._parse_util_ctx(state, util_ctx)
-                try:
-                    resolved = self._raw.send(
-                        "DOM.resolveNode",
-                        {
-                            "backendNodeId": backend_id,
-                            "executionContextId": util_int,
-                        },
-                        session=util_sid,
-                        timeout=10.0,
-                    )
-                    obj = resolved.get("object") or {}
-                    obj_id = obj.get("objectId")
-                    if obj_id:
-                        self._record_result_object(state, util_sid, obj)
-                        self.dispatch_event(
-                            "Page.fileChooserOpened",
+
+                def _resolve_chooser() -> None:
+                    try:
+                        resolved = self._raw.send(
+                            "DOM.resolveNode",
                             {
-                                "executionContextId": util_ctx,
-                                "element": {"objectId": obj_id},
+                                "backendNodeId": backend_id,
+                                "executionContextId": util_int,
                             },
-                            page_sid,
+                            session=util_sid,
+                            timeout=10.0,
                         )
-                except (juggler_conn.TargetClosedError, juggler_conn.ProtocolError):
-                    pass
+                        obj = resolved.get("object") or {}
+                        obj_id = obj.get("objectId")
+                        if obj_id:
+                            self._record_result_object(state, util_sid, obj)
+                            self.dispatch_event(
+                                "Page.fileChooserOpened",
+                                {
+                                    "executionContextId": util_ctx,
+                                    "element": {"objectId": obj_id},
+                                },
+                                page_sid,
+                            )
+                    except (
+                        juggler_conn.TargetClosedError,
+                        juggler_conn.ProtocolError,
+                    ):
+                        pass
+
+                threading.Thread(
+                    target=_resolve_chooser,
+                    name="invpw-cdp-filechooser",
+                    daemon=True,
+                ).start()
             return
 
         if method == "Runtime.executionContextCreated":
             cinfo = params.get("context") or {}
             aux = cinfo.get("auxData") or {}
-            if aux.get("isDefault") and aux.get("frameId") and cinfo.get("id") is not None:
-                fid_str = str(aux["frameId"])
-                new_id = int(cinfo["id"])
+            fid_raw = aux.get("frameId")
+            ctx_id_raw = cinfo.get("id")
+            if not fid_raw or ctx_id_raw is None:
+                return
+            fid_str = str(fid_raw)
+            new_id = int(ctx_id_raw)
+            cname = str(cinfo.get("name") or "")
+            if aux.get("isDefault"):
                 for k, v in list(state.main_world_to_frame.items()):
                     if v == fid_str and k != (raw_sid, new_id):
                         state.main_world_to_frame.pop(k, None)
                 state.main_world_to_frame[(raw_sid, new_id)] = fid_str
+                old_caller = state.caller_contexts.get(fid_str)
+                state.epoch += 1
+                caller_id = f"caller:{fid_str}:{state.epoch}"
+                state.caller_contexts[fid_str] = caller_id
+                state.session_v8_to_juggler[(raw_sid, new_id)] = caller_id
+                if old_caller and old_caller != caller_id:
+                    state.caller_windows.pop(old_caller, None)
+                    for k, jv in list(state.session_v8_to_juggler.items()):
+                        if jv == old_caller and k != (raw_sid, new_id):
+                            state.session_v8_to_juggler.pop(k, None)
+                    self.dispatch_event(
+                        "Runtime.executionContextDestroyed",
+                        {"executionContextId": old_caller},
+                        page_sid,
+                    )
+                self.dispatch_event(
+                    "Runtime.executionContextCreated",
+                    {
+                        "executionContextId": caller_id,
+                        "auxData": {"frameId": fid_str, "name": CALLER_WORLD},
+                    },
+                    page_sid,
+                )
+            elif cname == UTILITY_WORLD:
+                util_id = (
+                    str(new_id) if raw_sid == page_sid else f"{raw_sid}:{new_id}"
+                )
+                old_util = state.utility_contexts.get(fid_str)
+                state.utility_contexts[fid_str] = util_id
+                state.ctx_sessions[util_id] = raw_sid
+                state.utility_context_keys.add((raw_sid, new_id))
+                state.session_v8_to_juggler[(raw_sid, new_id)] = util_id
+                if old_util and old_util != util_id:
+                    old_sid, old_int = self._parse_util_ctx(state, old_util)
+                    if (old_sid, old_int) != (raw_sid, new_id):
+                        state.ctx_sessions.pop(old_util, None)
+                        state.landing_ready.discard((old_sid, old_util))
+                        state.utility_context_keys.discard((old_sid, old_int))
+                        state.session_v8_to_juggler.pop((old_sid, old_int), None)
+                    self.dispatch_event(
+                        "Runtime.executionContextDestroyed",
+                        {"executionContextId": old_util},
+                        page_sid,
+                    )
+                self.dispatch_event(
+                    "Runtime.executionContextCreated",
+                    {
+                        "executionContextId": util_id,
+                        "auxData": {"frameId": fid_str, "name": UTILITY_WORLD},
+                    },
+                    page_sid,
+                )
             return
 
         if method == "Runtime.executionContextDestroyed":
@@ -2155,6 +2285,57 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 v8_id = int(ctx_raw)
                 state.main_world_to_frame.pop((raw_sid, v8_id), None)
                 state.utility_context_keys.discard((raw_sid, v8_id))
+                j_id = state.session_v8_to_juggler.pop((raw_sid, v8_id), None)
+                if j_id:
+                    if j_id.startswith("caller:"):
+                        state.caller_windows.pop(j_id, None)
+                        for fk, fv in list(state.caller_contexts.items()):
+                            if fv == j_id:
+                                state.caller_contexts.pop(fk, None)
+                    else:
+                        state.ctx_sessions.pop(j_id, None)
+                        state.landing_ready.discard((raw_sid, j_id))
+                        for fk, fv in list(state.utility_contexts.items()):
+                            if fv == j_id:
+                                state.utility_contexts.pop(fk, None)
+                    self.dispatch_event(
+                        "Runtime.executionContextDestroyed",
+                        {"executionContextId": j_id},
+                        page_sid,
+                    )
+            return
+
+        if method == "Runtime.executionContextsCleared":
+            for k in [
+                key for key in state.main_world_to_frame if key[0] == raw_sid
+            ]:
+                state.main_world_to_frame.pop(k, None)
+            for k in [
+                key for key in state.utility_context_keys if key[0] == raw_sid
+            ]:
+                state.utility_context_keys.discard(k)
+            for k in [
+                key for key in state.session_v8_to_juggler if key[0] == raw_sid
+            ]:
+                j_id = state.session_v8_to_juggler.pop(k, None)
+                if not j_id:
+                    continue
+                if j_id.startswith("caller:"):
+                    state.caller_windows.pop(j_id, None)
+                    for fk, fv in list(state.caller_contexts.items()):
+                        if fv == j_id:
+                            state.caller_contexts.pop(fk, None)
+                else:
+                    state.ctx_sessions.pop(j_id, None)
+                    state.landing_ready.discard((raw_sid, j_id))
+                    for fk, fv in list(state.utility_contexts.items()):
+                        if fv == j_id:
+                            state.utility_contexts.pop(fk, None)
+                self.dispatch_event(
+                    "Runtime.executionContextDestroyed",
+                    {"executionContextId": j_id},
+                    page_sid,
+                )
             return
 
         if method == "Runtime.consoleAPICalled":
@@ -2210,52 +2391,69 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             if not native or v8_ctx_raw is None:
                 return
             v8_ctx_id = int(v8_ctx_raw)
-            fid = self._resolve_main_world_frame(state, raw_sid, v8_ctx_id)
-            caller_ctx = state.caller_contexts.get(fid)
-            if not caller_ctx:
-                return
+            fid = state.main_world_to_frame.get((raw_sid, v8_ctx_id))
+            caller_ctx = state.caller_contexts.get(fid) if fid else None
             ctx = self._get_ctx(state.context_id)
             entry = state.page_bindings.get(native) or ctx.bindings.get(native)
             if payload == _BIND_END_SENTINEL:
                 if not entry:
                     return
                 _wrapped, ev_name = entry
-                try:
-                    extract_expr = (
-                        "(() => {"
-                        " let captured = null;"
-                        f" dispatchEvent(new CustomEvent({json.dumps(ev_name)},"
-                        "   { detail: (fn) => { captured = fn; } }));"
-                        " return captured;"
-                        " })()"
-                    )
-                    res = self._raw.send(
-                        "Runtime.evaluate",
-                        {
-                            "expression": extract_expr,
-                            "contextId": v8_ctx_id,
-                            "returnByValue": False,
-                        },
-                        session=raw_sid,
-                        timeout=5.0,
-                    )
-                    res_obj = res.get("result") or {}
-                    end_oid = res_obj.get("objectId")
-                    if end_oid:
-                        self._record_result_object(state, raw_sid, res_obj)
-                        self.dispatch_event(
-                            "Page.bindingCalled",
-                            {
-                                "executionContextId": caller_ctx,
-                                "name": native,
-                                "payload": {"bindingEnd": end_oid},
-                            },
-                            page_sid,
+
+                def _resolve_binding_end() -> None:
+                    try:
+                        target_fid = fid or self._resolve_main_world_frame(
+                            state, raw_sid, v8_ctx_id
                         )
-                except (juggler_conn.TargetClosedError, juggler_conn.ProtocolError):
-                    pass
+                        target_caller = state.caller_contexts.get(target_fid)
+                        if not target_caller:
+                            return
+                        extract_expr = (
+                            "(() => {"
+                            " let captured = null;"
+                            f" dispatchEvent(new CustomEvent({json.dumps(ev_name)},"
+                            "   { detail: (fn) => { captured = fn; } }));"
+                            " return captured;"
+                            " })()"
+                        )
+                        res = self._raw.send(
+                            "Runtime.evaluate",
+                            {
+                                "expression": extract_expr,
+                                "contextId": v8_ctx_id,
+                                "returnByValue": False,
+                            },
+                            session=raw_sid,
+                            timeout=5.0,
+                        )
+                        res_obj = res.get("result") or {}
+                        end_oid = res_obj.get("objectId")
+                        if end_oid:
+                            self._record_result_object(state, raw_sid, res_obj)
+                            self.dispatch_event(
+                                "Page.bindingCalled",
+                                {
+                                    "executionContextId": target_caller,
+                                    "name": native,
+                                    "payload": {"bindingEnd": end_oid},
+                                },
+                                page_sid,
+                            )
+                    except (
+                        juggler_conn.TargetClosedError,
+                        juggler_conn.ProtocolError,
+                    ):
+                        pass
+
+                threading.Thread(
+                    target=_resolve_binding_end,
+                    name="invpw-cdp-binding",
+                    daemon=True,
+                ).start()
                 return
 
+            if not caller_ctx:
+                return
             self.dispatch_event(
                 "Page.bindingCalled",
                 {
@@ -2276,10 +2474,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 {"frameId": fid, "parentFrameId": parent_id},
                 page_sid,
             )
-            try:
-                self._mint_worlds_for_frame(state, fid)
-            except (juggler_conn.TargetClosedError, juggler_conn.ProtocolError):
-                pass
+            self._request_utility_world(state, fid, sid=raw_sid)
             return
 
         if method == "Page.frameDetached":
@@ -2292,9 +2487,13 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 state.ctx_sessions.pop(old_util, None)
                 state.landing_ready.discard((old_sid, old_util))
                 state.utility_context_keys.discard((old_sid, old_int))
+                state.session_v8_to_juggler.pop((old_sid, old_int), None)
             caller_id = state.caller_contexts.pop(fid, None)
             if caller_id:
                 state.caller_windows.pop(caller_id, None)
+                for k, jv in list(state.session_v8_to_juggler.items()):
+                    if jv == caller_id:
+                        state.session_v8_to_juggler.pop(k, None)
             state.frame_sessions.pop(fid, None)
             for k, v in list(state.main_world_to_frame.items()):
                 if v == fid:
@@ -2322,11 +2521,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 },
                 page_sid,
             )
-            try:
-                self._mint_worlds_for_frame(state, fid)
-            except (juggler_conn.TargetClosedError, juggler_conn.ProtocolError):
-                pass
             if params.get("type") == "BackForwardCacheRestore":
+                self._request_utility_world(state, fid, sid=raw_sid)
                 for ev_name in ("DOMContentLoaded", "load"):
                     self.dispatch_event(
                         "Page.eventFired",
@@ -3625,15 +3821,49 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 )
             except juggler_conn.ProtocolError:
                 return {"quads": []}
+            ox, oy = 0.0, 0.0
+            ex_x, ex_y = 1.0, 0.0
+            ey_x, ey_y = 0.0, 1.0
+            if obj_sid != session_id:
+                root_fid = state.session_root_frame.get(obj_sid) or next(
+                    (
+                        pfid
+                        for pfid, psid in state.frame_sessions.items()
+                        if psid == obj_sid
+                    ),
+                    None,
+                )
+                if root_fid and root_fid != state.main_frame_id:
+                    orig = self._send_page_command(
+                        session_id,
+                        "Page.getFrameOrigin",
+                        {"frameId": root_fid},
+                        timeout=timeout,
+                    )
+                    ox = float(orig.get("x") or 0.0)
+                    oy = float(orig.get("y") or 0.0)
+                    ex = orig.get("ex") or {}
+                    ey = orig.get("ey") or {}
+                    ex_x = float(ex.get("x", 1.0))
+                    ex_y = float(ex.get("y", 0.0))
+                    ey_x = float(ey.get("x", 0.0))
+                    ey_y = float(ey.get("y", 1.0))
+
+            def _map_pt(px: float, py: float) -> Dict[str, float]:
+                return {
+                    "x": ox + px * ex_x + py * ey_x,
+                    "y": oy + px * ex_y + py * ey_y,
+                }
+
             out_quads = []
             for q in res.get("quads") or ():
                 if len(q) >= 8:
                     out_quads.append(
                         {
-                            "p1": {"x": q[0], "y": q[1]},
-                            "p2": {"x": q[2], "y": q[3]},
-                            "p3": {"x": q[4], "y": q[5]},
-                            "p4": {"x": q[6], "y": q[7]},
+                            "p1": _map_pt(float(q[0]), float(q[1])),
+                            "p2": _map_pt(float(q[2]), float(q[3])),
+                            "p3": _map_pt(float(q[4]), float(q[5])),
+                            "p4": _map_pt(float(q[6]), float(q[7])),
                         }
                     )
             return {"quads": out_quads}

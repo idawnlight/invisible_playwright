@@ -162,7 +162,7 @@ class _AnnexbHandler(BaseHTTPRequestHandler):
 
 
 def test_webcodecs_h264_bframe_pts_matches_retail_order(firefox_binary, engine_at_least):
-    engine_at_least("firefox-67")
+    engine_at_least("firefox-68")
 
     from invisible_playwright import InvisiblePlaywright
 

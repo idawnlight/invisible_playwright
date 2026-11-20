@@ -453,7 +453,7 @@ def _gather_behind_a_coherent_gateway(monkeypatch, credentials, ice_prefs, rtt_m
         associates = gateway.associates
         # What the bench saw, taken before the gateway closes: its send errors, CONNECTs, accepted connections, associations and the
         # datagrams with their times, and what the core declared for this proxy (absent when its measure never finished).
-        bench = bench_report(gateway, rtt_ms, declared_udp_or_absent(gateway.proxy, measure_servers(gateway)))
+        bench = bench_report(gateway, rtt_ms, declared_udp_or_absent(gateway.proxy))
     srflx = [c for c in srflx_candidates(candidates(res["candidates"])) if c["address"] == exit_ip]
     verdict = (f"srflx with the gateway's exit {exit_ip}: {srflx}; candidates: {res['candidates']}; "
                f"ICE errors: {res['errors']}; gather timings (ms from the offer): {res['at_ms']}; "
@@ -714,7 +714,7 @@ def _gather_where_the_udp_is_dropped(gateway, monkeypatch, measured):
         page.goto("about:blank")
         res = page.evaluate(_RELAY_PROBE_JS, stun)
     carried = [(host, port) for host, port, _payload in gateway.datagrams]
-    declared = declared_udp(gateway.proxy, measure_servers(gateway))
+    declared = declared_udp(gateway.proxy)
     assert declared == measured, f"the core declared udp={declared} for this proxy, the measurement is {measured}"
     assert (STUN_NUMBER, STUN_PORT) not in carried, (
         f"the engine sent the page's UDP to a relay that was not measured coherent: {carried}")

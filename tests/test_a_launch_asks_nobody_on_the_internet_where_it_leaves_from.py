@@ -152,3 +152,159 @@ def test_the_conftest_declares_the_exit_for_the_whole_session_and_before_any_mod
         "the exit of the lab is declared by an autouse fixture of SESSION scope (a module-scoped browser is launched before any function-scoped one): %r"
         % (declaration,))
     assert fixtures["browser"].get("scope") == "module", "the conftest's module browser is the reason for the scope above"
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------
+#  The question WITH a proxy. The product asks it HTTPS (api.ipify.org:443 THROUGH the proxy), which no gateway of the tests can answer as the
+#  service; a proxy of the tests that forwards for real carried it to the internet and the launch was told the address of the machine that runs
+#  the test (a GitHub runner whose NAT changed in the middle of a session: ProxyEgressDrifted: the address seen at launch and the one seen later differed). A proxy that forwards
+#  for real DECLARES its exit and the lab answers with it; the proxies of the tests are the only roads out of the test process in these tests, so
+#  a question that reached one of them without being declared is refused there and fails the test.
+# ---------------------------------------------------------------------------------------------------------------------------------------
+LEFT = "left the machine"
+
+
+@pytest.fixture
+def what_would_leave(monkeypatch):
+    """The CONNECTs a proxy of the tests would have made past loopback, with the internet closed: ``socket.create_connection`` is what every
+    forwarding proxy of the tests uses to open its upstream. The list is what a runner would have sent to a service of the internet."""
+    left = []
+    real = socket.create_connection
+
+    def spy(address, *args, **kwargs):
+        host, port = address[0], address[1]
+        if host in ("127.0.0.1", "localhost"):
+            return real(address, *args, **kwargs)
+        left.append("%s:%d" % (host, port))
+        raise OSError("%s %s:%d: the internet is closed in this test" % (LEFT, host, port))
+
+    monkeypatch.setattr(socket, "create_connection", spy)
+    return left
+
+
+def _socks5_tcp_only():
+    from _socks_servers import Socks5TcpOnly
+
+    proxy = Socks5TcpOnly()
+    return proxy, {"server": "socks5://127.0.0.1:%d" % proxy.port}, _lab_egress.LAB_EGRESS_IP
+
+
+def _socks5_with_credentials():
+    # the proxy of tests/test_proxy_socks_auth_e2e.py (a file of the e2e: the class is the one that e2e test launches behind)
+    from test_proxy_socks_auth_e2e import _PASS, _USER, _Socks5AuthRecorder
+
+    proxy = _Socks5AuthRecorder()
+    return proxy, {"server": "socks5://127.0.0.1:%d" % proxy.port, "username": _USER, "password": _PASS}, _lab_egress.LAB_EGRESS_IP
+
+
+def _gateway_that_forwards():
+    from _socks_servers import EXIT, coherent
+
+    gateway = coherent()
+    return gateway, gateway.proxy, EXIT
+
+
+FORWARDING_PROXIES = [
+    pytest.param(_socks5_tcp_only, id="Socks5TcpOnly"),
+    pytest.param(_socks5_with_credentials, id="Socks5AuthRecorder"),
+    pytest.param(_gateway_that_forwards, id="Gateway"),
+]
+
+
+@pytest.mark.parametrize("make", FORWARDING_PROXIES)
+def test_the_question_behind_a_proxy_that_forwards_never_reaches_the_internet(make, what_would_leave):
+    """THE RED OF THE RUNNER: the lab declares the exit of a launch behind a proxy of the tests with ``DeclaredExit`` over the REAL discovery. Until
+    the proxy declared its exit, the proxied question went to the real function and from it through the proxy to api.ipify.org:443."""
+    from invisible_core import _geo
+
+    proxy, endpoint, exit_ip = make()
+    try:
+        declared = _lab_egress.DeclaredExit(_geo.discover_egress_ip)
+        try:
+            answer = declared(endpoint, timeout=3, budget=6)
+        except Exception as error:      # the closed internet makes the real function fail: what it SENT is the verdict
+            answer = error
+    finally:
+        proxy.close()
+    assert what_would_leave == [], "the question of the exit was carried to the internet through %s: %s" % (endpoint["server"], what_would_leave)
+    assert answer == exit_ip, "the proxy declares its exit and the lab answers it: %r" % (answer,)
+
+
+@pytest.mark.parametrize("make", FORWARDING_PROXIES)
+def test_a_forwarding_proxy_refuses_the_question_it_was_not_declared_for_and_the_test_fails(make, what_would_leave):
+    """The backstop: the REAL discovery, not behind ``DeclaredExit`` (a test that replaced the question, a launch that does not go through it).
+    The proxy refuses to forward the question, names it, and ``nobody_asked_the_world`` (which the autouse fixture of the conftest reads after every
+    test) hands it over once."""
+    import _socks_servers
+    from invisible_core import _geo
+
+    _socks_servers.nobody_asked_the_world()
+    proxy, endpoint, _exit = make()
+    try:
+        with pytest.raises(Exception):
+            _geo.discover_egress_ip(endpoint, timeout=3, budget=6)
+    finally:
+        proxy.close()
+    asked = _socks_servers.nobody_asked_the_world()
+    assert what_would_leave == [], "a proxy of the tests forwarded the question of the exit: %s" % what_would_leave
+    assert asked and all(endpoint["server"].split("://", 1)[1] in line and ":443" in line for line in asked), asked
+    assert _socks_servers.nobody_asked_the_world() == [], "the questions are handed over once"
+
+
+def test_a_proxy_that_refuses_the_world_keeps_its_question_for_what_answered_it_before():
+    """A gateway that refuses everything past loopback (the DoH family, the HTTP proxy) cannot carry the question anywhere: it is not declared, and the
+    lab leaves the question to the discovery, which the proxy refuses, as before."""
+    from _doh_servers import DohGateway, FakeDoh
+
+    asked = []
+
+    def before(proxy=None, *args, **kwargs):
+        asked.append(proxy["server"])
+        return "203.0.113.9"
+
+    with FakeDoh({}) as doh, DohGateway("closed", doh) as gateway:
+        assert _lab_egress.DeclaredExit(before)(gateway.proxy) == "203.0.113.9" and asked == [gateway.server]
+
+
+def test_a_declared_exit_is_answered_without_asking_anyone_and_is_forgotten_with_the_proxy():
+    import _socks_servers
+
+    asked = []
+
+    def before(proxy=None, *args, **kwargs):
+        asked.append(proxy)
+        return "203.0.113.9"
+
+    exit_ = _lab_egress.DeclaredExit(before)
+    _socks_servers.declare_exit("socks5://127.0.0.1:61999", "198.51.100.77")
+    try:
+        assert exit_({"server": "socks5://127.0.0.1:61999"}) == "198.51.100.77"
+        assert exit_({"server": "http://user:pw@127.0.0.1:61999"}) == "198.51.100.77", "the scheme and the credentials are not the identity of a proxy"
+        assert asked == [] and len(exit_.proxied_questions) == 2
+    finally:
+        _socks_servers.forget_exit("socks5://127.0.0.1:61999")
+    assert exit_({"server": "socks5://127.0.0.1:61999"}) == "203.0.113.9" and len(asked) == 1
+
+
+def test_the_services_a_proxy_refuses_are_the_services_of_the_core():
+    """The list the proxies refuse (``_socks_servers.EXIT_SERVICES``) covers every host the core asks: a service added to the core without it is red here."""
+    from urllib.parse import urlsplit
+
+    import _socks_servers
+    from invisible_core import _geo
+
+    hosts = {urlsplit(url).hostname for url in tuple(_geo._IP_ECHO_ENDPOINTS) + tuple(_geo._IPV6_ECHO_ENDPOINTS)}
+    assert hosts <= set(_socks_servers.EXIT_SERVICES), sorted(hosts - set(_socks_servers.EXIT_SERVICES))
+
+
+def test_the_conftest_fails_every_test_after_which_the_world_was_asked():
+    tree = ast.parse((TESTS / "conftest.py").read_text(encoding="utf-8"))
+    found = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Call) and getattr(decorator.func, "attr", "") == "fixture":
+                    found[node.name] = ({kw.arg: getattr(kw.value, "value", None) for kw in decorator.keywords}, ast.unparse(node))
+    guard = found.get("_no_test_asks_the_world_where_it_leaves_from")
+    assert guard is not None and guard[0] == {"autouse": True}, "an autouse fixture reads the questions of the world after every test: %r" % (guard and guard[0],)
+    assert "nobody_asked_the_world" in guard[1] and "pytest.fail" in guard[1], "and fails the test when there are any"

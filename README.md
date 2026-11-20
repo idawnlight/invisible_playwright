@@ -4,7 +4,7 @@
 native stealth browser engines:
 
 - **`backend="firefox"` (default)**: Firefox 160.0
-  ([`firefox-160.0-r2`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r2)),
+  ([`firefox-160.0-r3`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r3)),
   declaring a coherent Windows 10/11 desktop persona on Linux through native
   Gecko declarations, 119 bundled Windows fonts, and isolated Juggler worlds.
 - **`backend="chromium"`**: Chromium 157.0.8103.78
@@ -13,7 +13,7 @@ native stealth browser engines:
   `llvmpipe` WebGL1/2 parameters while driving `--remote-debugging-pipe` with
   `navigator.webdriver === false` and zero `Runtime.enable` leaks.
 
-This release pairs `invisible_core 160.76.0` with `invisible_playwright 0.55.1`
+This release pairs `invisible_core 160.78.0` with `invisible_playwright 0.57.0`
 and bundles the Playwright Python 1.61 client (both `sync_api` and `async_api`).
 
 ## Install
@@ -30,8 +30,8 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.76.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.55.1"
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.78.0" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.57.0"
 ```
 
 See [the installation guide](docs/installation.md) for Ubuntu/Linux system
