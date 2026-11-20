@@ -5038,6 +5038,7 @@ class BrowserDispatcher(Dispatcher):
                  udp_stun_servers: Optional[list] = None,
                  browser_name: str = "firefox") -> None:
         self.conn = conn
+        self.browser_name = browser_name
         # ⛔ THE EVENTS OF A SESSION GO THROUGH A GATE. A new page is handed the events it missed (`replay`) by the thread that builds it,
         # while the engine's reader goes on delivering the live ones to the same subscribers: a popup's destination committed (live) in the
         # middle of the replay of its first events, and the replay then went on with older ones (the initial about:blank, the
@@ -5874,13 +5875,16 @@ class BrowserDispatcher(Dispatcher):
         # a context whose proxy cannot be expressed must not come back usable.
         if params.get("proxy"):
             try:
-                # ⛔ MEASURED BEFORE IT IS SENT. The proxy's UDP exit (does its UDP leave from the address of its TCP?)
-                # travels in this very command, as `udp`, and without it the engine drops the UDP of every SOCKS5
-                # proxy. The core discovers the TCP exit through the proxy and measures the UDP beside it, once per
-                # proxy (cached by endpoint, a hash of the credentials and the servers), from the STUN servers the
-                # SESSION was launched with: this is the ONE place a context's proxy is applied, for the sync and
-                # async clients and for a remote one alike. A `udp` key in what the caller wrote is not read.
-                proxy = context_proxy_command(params["proxy"], self.udp_stun_servers)
+                if self.browser_name == "chromium":
+                    proxy = parse_proxy(params["proxy"]).as_engine_command()
+                else:
+                    # ⛔ MEASURED BEFORE IT IS SENT. The proxy's UDP exit (does its UDP leave from the address of its TCP?)
+                    # travels in this very command, as `udp`, and without it the engine drops the UDP of every SOCKS5
+                    # proxy. The core discovers the TCP exit through the proxy and measures the UDP beside it, once per
+                    # proxy (cached by endpoint, a hash of the credentials and the servers), from the STUN servers the
+                    # SESSION was launched with: this is the ONE place a context's proxy is applied, for the sync and
+                    # async clients and for a remote one alike. A `udp` key in what the caller wrote is not read.
+                    proxy = context_proxy_command(params["proxy"], self.udp_stun_servers)
             except ValueError as exc:
                 raise ProtocolException(
                     "new_context(proxy=...) cannot be applied: %s" % exc)

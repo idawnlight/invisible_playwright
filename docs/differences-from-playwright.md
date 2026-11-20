@@ -35,6 +35,8 @@ that names the reason.
 | `register_selector_engine()` or `set_test_id_attribute()` after a page exists | Error | Both are built into the page's injected script when it is created. Call them before the first page. |
 | `set_storage_state()` with per-origin `localStorage` | Error, not implemented yet | Restoring only the cookies would look like success and leave half the session missing. |
 | `response.body()` on a very large or old response | Error | The engine keeps at most 100 MB of response bodies per tab and 10 MB per response. Read the body sooner. |
+| SOCKS5 proxy with `username` / `password` on `backend="chromium"` | Error | Chromium's native SOCKS5 socket layer does not implement RFC 1929 authentication. Use authenticated HTTP/HTTPS `CONNECT` proxies on Chromium, or `backend="firefox"` for native authenticated SOCKS5. |
+| Mutating proxy on an already-active context on `backend="chromium"` | Error | Chromium binds proxy rules to the underlying `BrowserContext` at creation time. Pass `proxy=` at launch or to `browser.new_context(proxy=...)`. |
 
 ## Behaviour that differs on purpose
 

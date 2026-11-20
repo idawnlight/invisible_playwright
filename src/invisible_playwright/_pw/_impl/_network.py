@@ -555,11 +555,17 @@ class Route(ChannelOwner):
             getattr(asyncio.current_task(self._loop), "__pw_stack__", inspect.stack(0)),
         )
         target_closed_future = self.request._target_closed_future()
-        await asyncio.wait(
-            [fut, target_closed_future],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if fut.done() and fut.exception():
+        try:
+            await asyncio.wait(
+                [fut, target_closed_future],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except BaseException:
+            if not fut.done():
+                fut.cancel()
+            await asyncio.gather(fut, return_exceptions=True)
+            raise
+        if fut.done() and not fut.cancelled() and fut.exception():
             raise cast(BaseException, fut.exception())
         if target_closed_future.done():
             await asyncio.gather(fut, return_exceptions=True)

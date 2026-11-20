@@ -120,15 +120,29 @@ class Channel(AsyncIOEventEmitter):
         callback = self._connection._send_message_to_server(
             self._object, method, _augment_params(params, timeout_calculator)
         )
-        done, _ = await asyncio.wait(
-            {
-                self._connection._transport.on_error_future,
-                callback.future,
-            },
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        try:
+            done, _ = await asyncio.wait(
+                {
+                    self._connection._transport.on_error_future,
+                    callback.future,
+                },
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except BaseException:
+            if not callback.future.done():
+                callback.future.cancel()
+            elif not callback.future.cancelled():
+                callback.future.exception()
+            raise
         if not callback.future.done():
             callback.future.cancel()
+        elif not callback.future.cancelled():
+            callback.future.exception()
+        if (
+            self._connection._transport.on_error_future in done
+            and not self._connection._transport.on_error_future.cancelled()
+        ):
+            self._connection._transport.on_error_future.exception()
         result = next(iter(done)).result()
         # Protocol now has named return values, assume result is one level deeper unless
         # there is explicit ambiguity.

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.55.1] - 2026-11-20
+
+### Fixed
+- **Chromium authenticated HTTP/HTTPS proxy (`Fetch.enable`)**: `CDPBridgeConnection` no longer passes empty `patterns=[]` with `handleAuthRequests=True`, preventing `Fetch.enable: Can't specify empty patterns with handleAuth set` and the resulting 60-second `Browser.new_page` attachment timeout. Proxy authentication challenges (`407`) and HTTP origin credentials (`401`) are handled across both top-level pages and out-of-process iframes (OOPIFs), and repeated `407`/`401` challenges on rejected credentials terminate cleanly with `CancelAuth` instead of looping.
+- **Chromium page initialization error propagation & last-tab lifecycle**: `_init_attached_page` failures are surfaced immediately by `Browser.newPage` instead of being swallowed by `_event_worker_loop`, and Chromium launches with `--no-startup-window` so closing the last open tab no longer prevents subsequent `browser.new_page()` / `context.new_page()` calls.
+- **Chromium zero-delay iframe trusted clicks (`humanize=False`) & real `landsOn` verification**: Added `--allow-pre-commit-input` and `PaintHolding` disablement to align with upstream Playwright's Chromium input pipeline so newly loaded same-origin, cross-port, and cross-site OOPIF iframes receive `mousedown`/`mouseup`/`click` immediately without a 500 ms post-navigation suppression window. Replaced the stub `landsOn` reply in `_cdp/bridge.py` with genuine isolated utility-world capture verification (zero main-world footprint).
+- **Chromium `console` and `pageerror` events**: Enabled V8-stealth-safe `Runtime.enable` across page and OOPIF sessions, forwarding `Runtime.consoleAPICalled` to `Runtime.console` (`page.on("console")`) and `Runtime.exceptionThrown` to `Page.uncaughtError` (`page.on("pageerror")`) while filtering internal utility-world evaluations.
+- **Chromium context options & explicit refusals**: Implemented per-context `browser.new_context(proxy=...)` via `Target.createBrowserContext(proxyServer=..., proxyBypassList=...)`, `ignore_https_errors=True` (`Security.setIgnoreCertificateErrors`), `java_script_enabled=False` (`Emulation.setScriptExecutionDisabled`), `service_workers="block"` (`Network.setBypassServiceWorker`), and WebRTC `disable_non_proxied_udp` enforcement when launched with a proxy. Explicitly reject unsupported SOCKS5 username/password authentication and live proxy hot-swaps on active Chromium contexts instead of silently succeeding as a no-op.
+- **Async task cancellation cleanup (`TargetClosedError`)**: Fixed `Channel._inner_send`, `Route._race_with_page_close`, and `BrowserContext._on_route` so cancelling an in-flight task while closing its context/page leaves zero unretrieved `TargetClosedError` futures on the asyncio loop.
+
 ## [0.55.0] - 2026-11-19
 
 ### Added

@@ -44,7 +44,7 @@ check with zero network traffic.
 ## `version`
 
 ```text
-invisible_playwright 0.55.0
+invisible_playwright 0.55.1
 invisible_core       160.76.0   (declared: ==160.76.0)
 engine               firefox-160.0-r2  Firefox 160.0  build 20261119104835
 seal                 bc41cacd8e68  [.../invisible_core/seal.json]
