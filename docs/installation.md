@@ -1,22 +1,22 @@
 ---
 title: "Installation"
-description: "Install the paired Python packages from GitHub tags and run either Firefox 160 or Chromium 157 with automatic SHA256-verified binary caching."
+description: "Install the paired Python packages from GitHub tags and run either Firefox 160.0.1 or Chromium 158 with automatic SHA256-verified binary caching."
 parent: "Documentation"
 nav_order: 1
 ---
 
 # Installation
 
-This guide installs `invisible_playwright 0.57.4` and `invisible_core 160.78.1`
-(tags `v0.57.4` and `v160.78.1`), supporting both native stealth engines out of
+This guide installs `invisible_playwright 0.58.1` and `invisible_core 160.81.0`
+(tags `v0.58.1` and `v160.81.0`), supporting both native stealth engines out of
 the box:
 
-- **Firefox 160.0** (`backend="firefox"`, default) from
-  [`firefox-160.0-r3`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r3)
+- **Firefox 160.0.1** (`backend="firefox"`, default) from
+  [`firefox-160.0.1-r1`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0.1-r1)
   (~280 MB compressed)
-- **Chromium 157.0.8103.78** (`backend="chromium"`) from
-  [`chromium-157.0.8103.78-r1`](https://github.com/idawnlight/chromium_antidetect_patch/releases/tag/chromium-157.0.8103.78-r1)
-  (~236 MB compressed)
+- **Chromium 158.0.8127.36** (`backend="chromium"`) from
+  [`chromium-158.0.8127.36-r1`](https://github.com/idawnlight/chromium_antidetect_patch/releases/tag/chromium-158.0.8127.36-r1)
+  (~240 MB compressed)
 
 Supported platforms: **Linux x86_64**. Use Python **3.11 or newer** and Git.
 
@@ -53,11 +53,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install \
-  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.78.1" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.57.4"
+  "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.81.0" \
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.1"
 ```
 
-The wrapper requires `invisible-core==160.78.1`; supplying both references
+The wrapper requires `invisible-core==160.81.0`; supplying both references
 selects the exact paired core directly. Add `[remote]` to `invisible-playwright`
 (or `pip install "websockets>=13"`) if you plan to serve a browser over
 WebSocket with `launch_server()`. The Playwright Python client is bundled

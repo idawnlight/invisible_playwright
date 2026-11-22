@@ -65,7 +65,7 @@ Two things went wrong, and the second one is the interesting one.
 
 ## Silence is a trap
 
-[CreepJS](https://abrahamjuliot.github.io/creepjs/) has a check called
+A consistency checker has a check called
 `hasFakeAudio`. It does not compare your hash to a database. It builds a buffer that
 should be **silent**, renders it, and looks at whether anything is in it.
 
@@ -208,7 +208,7 @@ say so.
   and [getFloatTimeDomainData()](https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode/getFloatTimeDomainData),
   and [DynamicsCompressorNode.reduction](https://developer.mozilla.org/en-US/docs/Web/API/DynamicsCompressorNode/reduction),
   retrieved 2026-08-28.
-- [CreepJS](https://github.com/abrahamjuliot/creepjs), read 2026-08-28, for the
+- A consistency checker, read 2026-08-28, for the
   `hasFakeAudio` check and its silence-and-opening-samples tests described above.
 - This project's own A/B measurement of the tampering score with the audio noise isolated
   as the only variable, on one machine and one identity.
@@ -218,7 +218,7 @@ since the audio hash is one of the components that ID is made of,
 [why headless browsers render different fonts](headless-fonts-differ.md)
 and [your renderer string says NVIDIA, your pixels say software](renderer-string-vs-render.md),
 which are the same "the honest answer describes your machine" problem on other
-surfaces, and [how CreepJS decides you are lying](creepjs-explained.md).
+surfaces, and [how a consistency checker decides you are lying](consistency-checker-explained.md).
 
 ---
 

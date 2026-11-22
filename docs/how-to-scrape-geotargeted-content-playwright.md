@@ -66,7 +66,7 @@ with InvisiblePlaywright(seed=42, proxy=proxy) as browser:
 Add to that list two things that are not in JavaScript at all: the
 [`Accept-Language` header and its `navigator.languages` twin](accept-language-navigator-languages.md)
 the requests actually carry, and the country of the IP the request left from,
-which the browser also reports independently through WebRTC. And
+which the browser can also report independently through WebRTC. And
 [the geolocation API a page can query directly](geolocation-api-vs-ip-location-consistency.md)
 has to fall in the same country too.
 
@@ -81,7 +81,7 @@ fed by:
 | `Accept-Language` header | the HTTP request itself | egress IP |
 | Number and date format | `Intl.NumberFormat`, `toLocaleString()` | egress IP |
 | Geolocation country | the Geolocation API | egress IP |
-| Reported network address | WebRTC | exit IP |
+| Reported network address | WebRTC | exit IP (when the proxy relays UDP) |
 | Exit IP country | the proxy exit | the anchor everything matches |
 
 That is a set of surfaces, not a value. Geotargeting a region means every one of them has
@@ -95,8 +95,9 @@ is common enough to have its own page.
 The design decision that makes this tractable is to stop treating region as configuration
 and start treating it as a consequence of the proxy. By default the browser timezone is
 auto-derived from the egress IP: the proxy exit if a proxy is set, otherwise the host's
-own public IP. The same lookup that finds the egress country feeds the locale and the
-address WebRTC reports, so those surfaces come from one answer and cannot drift apart.
+own public IP. The same lookup that finds the egress country feeds the locale, and when the
+proxy relays UDP the address WebRTC reports is that same exit, so those surfaces come from one
+answer and cannot drift apart.
 
 In practice that means the geotargeted scrape is the ordinary scrape. You set the proxy,
 and the region surfaces follow it:
@@ -231,7 +232,7 @@ actually in the target country and diff the two reports field by field, which is
 method described in
 [how to test whether your browser is detected](how-to-test-bot-detection.md).
 
-Remember also that WebRTC reports the exit country independently of all of this, so a
+Remember also that WebRTC can report the exit country independently of all of this, so a
 [WebRTC path that reports the wrong address or nothing at all](webrtc-leak-proxy.md) will
 contradict a perfectly matched timezone. It is part of the same surface set, not a
 separate concern.

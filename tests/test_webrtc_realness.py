@@ -25,11 +25,16 @@ import re
 import select
 import socket
 import struct
+import subprocess
+import sys
 import threading
+import time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
+from _evidence_on_failure import FailureEvidence
+from _far_away_probes import FarAwayProbes
 from _host_address import this_host_address
 from _socks_servers import MEASURE_NUMBER, STUN_NUMBER, STUN_PORT, Socks5TcpOnly
 from _udp_line import bench_report, declared_udp, declared_udp_or_absent, egress_by_proxy, measure_servers
@@ -389,27 +394,45 @@ def test_not_blocked_behind_tcp_only_socks(socks5_tcp_only, local_https_page):
 # The gather the next tests read: one STUN server, by number, and everything the engine says about it.
 _RELAY_PROBE_JS = r"""async (stun) => {
   const t0 = performance.now();
+  // What the page saw, with its time (``ms`` from the offer, ``wall`` the epoch clock the test's own record shares): the evidence of a
+  // failed gather. It is also left on ``window`` so that a test whose evaluation did not return can still read it. It changes nothing.
+  const events = window.__relayEvents = [];
+  const note = (kind, data) => {
+    try { events.push(Object.assign({kind, ms: Math.round((performance.now() - t0) * 10) / 10, wall: Date.now()}, data || {})); } catch (e) {}
+  };
   const pc = new RTCPeerConnection({iceServers: [{urls: [stun]}]});
   pc.createDataChannel('');
   const cands = [], errors = [], at = {};
+  note('start', {state: pc.iceGatheringState});
+  pc.addEventListener('icegatheringstatechange', () => note('icegatheringstatechange', {state: pc.iceGatheringState}));
   pc.addEventListener('icecandidate', e => {
+    try {
+      const c = e.candidate;
+      note('icecandidate', c ? {candidate: c.candidate, type: c.type, protocol: c.protocol, address: c.address, port: c.port,
+                                relatedAddress: c.relatedAddress, relatedPort: c.relatedPort, url: e.url} : {end: true});
+    } catch (x) {}
     if (e.candidate && e.candidate.candidate) {
       cands.push(e.candidate.candidate);
       const typ = (e.candidate.candidate.match(/ typ (\w+)/) || [])[1];
       if (typ && !(typ in at)) at[typ] = Math.round(performance.now() - t0);
     }
   });
-  pc.addEventListener('icecandidateerror', e => { errors.push({code: e.errorCode, text: e.errorText, url: e.url}); at.error = Math.round(performance.now() - t0); });
+  pc.addEventListener('icecandidateerror', e => {
+    note('icecandidateerror', {errorCode: e.errorCode, errorText: e.errorText, url: e.url, address: e.address, port: e.port});
+    errors.push({code: e.errorCode, text: e.errorText, url: e.url}); at.error = Math.round(performance.now() - t0);
+  });
   await pc.setLocalDescription(await pc.createOffer());
+  note('setLocalDescription returned', {state: pc.iceGatheringState});
   await new Promise(resolve => {
-    const timer = setTimeout(resolve, 30000);
+    const timer = setTimeout(() => { note('the 30 s wait for the end of the gathering ran out'); resolve(); }, 30000);
     pc.addEventListener('icegatheringstatechange', () => {
       if (pc.iceGatheringState === 'complete') { at.complete = Math.round(performance.now() - t0); clearTimeout(timer); resolve(); }
     });
   });
   const sdp = (pc.localDescription && pc.localDescription.sdp) || '';
+  note('closing', {state: pc.iceGatheringState});
   try { pc.close(); } catch (e) {}
-  return {candidates: cands, errors, sdp, at_ms: at};
+  return {candidates: cands, errors, sdp, at_ms: at, events};
 }"""
 
 
@@ -425,9 +448,442 @@ _ICE_IDS = ["ice_in_the_socket_process", "the_caller_asks_for_ice_in_the_content
             "the_caller_asks_for_no_socket_process_and_the_lock_wins"]
 
 
-def _gather_behind_a_coherent_gateway(monkeypatch, credentials, ice_prefs, rtt_ms):
+# What a failed gather leaves for a reader (tests/_evidence_on_failure.py): where the page's STUN request went. Nothing here changes an
+# assertion, a wait or a deadline: the gateway of the test and its sockets are listened to, never steered.
+class _Journal:
+    """A record the evidence saves as ``<name>.jsonl`` (``lock``, ``records``). ``t`` is the wall clock (seconds since the epoch), ``m`` the
+    ``perf_counter`` of this process; a record that carries its own time says ``m=None``."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.records = []
+
+    def add(self, **fields):
+        """Never raises: it is called from the gateway's own threads, and a failure there would be the test's, not the product's.
+        Who wrote a record is ``origin`` (gateway, socket, test, page), never ``source``: that is a field of a datagram."""
+        try:
+            fields.setdefault("t", round(time.time(), 4))
+            fields.setdefault("m", round(time.perf_counter(), 6))
+            with self.lock:
+                self.records.append(fields)
+        except Exception as problem:  # noqa: BLE001 - recorded, never raised
+            with self.lock:
+                self.records.append({"origin": "journal", "event": "a record could not be kept", "error": repr(problem)})
+
+
+def _interfaces_of_this_runner(relay_host):
+    """Every address this runner has, as the several ways to ask give it (a failure of one is said, not raised): what the hostname
+    resolves to, the interfaces of ``psutil`` when it is installed, and the system's own listing (``ipconfig /all`` or ``ip addr``)."""
+    found = {"relay_host_this_host_address": relay_host}
+    try:
+        name = socket.gethostname()
+        found["hostname"] = name
+        found["getaddrinfo_of_the_hostname"] = sorted({"%s %s" % (info[0].name, info[4][0]) for info in socket.getaddrinfo(name, None)})
+    except Exception as problem:
+        found["getaddrinfo_error"] = repr(problem)
+    try:
+        import psutil
+        found["psutil_net_if_addrs"] = {nic: [{"family": a.family.name, "address": a.address, "netmask": a.netmask} for a in addrs]
+                                       for nic, addrs in psutil.net_if_addrs().items()}
+    except Exception as problem:
+        found["psutil"] = "not read: %r" % (problem,)
+    command = ["ipconfig", "/all"] if sys.platform == "win32" else ["ip", "-o", "addr"]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=30)
+        found["listing_command"] = " ".join(command)
+        found["listing"] = done.stdout[:30000]
+    except Exception as problem:
+        found["listing_error"] = "%s: %r" % (" ".join(command), problem)
+    return found
+
+
+class _Watch:
+    """The record of one gather behind a gateway of the test, kept only when ``evidence`` (a ``FailureEvidence``) is given; with none every
+    method is the plain call. It wraps the OBJECT of the gateway and the ``socket`` name of ``tests/_socks_servers.py`` (not the file), so that
+    the failed gather says, with times, for each control connection what the client sent and what the gateway answered (the greeting, the
+    authentication, the ASSOCIATE with the address the client declared, the BND address and port), and for each datagram on the relay and on
+    the exit sockets where it came from, where it went and whether the gateway skipped, dropped or carried it. The Gateway has no source
+    filter: it takes the datagram of any address and answers the last one it heard (the cells say so)."""
+
+    def __init__(self, gateway, monkeypatch, evidence, relay_host):
+        self.gateway = gateway
+        self.evidence = evidence
+        self.active = evidence is not None
+        self.relay_host = relay_host
+        if not self.active:
+            return
+        self.cells = evidence.cells if evidence.cells is not None else {}
+        evidence.note_cells(self.cells)
+        self.control, self.udp, self.page = _Journal(), _Journal(), _Journal()
+        evidence.note_records("gateway-control-connections", self.control)
+        evidence.note_records("gateway-udp-datagrams", self.udp)
+        evidence.note_records("page-view", self.page)
+        # The recorders of the machine and of the core's own measurement (tests/_far_away_probes.py): started with the watch, stopped with it.
+        self.probes = FarAwayProbes(gateway.t0)
+        evidence.note_records("stall-witness", self.probes.stall_records)
+        evidence.note_records("runner-load", self.probes.load_records)
+        evidence.note_records("core-udp-exit-log", self.probes.core_records)
+        self.bnd_ports = set()
+        self._reads = threading.local()
+        self.cells["relay_host"] = relay_host
+        self._wrap_the_gateway(monkeypatch)
+        self._wrap_the_sockets(monkeypatch)
+
+    def __enter__(self):
+        if self.active:
+            self.safely(self.probes.start)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.active:
+            self.safely(self.probes.stop)
+            try:
+                self.snapshot()
+            except Exception as problem:      # the evidence never hides the failure it is about
+                sys.stderr.write("gateway evidence: could not be taken: %r\n" % (problem,))
+            if exc is not None:               # a failure that is not an assertion of the test (a wait, a launch) says it too
+                self.safely(lambda: exc.add_note(self.summary()))
+        return False
+
+    def mark(self, what):
+        """A moment of the test on the scale of the core's records (the launch that runs the core's UDP measurement starts, returns)."""
+        if self.active:
+            self.safely(lambda: self.probes.mark(what))
+
+    def summary(self):
+        """The lines a failed gather adds to its message: the control connections' times, the core's UDP measurement, the stalls of the
+        process and the runner's load (the evidence has them whole). Empty when no evidence is kept. Never raises."""
+        if not self.active:
+            return ""
+        try:
+            with self.control.lock:
+                records = list(self.control.records)
+            return self.probes.lines(records)
+        except Exception as problem:  # noqa: BLE001
+            return "far-away probes: not read (%r)" % (problem,)
+
+    # ---- the clocks ---------------------------------------------------------------------------------------------------------
+    def _gw(self):
+        """Seconds from the start of the gateway (``Gateway.t0``): the scale of its ``requests``, ``accepted``, ``associations`` and ``datagram_log``."""
+        return round(time.monotonic() - self.gateway.t0, 4)
+
+    def _conn(self):
+        return getattr(self.gateway._local, "index", -1)
+
+    def _kind_of(self, ip):
+        if ip.startswith("127."):
+            return "loopback"
+        if ip == self.relay_host:
+            return "the host address of the runner (this_host_address(), where the relay listens)"
+        return "another address"
+
+    # ---- the control connections --------------------------------------------------------------------------------------------------
+    def safely(self, record):
+        """Runs ``record``, a recording (it builds a record and adds it): it NEVER raises, whatever it reads or formats, and a failure of it
+        is itself a record (``origin: watch``). Every recording of every wrapper goes through here, and the call of the original (the
+        gateway's own method, the real socket) is made outside it, with its own arguments, so that what the gateway returns or raises is
+        what it did before and a datagram is never lost to the test's own bookkeeping."""
+        try:
+            record()
+        except Exception as problem:  # noqa: BLE001 - the recording failed: say so, and go on
+            try:
+                self.control.add(origin="watch", event="a record could not be made", error=repr(problem))
+            except Exception:  # noqa: BLE001 - not even that could be kept: nothing is raised into the gateway's thread
+                pass
+
+    def _wrap_the_gateway(self, monkeypatch):
+        gateway, control, reads, watch = self.gateway, self.control, self._reads, self
+        import _socks_servers as servers
+
+        original_recv_exact = servers._recv_exact
+
+        def keep_the_read(data):
+            sink = getattr(reads, "sink", None)
+            if sink is not None:
+                sink.append(data)
+
+        def recv_exact(s, n):
+            data = original_recv_exact(s, n)
+            watch.safely(lambda: keep_the_read(data))
+            return data
+
+        monkeypatch.setattr(servers, "_recv_exact", recv_exact)
+
+        original_handle, original_greet = gateway._handle, gateway._greet
+        original_read_address = type(gateway)._read_address
+        original_send, original_connect = gateway._send, gateway._connect
+        original_associate, original_route, original_deliver = gateway._associate, gateway._route, gateway._deliver
+
+        def note_accepted(c):
+            try:
+                peer, local = c.getpeername(), c.getsockname()
+            except OSError as problem:
+                peer = local = repr(problem)
+            control.add(origin="gateway", event="control connection accepted", conn=watch._conn(), gw=watch._gw(),
+                        client=str(peer), gateway_end=str(local))
+
+        def note_closed(started):
+            control.add(origin="gateway", event="control connection closed", conn=watch._conn(), gw=watch._gw(),
+                        lasted_s=round(time.monotonic() - started, 4), bytes_read_from_the_client_hex=[r.hex() for r in reads.sink])
+
+        def handle(c):
+            reads.sink, reads.address, reads.cmd = [], None, None
+            started = time.monotonic()
+            watch.safely(lambda: note_accepted(c))
+            try:
+                return original_handle(c)
+            finally:
+                watch.safely(lambda: note_closed(started))
+
+        def note_greeting(ok):
+            sink = reads.sink
+            record = {"origin": "gateway", "event": "greeting and authentication done", "ok": ok, "conn": watch._conn(), "gw": watch._gw(),
+                      "gateway_wants_credentials": gateway.user is not None,
+                      "methods_offered_by_the_client": list(sink[1])}
+            if gateway.user is not None and len(sink) >= 7:
+                record["user_sent"] = sink[4].decode("utf-8", "replace")
+                record["password_length_sent"] = len(sink[6])
+            control.add(**record)
+
+        def greet(c):
+            ok = original_greet(c)
+            watch.safely(lambda: note_greeting(ok))
+            return ok
+
+        def note_request(host, port):
+            header = next((r for r in reversed(reads.sink) if len(r) == 3 and r[0] == 5), b"")
+            reads.cmd = {1: "CONNECT", 3: "UDP ASSOCIATE"}.get(header[1], "command %d" % header[1]) if len(header) == 3 else "unknown"
+            reads.address = "%s:%d" % (host, port)
+            control.add(origin="gateway", event="request", command=reads.cmd, address_declared_by_the_client=reads.address,
+                        conn=watch._conn(), gw=watch._gw())
+
+        def read_address(c):
+            host, port = original_read_address(c)
+            watch.safely(lambda: note_request(host, port))
+            return host, port
+
+        def connect(c, host, port):
+            watch.safely(lambda: control.add(origin="gateway", event="CONNECT handled", target="%s:%d" % (host, port),
+                                             conn=watch._conn(), gw=watch._gw()))
+            return original_connect(c, host, port)
+
+        def associate(c):
+            watch.safely(lambda: control.add(origin="gateway", event="UDP ASSOCIATE handled",
+                                             address_declared_by_the_client=getattr(reads, "address", None),
+                                             associations_so_far=len(gateway.associations), conn=watch._conn(), gw=watch._gw()))
+            return original_associate(c)
+
+        def note_answer(data, asked, kind, problem):
+            record = {"origin": "gateway", "event": "answer sent" if problem is None else "answer could not be sent", "kind": kind,
+                      "hex": data.hex(), "conn": watch._conn(), "asked_gw": round(asked - gateway.t0, 4), "gw": watch._gw()}
+            if problem is not None:
+                record["error"] = repr(problem)
+            elif len(data) == 2:
+                record["what"] = ("method selection (0x00 none, 0x02 user/password, 0xff none acceptable)" if data[0] == 5 else
+                                  "authentication status (0x00 accepted)")
+                record["value"] = data[1]
+            elif len(data) == 10 and data[0] == 5 and data[3] == 1:
+                host, port = socket.inet_ntoa(data[4:8]), struct.unpack("!H", data[8:10])[0]
+                record.update(what="reply (REP 0 = succeeded)", rep=data[1], bnd="%s:%d" % (host, port))
+                if kind == "associate" and data[1] == 0:
+                    watch.bnd_ports.add(port)
+            control.add(**record)
+
+        def send(c, data):
+            asked = time.monotonic()
+            kind = getattr(gateway._local, "kind", None)
+            try:
+                original_send(c, data)
+            except BaseException as problem:
+                watch.safely(lambda problem=problem: note_answer(data, asked, kind, problem))
+                raise
+            watch.safely(lambda: note_answer(data, asked, kind, None))
+
+        def note_route(host, dport, atyp, payload, out_port, routed):
+            record = {"origin": "gateway", "event": "datagram dropped by the route (nothing is sent on)" if routed is None else "datagram routed",
+                      "gw": watch._gw(), "destination_in_the_header": "%s:%d" % (host, dport), "atyp": atyp, "payload_len": len(payload),
+                      "exit_socket_port": out_port}
+            if routed is not None:
+                record["sent_on_to"] = "%s:%d" % tuple(routed[0][:2])
+                record["answer_will_be_reported_as"] = None if routed[1] is None else "%s:%d" % tuple(routed[1][:2])
+            watch.udp.add(**record)
+
+        def route(host, dport, atyp, payload, out_port, answer):
+            routed = original_route(host, dport, atyp, payload, out_port, answer)
+            watch.safely(lambda: note_route(host, dport, atyp, payload, out_port, routed))
+            return routed
+
+        def deliver(relay, to, host, port, payload):
+            watch.safely(lambda: watch.udp.add(origin="gateway", event="answer handed to the relay socket for the client", gw=watch._gw(),
+                                               to=str(to), reported_as_coming_from="%s:%d" % (host, port), payload_len=len(payload),
+                                               payload_head_hex=payload[:2].hex()))
+            return original_deliver(relay, to, host, port, payload)
+
+        for name, function in (("_handle", handle), ("_greet", greet), ("_read_address", read_address), ("_send", send),
+                               ("_connect", connect), ("_associate", associate), ("_route", route), ("_deliver", deliver)):
+            setattr(gateway, name, function)
+
+    # ---- the datagrams ----------------------------------------------------------------------------------------------------------
+    def _wrap_the_sockets(self, monkeypatch):
+        """The datagram sockets the gateway opens from now on (the relay of each association and its exit socket) report every ``recvfrom``
+        and ``sendto``: the ``socket`` name of ``tests/_socks_servers.py`` stands for a module whose ``socket`` class does."""
+        watch, gateway, real = self, self.gateway, socket
+        import _socks_servers as servers
+
+        def address_of(pair):
+            return "%s:%d" % tuple(pair[:2])           # an IPv6 address is a 4-tuple
+
+        class Listening(real.socket):
+            def _role(self):
+                try:
+                    local = self.getsockname()
+                except OSError:
+                    return None, "closed"
+                if local[1] in gateway.exit_ports:
+                    return local, "exit socket (leaves for the world)"
+                if local[1] in watch.bnd_ports:
+                    return local, "relay socket (the BND address the client was told)"
+                return local, "datagram socket"
+
+            def _note_reset(self, problem):
+                if self.type == real.SOCK_DGRAM:
+                    watch.udp.add(origin="socket", event="recvfrom raised ConnectionResetError", gw=watch._gw(), error=repr(problem),
+                                  local=str(self._role()[0]))
+
+            def _note_received(self, data, peer):
+                if self.type != real.SOCK_DGRAM or not data:
+                    return
+                local, role = self._role()
+                record = {"origin": "socket", "event": "datagram received", "gw": watch._gw(), "on": role,
+                          "local": address_of(local) if local else None, "source": address_of(peer), "source_kind": watch._kind_of(peer[0]),
+                          "len": len(data), "head_hex": data[:24].hex()}
+                if role.startswith("relay"):
+                    skipped = len(data) < 10 or data[2] != 0
+                    record["skipped_by_the_gateway"] = skipped
+                    record["why"] = ("shorter than 10 bytes" if len(data) < 10 else "FRAG is not 0") if skipped else None
+                    record["source_refused_as_foreign"] = False     # the Gateway has no source filter: see the cells
+                watch.udp.add(**record)
+
+            def _note_send_failed(self, data, args, problem):
+                if self.type == real.SOCK_DGRAM and data:
+                    watch.udp.add(origin="socket", event="sendto failed", gw=watch._gw(), error=repr(problem), destination=str(args[-1]),
+                                  len=len(data), local=str(self._role()[0]))
+
+            def _note_sent(self, data, args):
+                if self.type != real.SOCK_DGRAM or not data:
+                    return
+                local, role = self._role()
+                watch.udp.add(origin="socket", event="datagram sent", gw=watch._gw(), on=role, local=address_of(local) if local else None,
+                              destination=address_of(args[-1]), len=len(data), head_hex=data[:24].hex())
+
+            def recvfrom(self, *args):
+                try:
+                    data, peer = super().recvfrom(*args)
+                except ConnectionResetError as problem:
+                    watch.safely(lambda problem=problem: self._note_reset(problem))
+                    raise
+                watch.safely(lambda: self._note_received(data, peer))
+                return data, peer
+
+            def sendto(self, data, *args):
+                try:
+                    sent = super().sendto(data, *args)
+                except OSError as problem:
+                    watch.safely(lambda problem=problem: self._note_send_failed(data, args, problem))
+                    raise
+                watch.safely(lambda: self._note_sent(data, args))
+                return sent
+
+        class Module:
+            socket = Listening
+
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+        monkeypatch.setattr(servers, "socket", Module())
+
+    # ---- the launch and the page ------------------------------------------------------------------------------------------------
+    def arm(self):
+        """Before the browser is launched: the engine's trace and the Juggler wire."""
+        if self.active:
+            self.evidence.arm()
+
+    def launched(self, session):
+        """What the core declared for this session, read from the object the launch made."""
+        if not self.active:
+            return
+        seed = getattr(session, "seed", None)
+        self.cells["seed"] = seed
+        try:
+            from invisible_core import network_to_declare
+            self.cells["network_the_core_declares_to_the_engine (STEALTHFOX_WEBRTC_NETWORK)"] = network_to_declare(seed)
+        except Exception as problem:
+            self.cells["network_the_core_declares_to_the_engine"] = "not read: %r" % (problem,)
+
+    def _note_page_events(self, events):
+        for event in events:
+            self.page.add(**dict(event, origin="page", t=event.get("wall", 0) / 1000.0, m=None))
+
+    def evaluate(self, page, script, argument):
+        """``page.evaluate`` and, when the evidence is kept, the page's own view of the gather as ``page-view.jsonl``."""
+        if not self.active:
+            return page.evaluate(script, argument)
+        self.safely(lambda: self.page.add(origin="test", event="page.evaluate of the gather starts", stun=argument,
+                                          wall_ms=round(time.time() * 1000), gw=self._gw()))
+        try:
+            res = page.evaluate(script, argument)
+        except BaseException as problem:
+            self.safely(lambda problem=problem: self.page.add(origin="test", event="page.evaluate raised", error=repr(problem), gw=self._gw()))
+            try:
+                events = page.evaluate("() => window.__relayEvents || []")
+                self.safely(lambda: self._note_page_events(events))
+            except Exception as again:
+                self.safely(lambda again=again: self.page.add(origin="test", event="the page's events could not be read back", error=repr(again)))
+            raise
+        self.safely(lambda: self.page.add(origin="test", event="page.evaluate of the gather returned", wall_ms=round(time.time() * 1000),
+                                          gw=self._gw()))
+        self.safely(lambda: self._note_page_events(res.get("events", [])))
+        self.safely(lambda: self.cells.__setitem__("page_result", {key: value for key, value in res.items() if key != "events"}))
+        return res
+
+    def snapshot(self):
+        """The gateway's own lists, taken before it closes (times in seconds from its start; ``wall0`` is that instant on the wall clock)."""
+        gateway = self.gateway
+        with self.control.lock:
+            control = list(self.control.records)
+        self.safely(lambda: self.cells.update(self.probes.cells(control)))
+        self.cells["gateway"] = {
+            "wall0_epoch_seconds_of_the_gateway_start": gateway.wall0,
+            "udp": gateway.udp, "wants_credentials": gateway.user is not None, "rtt_s": gateway.rtt,
+            "relay_host (BND.ADDR it answers)": gateway.relay_host, "exit_host (source of the datagrams it sends on)": gateway.exit_host,
+            "fake_stun_address": list(gateway.stun.address), "fake_stun_requests_answered": gateway.stun.requests,
+            "tcp_exit": gateway.tcp_exit,
+            "accepted_control_connections_s": list(gateway.accepted),
+            "requests (s, connection, kind, detail)": [list(r) for r in gateway.requests],
+            "connects": [list(c) for c in gateway.connects],
+            "associates": gateway.associates,
+            "associations (start, end in s)": [list(a) for a in gateway.associations],
+            "exit_ports": list(gateway.exit_ports),
+            "bnd_ports_told_to_the_client": sorted(self.bnd_ports),
+            "datagram_log (host, port, atyp, s)": [list(d) for d in gateway.datagram_log],
+            "datagram_via (host, port, association, s)": [list(d) for d in gateway.datagram_via],
+            "datagrams_carried (host, port, payload length, head hex)": [[h, p, len(d), d[:24].hex()] for h, p, d in gateway.datagrams],
+            "send_errors": list(gateway.send_errors),
+            "source_filter": ("none: Gateway._associate keeps the source address of the last well-formed datagram as the client and answers "
+                              "it; no datagram is refused as foreign by its source address. What it does not carry: a datagram shorter than "
+                              "10 bytes or with FRAG != 0 (skipped), one the route drops (stun_answers False, forward_only_to); both are in "
+                              "gateway-udp-datagrams.jsonl."),
+        }
+        try:
+            self.cells["declared_udp_of_the_core_for_this_proxy"] = declared_udp_or_absent(gateway.proxy)
+        except Exception as problem:
+            self.cells["declared_udp_of_the_core_for_this_proxy"] = "not read: %r" % (problem,)
+
+
+def _gather_behind_a_coherent_gateway(monkeypatch, credentials, ice_prefs, rtt_ms, evidence=None):
     """Launch the default engine behind a local gateway with coherent UDP, `rtt_ms` away, gather with a STUN server only
-    its relay reaches, and say whether the page's request took the relay and what the gather looked like."""
+    its relay reaches, and say whether the page's request took the relay and what the gather looked like. With `evidence` (a
+    `FailureEvidence`) the gateway, its sockets, the page and the launch are also recorded for it (`_Watch`); nothing else differs."""
     binary = _e2e_binary()
     if not binary:
         pytest.skip("no patched binary (set STEALTHFOX_E2E_BINARY)")
@@ -438,16 +894,22 @@ def _gather_behind_a_coherent_gateway(monkeypatch, credentials, ice_prefs, rtt_m
     user, password = credentials or (None, None)
     # The relay sits on the address of this host, as a real gateway's does: the engine's ICE sockets are bound to an
     # interface address, and on Windows such a socket cannot send to a relay on loopback.
-    with coherent(user=user, password=password, relay_host=this_host_address(), rtt_ms=rtt_ms) as gateway:
+    relay_host = this_host_address()
+    with coherent(user=user, password=password, relay_host=relay_host, rtt_ms=rtt_ms) as gateway,             _Watch(gateway, monkeypatch, evidence, relay_host) as watch:
         exit_ip = gateway.tcp_exit
         # The session asks the gateway for its TCP exit over HTTPS, which no local gateway can answer as itself: the
         # answer is the gateway's. The UDP probe that follows is NOT replaced: it runs through the relay, for real.
         monkeypatch.setattr(_geo, "discover_egress_ip", egress_by_proxy(gateway))
         extra_prefs = {"media.peerconnection.ice.obfuscate_host_addresses": True, **ice_prefs}
-        with _launch_behind(gateway, binary_path=binary, extra_prefs=extra_prefs) as browser:
+        watch.arm()
+        launched = _launch_behind(gateway, binary_path=binary, extra_prefs=extra_prefs)
+        watch.launched(launched)
+        watch.mark("launch starts")
+        with launched as browser:
+            watch.mark("launch returned")
             page = browser.new_context().new_page()
             page.goto("about:blank")
-            res = page.evaluate(_RELAY_PROBE_JS, stun)
+            res = watch.evaluate(page, _RELAY_PROBE_JS, stun)
         carried = [(host, port) for host, port, _payload in gateway.datagrams]
         stun_requests = gateway.stun.requests
         associates = gateway.associates
@@ -459,6 +921,9 @@ def _gather_behind_a_coherent_gateway(monkeypatch, credentials, ice_prefs, rtt_m
                f"ICE errors: {res['errors']}; gather timings (ms from the offer): {res['at_ms']}; "
                f"datagrams the relay carried: {carried}; STUN requests the server answered: {stun_requests}; "
                f"UDP ASSOCIATEs the gateway saw: {associates}; round trip to the gateway: {rtt_ms} ms; {bench}")
+    probes = watch.summary()
+    if probes:
+        verdict += "\n" + probes
     return bool(srflx) and (STUN_NUMBER, STUN_PORT) in carried, verdict, res["at_ms"]
 
 
@@ -504,10 +969,24 @@ def test_a_gateway_that_is_far_away_still_gives_the_page_a_srflx_born_through_it
     """The same gather with a gateway that is not on loopback: every answer on the control connection waits `rtt_ms`
     and the relay adds half of it each way. The layer opens one association per ICE socket, one after the other, each
     with a connect, a greeting, an authentication and the ASSOCIATE; a gather must not be over before they are done."""
-    took_the_relay, verdict, _timings = _gather_behind_a_coherent_gateway(
-        monkeypatch, ("alice", "s3cret"), ice_prefs, rtt_ms)
-    print(f"[gather] rtt {rtt_ms} ms, {_ICE_IDS[_ICE_PREFS.index(ice_prefs)]}: {_timings}")
-    assert took_the_relay, "the page's STUN request did not take the relay. " + verdict
+    ice_id = _ICE_IDS[_ICE_PREFS.index(ice_prefs)]
+    # When it fails it saves, under `invpw-evidence/webrtc-far-away-<ice row>-<rtt>/`, where the page's STUN request went: `cells.json` (the
+    # gateway's own lists, the page's result, `timings_ms_from_the_offer`, the verdict, the addresses of the runner and the network the core
+    # declares), `gateway-control-connections.jsonl`, `gateway-udp-datagrams.jsonl`, `page-view.jsonl`, `juggler-wire.jsonl` and
+    # `juggler-engine-trace/`. The assertion below is the one it always was.
+    with FailureEvidence("webrtc-far-away-%s-%d" % (ice_id, rtt_ms)) as evidence:
+        cells = {"test": "far-away gateway", "rtt_ms": rtt_ms, "ice_prefs": ice_prefs, "ice_row": ice_id}
+        evidence.note_cells(cells)
+        try:
+            took_the_relay, verdict, _timings = _gather_behind_a_coherent_gateway(
+                monkeypatch, ("alice", "s3cret"), ice_prefs, rtt_ms, evidence=evidence)
+            cells["timings_ms_from_the_offer"] = _timings
+            cells["verdict"] = verdict
+            print(f"[gather] rtt {rtt_ms} ms, {ice_id}: {_timings}")
+            assert took_the_relay, "the page's STUN request did not take the relay. " + verdict
+        except BaseException:
+            cells["interfaces_of_the_runner"] = _interfaces_of_this_runner(cells.get("relay_host"))
+            raise
 
 
 _START_A_GATHER_JS = r"""async (stun) => {
@@ -596,31 +1075,46 @@ def test_a_gather_after_the_page_loaded_through_the_gateway_costs_only_the_road_
     from _socks_servers import STUN_NUMBER, STUN_PORT, WEB_ADDRESS, coherent
     from _waits import wait_until, watch
     stun = f"stun:{STUN_NUMBER}:{STUN_PORT}"
-    with coherent(user="alice", password="s3cret", relay_host=this_host_address(), rtt_ms=250) as gateway:
-        monkeypatch.setattr(_geo, "discover_egress_ip", egress_by_proxy(gateway))
-        extra_prefs = {"media.peerconnection.ice.obfuscate_host_addresses": True}
-        with _launch_behind(gateway, binary_path=binary, extra_prefs=extra_prefs) as browser:
-            page = browser.new_context().new_page()
-            page.goto("http://%s/" % WEB_ADDRESS)       # by address: the browser resolves names itself
-            # the pool makes its associations: wait until the gateway has granted one of the engine's (the first granted is the
-            # core's probe); the verdict names what it saw if none came
-            wait_until(lambda: len([a for a in gateway.associations if a[1] is not None]) >= 2, 30,
-                       lambda: page.wait_for_timeout(50))
-            page.evaluate(_START_A_GATHER_JS, stun)
-            srflx = watch(lambda: page.evaluate("window.__gather.srflx"), lambda at: at is not None, 30,
-                          lambda: page.wait_for_timeout(50))
-            gather = page.evaluate("window.__gather")
-        associations = [list(a) for a in gateway.associations]
-        via = list(gateway.datagram_via)
-        born = gather["born"] / 1000.0 - gateway.wall0
-    seen = (f"candidates: {gather['candidates']}; ICE errors: {gather['errors']}; associations (start, end) seen by the gateway: "
-            f"{associations}; datagrams and the association each left on: {via}; srflx looks: {srflx.render()}")
-    assert srflx.ok, "no srflx within 30 s behind a gateway 250 ms away. " + seen
-    problem = cold_association_problem(associations, via, STUN_NUMBER, born)
-    assert problem is None, f"{problem}. {seen}"
-    assert gather["host"] is not None and gather["host"] < gather["srflx"], (
-        f"the host candidate (at {gather['host']} ms) did not come before the srflx ({gather['srflx']} ms): it waited for the "
-        f"road to the server. {seen}")
+    # When it fails it saves, under `invpw-evidence/webrtc-gather-after-load-250/`, what the far-away test saves (cells.json, the control
+    # connections and datagrams of the gateway with their times, the stall witness, the runner's load and the core's own log of its UDP
+    # measurement); the lines of the same record are in the message. No assertion, wait or deadline below differs from before.
+    relay_host = this_host_address()
+    with FailureEvidence("webrtc-gather-after-load-250") as evidence:
+        cells = {"test": "gather after the page loaded", "rtt_ms": 250}
+        evidence.note_cells(cells)
+        with coherent(user="alice", password="s3cret", relay_host=relay_host, rtt_ms=250) as gateway, \
+                _Watch(gateway, monkeypatch, evidence, relay_host) as record:
+            monkeypatch.setattr(_geo, "discover_egress_ip", egress_by_proxy(gateway))
+            extra_prefs = {"media.peerconnection.ice.obfuscate_host_addresses": True}
+            launched = _launch_behind(gateway, binary_path=binary, extra_prefs=extra_prefs)
+            record.mark("launch starts")
+            with launched as browser:
+                record.mark("launch returned")
+                page = browser.new_context().new_page()
+                page.goto("http://%s/" % WEB_ADDRESS)       # by address: the browser resolves names itself
+                # the pool makes its associations: wait until the gateway has granted one of the engine's (the first granted is the
+                # core's probe); the verdict names what it saw if none came
+                wait_until(lambda: len([a for a in gateway.associations if a[1] is not None]) >= 2, 30,
+                           lambda: page.wait_for_timeout(50))
+                page.evaluate(_START_A_GATHER_JS, stun)
+                srflx = watch(lambda: page.evaluate("window.__gather.srflx"), lambda at: at is not None, 30,
+                              lambda: page.wait_for_timeout(50))
+                gather = page.evaluate("window.__gather")
+            associations = [list(a) for a in gateway.associations]
+            via = list(gateway.datagram_via)
+            born = gather["born"] / 1000.0 - gateway.wall0
+        seen = (f"candidates: {gather['candidates']}; ICE errors: {gather['errors']}; associations (start, end) seen by the gateway: "
+                f"{associations}; datagrams and the association each left on: {via}; srflx looks: {srflx.render()}")
+        cells["seen"] = seen
+        probes = record.summary()
+        if probes:
+            seen += "\n" + probes
+        assert srflx.ok, "no srflx within 30 s behind a gateway 250 ms away. " + seen
+        problem = cold_association_problem(associations, via, STUN_NUMBER, born)
+        assert problem is None, f"{problem}. {seen}"
+        assert gather["host"] is not None and gather["host"] < gather["srflx"], (
+            f"the host candidate (at {gather['host']} ms) did not come before the srflx ({gather['srflx']} ms): it waited for the "
+            f"road to the server. {seen}")
 
 
 @pytest.mark.e2e

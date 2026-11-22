@@ -55,7 +55,7 @@ claims and the hardware that drew this image are not the same hardware".
 
 Everything else in a fingerprint is a value you can set. This one is an *output*.
 
-A renderer string is a string. A [canvas hash](browserleaks-canvas-webgl-hash.md) is
+A renderer string is a string. A [canvas hash](canvas-webgl-readback-hash-explained.md) is
 the result of running a rasteriser over a shape, and to change it consistently you have
 to change the rasteriser or the machine. That is why:
 

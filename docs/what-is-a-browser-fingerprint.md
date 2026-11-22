@@ -49,7 +49,7 @@ common members:
 
 Taken one at a time, every one of these is shared by a large population. That is the
 whole point of the word "low-entropy": each attribute narrows the field only a little.
-The BrowserLeaks-style per-surface pages exist precisely because reading one surface at
+raw-value-inspector-style per-surface pages exist precisely because reading one surface at
 a time is how you inspect the pieces before worrying about the join.
 
 ## Why the join identifies you when no single value does
@@ -195,7 +195,7 @@ is stable rather than randomised per call.
 ## Sources
 
 - The public per-surface and per-suite detectors documented elsewhere in this set
-  (CreepJS, BotD, FingerprintJS, sannysoft, BrowserLeaks), each read from its own source.
+  (a consistency checker, BotD, an open-source fingerprinting library, a basic bot-test page, a raw-value inspector), each read from its own source.
 - This project's seed-derived generator, which produces canvas, WebGL, font, audio,
   screen and hardware attributes from a single seed so the join is consistent by
   construction.

@@ -57,7 +57,7 @@ client is stuck. Concretely, it cannot handle any of these on its own:
 - **A JS challenge.** The first response is a script whose job is to compute a token,
   set a cookie, and reload. Nothing runs, so nothing is computed.
 - **JavaScript fingerprinting.** Canvas, WebGL, audio, font enumeration, and the checks
-  that libraries like CreepJS, BotD, FingerprintJS, sannysoft and BrowserLeaks run all
+  that libraries like a consistency checker, BotD, an open-source fingerprinting library, a basic bot-test page and a raw-value inspector run all
   execute in a page. A client with no page has no answer to give, and "no answer" is
   itself a signal.
 

@@ -1,6 +1,6 @@
 ---
 title: "Comparisons"
-description: "invisible_playwright against the closest alternatives at each layer - Camoufox, Patchright, nodriver, playwright-stealth - plus the engine question underneath all of them: Firefox or Chromium."
+description: "invisible_playwright against the closest alternatives at each layer - Patchright, nodriver, playwright-stealth - plus the engine question underneath all of them: Firefox or Chromium."
 has_children: true
 nav_order: 4
 ---
@@ -28,7 +28,6 @@ browser. An engine-level patch changed the binary, so there is no lie left to re
 | Tool | Browser | Patch layer | Language |
 |---|---|---|---|
 | invisible_playwright | Firefox | engine (C++) | Python |
-| [Camoufox](vs-camoufox.md) | Firefox | engine (C++) | Python |
 | [Patchright](vs-patchright.md) | Chromium | driver | Python, Node |
 | [rebrowser-patches](vs-rebrowser-patches.md) | Chromium | driver (CDP `Runtime.enable`) | Node |
 | [undetected-playwright](vs-undetected-playwright.md) | Chromium | driver | Python |
@@ -65,7 +64,6 @@ need rendering. Each page below states where the other tool covers more.
 
 ## Patched-engine, driver-patch and stealth-plugin tools
 
-- [invisible_playwright vs Camoufox: two patched Firefoxes](vs-camoufox.md) - Both patch Firefox in C++; how each builds its fingerprint and whether a run replays.
 - [invisible_playwright vs Patchright: driver vs engine](vs-patchright.md) - Patchright patches the Playwright driver on Chromium; this patches Firefox itself. Often you need both.
 - [invisible_playwright vs rebrowser-patches: the same CDP fix](vs-rebrowser-patches.md) - Fixes the Runtime.enable CDP leak on Chromium; reaches neither Firefox nor fonts, GPU, canvas, audio.
 - [undetected-playwright vs a patched Firefox binary](vs-undetected-playwright.md) - Hides Playwright's init-script and bindings tells; a patched Firefox closes the fingerprint layer.

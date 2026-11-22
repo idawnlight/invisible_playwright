@@ -70,6 +70,12 @@ invisible_playwright resolves DNS through the proxy by default, so names and con
 exit from the same place. There is no separate switch to remember: pass a SOCKS5 proxy
 and the hostname goes to the exit, not to your local resolver.
 
+WebRTC follows the same rule. With a proxy set, the names of STUN and TURN servers in a
+page's `iceServers` are resolved by the browser over DNS-over-HTTPS, and that request
+leaves through the proxy of that context (a context with its own proxy uses it), never
+through your machine's resolver. The browser then connects to the address, not the name.
+Without a proxy the system resolver is used, as in retail Firefox.
+
 ## Where DNS-over-HTTPS fits
 
 DNS-over-HTTPS (DoH), standardized in
@@ -219,6 +225,10 @@ location is unchanged. It answers "is my lookup readable", not "where does my lo
 **Does invisible_playwright leak DNS?** No. It resolves DNS through the proxy by default, so
 the name and the connection exit from the same place. You just pass a SOCKS5 proxy the normal
 way.
+
+**Who resolves the name of a STUN or TURN server?** With a proxy, the browser, over
+DNS-over-HTTPS through the proxy of that context. Without a proxy, the system resolver, as in
+retail Firefox.
 
 **How do I check for a DNS leak?** Positively, through the browser session and not on
 localhost. Compare the exit IP the destination sees against the address a resolver-echo

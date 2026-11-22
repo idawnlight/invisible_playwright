@@ -141,7 +141,7 @@ Do not trust a blog snippet that claims to "bypass" closed shadow roots by monke
 `Element.prototype.attachShadow` before the component runs. That works only if you can
 inject before the page's own scripts, it changes observable behaviour the page can notice,
 and it is exactly the kind of environment tampering that consistency checks like
-[CreepJS](creepjs-explained.md) are built to catch. A quiet, real browser that reads what
+[a consistency checker](consistency-checker-explained.md) are built to catch. A quiet, real browser that reads what
 it can and leaves the rest is a better position than a loud one that reaches for
 everything.
 

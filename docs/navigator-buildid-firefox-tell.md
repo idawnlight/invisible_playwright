@@ -60,7 +60,7 @@ on a real machine, cannot disagree.
 
 A consistency-based detector does not need to know the "right" buildID. It only
 needs to notice that this one is impossible given the rest of the identity. The
-same logic that [CreepJS applies to every surface it can reach](creepjs-explained.md)
+same logic that [a consistency checker applies to every surface it can reach](consistency-checker-explained.md)
 applies here: it is not asking whether a value is unusual, it is asking whether
 two values that should agree, do. A 2018 build date next to a 2026 everything-else
 does not agree with anything, and a browser that reports it has told the page it
@@ -218,13 +218,13 @@ the year should be consistent with your version.
 - [reCAPTCHA v3](https://developers.google.com/recaptcha/docs/v3), Google's
   documentation for the continuous score that this project's A/B measured,
   retrieved 2026-08-28.
-- [CreepJS](https://github.com/abrahamjuliot/creepjs), the consistency
+- A consistency checker, the consistency
   detector named above, read from its own source rather than from its
   rendered verdict, retrieved 2026-08-28.
 
 **See also:** [what the reCAPTCHA v3 score actually measures](recaptcha-v3-score.md),
 [how the user agent is derived rather than pinned](playwright-user-agent.md), and
-[why CreepJS treats a contradiction as a lie](creepjs-explained.md).
+[why a consistency checker treats a contradiction as a lie](consistency-checker-explained.md).
 
 ---
 

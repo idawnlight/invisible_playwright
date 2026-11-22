@@ -158,8 +158,8 @@ makes things worse.
 
 This engine is built so that a fresh session produces a full, self-consistent desktop
 fingerprint - GPU, audio, fonts, screen, hundreds of fields - that holds up against the
-public tampering and consistency suites (CreepJS, BotD, FingerprintJS, sannysoft,
-BrowserLeaks). When the fingerprint is already clean, a mid-scrape 403 is far more likely
+public tampering and consistency suites (a consistency checker, BotD, an open-source fingerprinting library, a basic bot-test page,
+a raw-value inspector). When the fingerprint is already clean, a mid-scrape 403 is far more likely
 to be *behavior or rate* than *fingerprint*. It is the velocity, the request pattern, or
 the exit address that got categorized, not the shape of the browser.
 

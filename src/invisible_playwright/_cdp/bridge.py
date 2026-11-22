@@ -342,6 +342,11 @@ class _PosixSpawnProcess:
             self._guardian_write_fd = -1
             gpid = self._guardian_pid
             self._guardian_pid = None
+        if gpid is not None:
+            try:
+                os.kill(gpid, signal.SIGKILL)
+            except OSError:
+                pass
         if wfd >= 0:
             try:
                 os.close(wfd)
@@ -357,11 +362,6 @@ class _PosixSpawnProcess:
                 except ChildProcessError:
                     break
                 if time.monotonic() >= deadline:
-                    try:
-                        os.kill(gpid, signal.SIGKILL)
-                        os.waitpid(gpid, 0)
-                    except OSError:
-                        pass
                     break
                 time.sleep(0.01)
 
@@ -512,7 +512,6 @@ class _RawPending:
                 for phrase in (
                     "Session with given id not found",
                     "Target closed",
-                    "Inspected target navigated or closed",
                 )
             ):
                 raise juggler_conn.TargetClosedError(f"{self.method}: {err_msg}")
@@ -833,8 +832,13 @@ class _PageSessionState:
     req_types: Dict[str, str] = field(default_factory=dict)
     sent_requests: set[str] = field(default_factory=set)
     unpaused_requests: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    deferred_paused: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     responded_requests: set[str] = field(default_factory=set)
     finished_requests: set[str] = field(default_factory=set)
+    completed_req_order: "collections.deque[str]" = field(
+        default_factory=collections.deque
+    )
+    had_extra_headers: set[str] = field(default_factory=set)
     # (session_id, utility_ctx_id) where __invpwLanding is already bootstrapped
     landing_ready: set[tuple[str, str]] = field(default_factory=set)
     # (session_id, int(utility_ctx_id)) internal contexts excluded from user console/pageerror
@@ -908,6 +912,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         self._download_ctx_by_guid: Dict[str, Optional[str]] = {}
         self._adopt_started = False
         self._closed = False
+        self._close_called = False
         self._version_product = ""
         self._user_agent = ""
         self._intrinsics_ev = f"__invpw_intr_{secrets.token_hex(16)}"
@@ -1485,8 +1490,30 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
 
     def _on_pipe_closed(self) -> None:
         self._closed = True
+        if self._process.poll() is not None and hasattr(self._process, "close_guardian"):
+            self._process.close_guardian()
         self._ev_queue.put(None)
         self.announce_closed()
+
+    def _note_request_completed(
+        self, state: _PageSessionState, req_id: Optional[str]
+    ) -> None:
+        if not req_id:
+            return
+        state.completed_req_order.append(req_id)
+        if len(state.completed_req_order) > 4096:
+            while len(state.completed_req_order) > 2048:
+                old_id = state.completed_req_order.popleft()
+                if old_id in state.paused_requests:
+                    continue
+                state.req_frames.pop(old_id, None)
+                state.req_types.pop(old_id, None)
+                state.req_sessions.pop(old_id, None)
+                state.unpaused_requests.pop(old_id, None)
+                state.deferred_paused.pop(old_id, None)
+                state.sent_requests.discard(old_id)
+                state.responded_requests.discard(old_id)
+                state.finished_requests.discard(old_id)
 
     def _record_bridge_error(self, context: str, exc: BaseException) -> None:
         formatted = f"{context}: {type(exc).__name__}: {exc}"
@@ -1503,6 +1530,20 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             kind = item[0]
             if kind == "barrier":
                 item[1].set()
+                continue
+            if kind == "flush_paused":
+                _, p_sid, net_id = item
+                with self._lock:
+                    st = self._pages.get(p_sid)
+                if st is not None:
+                    j_req = st.deferred_paused.pop(net_id, None)
+                    if j_req is not None and net_id not in st.sent_requests:
+                        if st.req_types.get(net_id):
+                            j_req["resourceType"] = st.req_types[net_id]
+                        if st.req_frames.get(net_id):
+                            j_req["frameId"] = st.req_frames[net_id][0]
+                        st.sent_requests.add(net_id)
+                        self.dispatch_event("Network.requestWillBeSent", j_req, p_sid)
                 continue
             _, session_id, method, params = item
             try:
@@ -1790,6 +1831,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     session=child_sid,
                 )
             if ctx.extra_headers:
+                state.had_extra_headers.add(child_sid)
                 self._raw.post(
                     "Network.setExtraHTTPHeaders",
                     {"headers": dict(ctx.extra_headers)},
@@ -2048,6 +2090,32 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 self._apply_ctx_to_session(state, ctx, child_sid, is_main=False)
             except juggler_conn.TargetClosedError:
                 pass
+        for w_sid in list(state.worker_sessions):
+            try:
+                if ctx.extra_headers or w_sid in state.had_extra_headers:
+                    if ctx.extra_headers:
+                        state.had_extra_headers.add(w_sid)
+                    else:
+                        state.had_extra_headers.discard(w_sid)
+                    self._raw.post(
+                        "Network.setExtraHTTPHeaders",
+                        {"headers": dict(ctx.extra_headers)},
+                        session=w_sid,
+                    )
+                if ctx.offline != state.applied_offline.get(w_sid, False):
+                    state.applied_offline[w_sid] = ctx.offline
+                    self._raw.post(
+                        "Network.emulateNetworkConditions",
+                        {
+                            "offline": bool(ctx.offline),
+                            "latency": 0,
+                            "downloadThroughput": -1,
+                            "uploadThroughput": -1,
+                        },
+                        session=w_sid,
+                    )
+            except juggler_conn.TargetClosedError:
+                pass
 
     def _apply_ctx_to_session(
         self,
@@ -2141,7 +2209,11 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     {"name": "forced-colors", "value": ctx.forced_colors}
                 )
             _emit("Emulation.setEmulatedMedia", {"features": features})
-        if ctx.extra_headers:
+        if ctx.extra_headers or sid in state.had_extra_headers:
+            if ctx.extra_headers:
+                state.had_extra_headers.add(sid)
+            else:
+                state.had_extra_headers.discard(sid)
             _emit("Network.setExtraHTTPHeaders", {"headers": dict(ctx.extra_headers)})
         if ctx.offline != state.applied_offline.get(sid, False):
             state.applied_offline[sid] = ctx.offline
@@ -2378,6 +2450,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         if method == "Target.detachedFromTarget":
             child_sid = params.get("sessionId")
             aborted_worker_reqs: List[tuple[str, str]] = []
+            flushed_paused: List[tuple[str, Dict[str, Any]]] = []
             if child_sid:
                 with self._lock:
                     st = self._pages.pop(child_sid, None)
@@ -2394,13 +2467,21 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                             was_worker = child_sid in parent_st.worker_sessions
                             parent_st.worker_sessions.discard(child_sid)
                             parent_st.worker_frames.pop(child_sid, None)
+                            parent_st.had_extra_headers.discard(child_sid)
+                            parent_st.applied_offline.pop(child_sid, None)
                             if was_worker:
+                                for d_id, d_req in list(parent_st.deferred_paused.items()):
+                                    if d_id not in parent_st.sent_requests:
+                                        parent_st.deferred_paused.pop(d_id, None)
+                                        parent_st.sent_requests.add(d_id)
+                                        flushed_paused.append((parent_st.session_id, d_req))
                                 for r_id in list(parent_st.sent_requests):
                                     if (
                                         r_id not in parent_st.finished_requests
                                         and parent_st.req_sessions.get(r_id) == child_sid
                                     ):
                                         parent_st.finished_requests.add(r_id)
+                                        self._note_request_completed(parent_st, r_id)
                                         aborted_worker_reqs.append(
                                             (parent_st.session_id, r_id)
                                         )
@@ -2432,6 +2513,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                             for fid, f_sid in list(parent_st.frame_sessions.items()):
                                 if f_sid == child_sid:
                                     parent_st.frame_sessions[fid] = parent_st.session_id
+                for p_sid, d_req in flushed_paused:
+                    self.dispatch_event("Network.requestWillBeSent", d_req, p_sid)
                 for p_sid, r_id in aborted_worker_reqs:
                     self.dispatch_event(
                         "Network.requestFailed",
@@ -3020,7 +3103,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 return
             state.paused_requests[net_id] = fetch_id
             state.paused_sessions[net_id] = raw_sid
-            state.req_sessions[net_id] = raw_sid
+            if raw_sid != page_sid or net_id not in state.req_sessions:
+                state.req_sessions[net_id] = raw_sid
             req_obj = params.get("request") or {}
             fid = (
                 params.get("frameId")
@@ -3033,7 +3117,6 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             if net_id:
                 state.unpaused_requests.pop(net_id, None)
                 state.req_frames[net_id] = (fid, is_nav)
-                state.sent_requests.add(net_id)
             nav_id = f"nav-{net_id}" if is_nav else None
             if is_nav and nav_id:
                 state.nav_loaders[fid] = nav_id
@@ -3065,6 +3148,24 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 **({"navigationId": nav_id} if nav_id else {}),
                 **({"postData": post_b64} if post_b64 is not None else {}),
             }
+            if (
+                net_id
+                and not params.get("frameId")
+                and net_id not in state.req_types
+                and state.worker_sessions
+            ):
+                state.deferred_paused[net_id] = j_req
+                t = threading.Timer(
+                    0.05,
+                    lambda p=page_sid, n=net_id: self._ev_queue.put(
+                        ("flush_paused", p, n)
+                    ),
+                )
+                t.daemon = True
+                t.start()
+                return
+            if net_id:
+                state.sent_requests.add(net_id)
             self.dispatch_event("Network.requestWillBeSent", j_req, page_sid)
             return
 
@@ -3084,6 +3185,14 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 state.req_frames[req_id] = (fid, is_nav)
                 if params.get("type"):
                     state.req_types[req_id] = str(params["type"])
+                deferred = state.deferred_paused.pop(req_id, None)
+                if deferred is not None:
+                    deferred["frameId"] = fid
+                    if params.get("type"):
+                        deferred["resourceType"] = str(params["type"])
+                    state.sent_requests.add(req_id)
+                    self.dispatch_event("Network.requestWillBeSent", deferred, page_sid)
+                    return
             req_obj = params.get("request") or {}
             nav_id = params.get("loaderId") if is_nav else None
             post_b64 = None
@@ -3176,6 +3285,11 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 if req_id in state.finished_requests:
                     return
                 state.finished_requests.add(req_id)
+                self._note_request_completed(state, req_id)
+                deferred = state.deferred_paused.pop(req_id, None)
+                if deferred is not None and req_id not in state.sent_requests:
+                    state.sent_requests.add(req_id)
+                    self.dispatch_event("Network.requestWillBeSent", deferred, page_sid)
                 unpaused = state.unpaused_requests.pop(req_id, None)
                 if unpaused is not None and req_id not in state.sent_requests:
                     state.sent_requests.add(req_id)
@@ -3202,6 +3316,11 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 if req_id in state.finished_requests:
                     return
                 state.finished_requests.add(req_id)
+                self._note_request_completed(state, req_id)
+                deferred = state.deferred_paused.pop(req_id, None)
+                if deferred is not None and req_id not in state.sent_requests:
+                    state.sent_requests.add(req_id)
+                    self.dispatch_event("Network.requestWillBeSent", deferred, page_sid)
                 unpaused = state.unpaused_requests.pop(req_id, None)
                 if unpaused is not None and req_id not in state.sent_requests:
                     state.sent_requests.add(req_id)
@@ -4101,6 +4220,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 if ctx_id.startswith("caller:"):
                     parts = ctx_id.split(":")
                     fid = parts[1] if len(parts) >= 2 else state.main_frame_id
+                    cur_caller = state.caller_contexts.get(fid)
+                    if cur_caller is not None and cur_caller != ctx_id:
+                        raise juggler_conn.ProtocolError("Execution context was destroyed!")
                     v8_pair = state.caller_v8_contexts.get(ctx_id)
                     v8_ctx_id = v8_pair[1] if v8_pair else None
                     frame_sid = (
@@ -4140,36 +4262,60 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                             )
                             if "SyntaxError" not in exc_desc:
                                 res = cand
+                            else:
+                                comp = self._raw.send(
+                                    "Runtime.compileScript",
+                                    {
+                                        "expression": f"(\n{expr}\n)",
+                                        "sourceURL": "",
+                                        "persistScript": False,
+                                        **(
+                                            {"executionContextId": v8_ctx_id}
+                                            if v8_ctx_id is not None
+                                            else {}
+                                        ),
+                                    },
+                                    session=eval_sid,
+                                    timeout=timeout,
+                                )
+                                if not comp.get("exceptionDetails"):
+                                    res = cand
                         except juggler_conn.ProtocolError as i_exc:
-                            if any(
+                            if "Cannot find object" in str(i_exc):
+                                state.caller_intrinsics.pop(ctx_id, None)
+                            elif any(
                                 m in str(i_exc)
                                 for m in (
-                                    "Cannot find object",
                                     "Cannot find context",
                                     "Execution context was destroyed",
+                                    "Inspected target navigated or closed",
                                 )
                             ):
                                 state.caller_intrinsics.pop(ctx_id, None)
+                                raise
                             else:
                                 raise
                     if res is None:
-                        if fid == state.main_frame_id or frame_sid != session_id:
+                        if v8_ctx_id is not None:
                             res = self._raw.send(
                                 "Runtime.evaluate",
                                 {
                                     "expression": expr,
+                                    "contextId": v8_ctx_id,
                                     "returnByValue": by_value,
                                     "awaitPromise": True,
                                 },
                                 session=eval_sid,
                                 timeout=timeout,
                             )
-                        elif v8_ctx_id is not None:
+                        elif (
+                            cur_caller is None
+                            and (fid == state.main_frame_id or frame_sid != session_id)
+                        ):
                             res = self._raw.send(
                                 "Runtime.evaluate",
                                 {
                                     "expression": expr,
-                                    "contextId": v8_ctx_id,
                                     "returnByValue": by_value,
                                     "awaitPromise": True,
                                 },
@@ -4214,6 +4360,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         "Cannot find context",
                         "Execution context was destroyed",
                         "Cannot find default execution context",
+                        "Inspected target navigated or closed",
                     )
                 ):
                     raise juggler_conn.ProtocolError(
@@ -4305,6 +4452,7 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         "Execution context was destroyed",
                         "Cannot find object with id",
                         "Argument should belong to the same JavaScript world",
+                        "Inspected target navigated or closed",
                     )
                 ):
                     raise juggler_conn.ProtocolError(
@@ -4663,15 +4811,18 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         raise juggler_conn.ProtocolError(f"Unsupported page command: {method}")
 
     def close(self) -> None:
-        if self._closed:
+        if self._close_called:
             return
+        self._close_called = True
+        already_closed = self._closed
         self._closed = True
         with self._ctx_cv:
             self._ctx_cv.notify_all()
-        try:
-            self._raw.send("Browser.close", timeout=2.5)
-        except Exception:
-            pass
+        if not already_closed:
+            try:
+                self._raw.send("Browser.close", timeout=2.5)
+            except Exception:
+                pass
         self._raw.close()
         self._ev_queue.put(None)
         if self._process.poll() is None:

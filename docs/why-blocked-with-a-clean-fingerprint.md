@@ -1,6 +1,6 @@
 ---
 title: "Why am I blocked with a clean fingerprint?"
-description: "You pass CreepJS, BotD and sannysoft and still get blocked. The fingerprint is only one of four independent layers - here is how to isolate which one is failing."
+description: "You pass a consistency checker, BotD and a basic bot-test page and still get blocked. The fingerprint is only one of four independent layers - here is how to isolate which one is failing."
 parent: "Testing and Troubleshooting"
 grand_parent: "Guides"
 nav_order: 8
@@ -10,7 +10,7 @@ nav_order: 8
 # Why am I blocked with a clean fingerprint?
 
 You checked the thing everyone tells you to check. The fingerprint reads as a real
-Firefox: CreepJS finds nothing contradictory, BotD returns human, sannysoft is all
+Firefox: a consistency checker finds nothing contradictory, BotD returns human, the basic bot-test page is all
 green, the TLS handshake matches the browser you claim to be. And the session still
 gets a challenge, a short body, or the wrong page.
 
@@ -113,7 +113,7 @@ layer doing the blocking has named itself. You have measured it instead of guess
 ## An honest measurement, and the honest caveat
 
 To show the shape of this concretely rather than as a slogan: on the public suites, a
-seeded session reads as a genuine desktop Firefox. CreepJS finds no lie in the
+seeded session reads as a genuine desktop Firefox. A consistency checker finds no lie in the
 descriptors, BotD returns a human verdict, and the reported GPU, audio and font set are
 internally consistent with a Windows machine and with each other. Those are real results
 and they are why most detection checks pass.
@@ -149,7 +149,7 @@ touching.
 
 ## Short answers to the questions that lead here
 
-**Why am I blocked when CreepJS and BotD both pass?** Because those suites only score the
+**Why am I blocked when a consistency checker and BotD both pass?** Because those suites only score the
 fingerprint and driver layer. IP reputation, request rate, and session history are scored
 separately and none of them care that your browser looks real.
 

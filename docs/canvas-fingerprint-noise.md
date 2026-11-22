@@ -220,7 +220,7 @@ fingerprinting probe.
 same per-call mistake has the same consequence and where our own noise turned out to be
 the thing being detected, [what sannysoft checks](sannysoft-explained.md), whose
 canvas-in-iframe rows are a consistency test rather than a fingerprint test, and
-[how BrowserLeaks reports the canvas and WebGL hash](browserleaks-canvas-webgl-hash.md).
+[how a raw-value inspector reports the canvas and WebGL hash](canvas-webgl-readback-hash-explained.md).
 
 ---
 

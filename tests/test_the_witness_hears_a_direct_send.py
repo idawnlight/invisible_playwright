@@ -69,3 +69,52 @@ def test_a_gateway_whose_tcp_leaves_from_its_exit_is_told_apart_from_a_client_th
             assert [h[0] for h in w.heard()["tcp"]] == ["127.0.0.2"], "the connection of the gateway did not leave from its exit"
         finally:
             gateway.close()
+
+
+# --- a source that is not an address of this host cannot be the browser --------------------------------------------------
+def test_a_source_that_is_not_an_address_of_this_host_is_foreign_and_a_host_one_is_not():
+    import _witness
+    known = {"10.0.140.51", "fe80::1"}
+    assert _witness.is_host_source("127.0.0.1", set()) and _witness.is_host_source("127.9.9.9", set()) and _witness.is_host_source("::1", set())
+    assert _witness.is_host_source("10.0.140.51", known) and _witness.is_host_source("fe80::1%eth0", known)
+    assert _witness.is_host_source("::ffff:10.0.140.51", known)                      # an IPv4 source seen through a dual-stack socket
+    assert not _witness.is_host_source("203.0.113.7", known)
+    assert not _witness.is_host_source("not an address", known)
+
+
+def test_the_addresses_of_this_host_hold_loopback_and_the_address_the_witness_is_bound_to():
+    import _witness
+    assert "127.0.0.1" in _witness.host_addresses()
+    with Witness("127.0.0.2") as w:
+        assert "127.0.0.2" in w._host and "127.0.0.1" in w._host
+
+
+def test_a_datagram_and_a_connection_from_a_foreign_source_are_kept_apart_and_not_answered(monkeypatch):
+    import _witness
+    monkeypatch.setattr(_witness, "is_host_source", lambda ip, known: False)         # every source is foreign: no network is needed
+    monkeypatch.setattr(_witness, "host_addresses", lambda: set())
+    with Witness("127.0.0.1") as w:
+        c = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        c.bind(("127.0.0.2", 0))
+        c.settimeout(0.5)
+        c.sendto(b"\x00\x01\x00\x00\x21\x12\xa4\x42" + b"\x07" * 12, ("127.0.0.1", w.port))
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("127.0.0.2", 0))
+        s.connect(("127.0.0.1", w.port))
+        s.close()
+        assert _until(lambda: len(w.heard_foreign()["udp"]) == 1 and len(w.heard_foreign()["tcp"]) == 1)
+        assert [h[0] for h in w.heard_foreign()["udp"]] == ["127.0.0.2"] and [h[0] for h in w.heard_foreign()["tcp"]] == ["127.0.0.2"]
+        assert w.heard() == {"udp": [], "tcp": []} and w.heard_from_other_than([]) == {"udp": [], "tcp": []}
+        with pytest.raises(socket.timeout):
+            c.recvfrom(2048)                                                         # a foreign source gets no STUN answer
+        c.close()
+
+
+def test_an_address_added_to_the_host_after_the_start_is_not_called_foreign(monkeypatch):
+    import _witness
+    appeared = set()
+    monkeypatch.setattr(_witness, "host_addresses", lambda: set(appeared))
+    with Witness("127.0.0.1") as w:
+        assert not w._is_host("203.0.113.7")
+        appeared.add("203.0.113.7")                                                  # the interface gets it later
+        assert w._is_host("203.0.113.7")

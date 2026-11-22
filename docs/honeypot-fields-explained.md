@@ -159,8 +159,8 @@ real the engine underneath it is.
 **See also:** [Beyond robots.txt: how sites actually block AI crawlers now](beyond-robots-txt-anti-crawler-mechanisms.md)
 for the wider stack this trap sits inside, [how DataDome's bot detection actually
 works](datadome-explained.md) for the behavioral-scoring layer that scores automation
-code the same way, and [what BrowserLeaks actually tests, surface by
-surface](browserleaks-explained.md) for the engine-level checks this page
+code the same way, and [what a raw-value inspector actually tests, surface by
+surface](raw-value-inspector-explained.md) for the engine-level checks this page
 deliberately contrasts against.
 
 ---

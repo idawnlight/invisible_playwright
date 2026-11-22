@@ -52,7 +52,7 @@ navigator.connection?.rtt       // undefined
 That last line is the one detectors actually run. `'connection' in navigator` is a
 one-token check that returns `false` on every real Firefox and `true` on every real
 Chromium. It costs nothing, cannot be argued with, and it is exactly the kind of
-member-existence probe that suites like CreepJS and BotD lean on to decide which engine
+member-existence probe that suites like a consistency checker and BotD lean on to decide which engine
 you *really* are, regardless of what the user-agent string says.
 
 So the failure mode is not "Firefox leaks connection data". Firefox has no connection

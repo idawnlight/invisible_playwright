@@ -71,7 +71,7 @@ If the identifier is a hash of canvas, WebGL, fonts, audio and TLS, then the onl
 to present a different identity is to change those underlying values so they hash
 differently, and to change them together so they still agree with one another. A canvas
 that says one machine next to a font list that says another is not a new identity, it
-is a contradiction, and [contradictions are what the tampering-focused suites look for](creepjs-explained.md).
+is a contradiction, and [contradictions are what the tampering-focused suites look for](consistency-checker-explained.md).
 
 That is a much harder thing to do than emptying a cookie jar, which is the reason a
 cookie clear can never do it. The cleared browser still renders canvas the same way and

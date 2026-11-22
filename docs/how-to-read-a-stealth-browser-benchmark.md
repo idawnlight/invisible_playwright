@@ -45,7 +45,7 @@ deciding and credited the browser for it.
 
 **Whether "pass" means the same thing across tools.** This corpus's own [testing
 methodology page](how-to-test-bot-detection.md) makes this point about testing your own
-browser: sannysoft, CreepJS, BotD, FingerprintJS and BrowserLeaks each answer a different
+browser: a basic bot-test page, a consistency checker, BotD, an open-source fingerprinting library and a raw-value inspector each answer a different
 question, and "we pass every suite" is five different claims wearing one sentence. A
 benchmark comparing two automation tools has the identical problem one level up. A "pass"
 against a sitekey test page, a "pass" meaning no block occurred on a live production
@@ -73,10 +73,10 @@ cousins, not three separate engineering efforts arriving at the same answer.
 ## What a trustworthy report actually looks like, with a real example
 
 A GitHub issue is not usually where you'd point someone for methodology, but
-[`daijro/camoufox#555`](https://github.com/daijro/camoufox/issues/555), already covered
+a public issue on a patched-Firefox project, already covered
 in more depth in [how Akamai Bot Manager actually works](akamai-bot-manager-explained.md),
 is a genuinely good example of what disclosure looks like in practice. The reporter named
-exact software versions (Camoufox v135.0.1-beta.24, Playwright 1.58.0), the platform
+exact software versions (the project's v135.0.1-beta.24 build, Playwright 1.58.0), the platform
 (Linux), confirmed both arms shared the same IP, named the specific fingerprint fields
 compared (JA3, JA4, Akamai's own HTTP/2 signature, all matched), and reported one
 concrete, checkable inconsistency (a viewport reported as 1280x720 to the automation
@@ -114,14 +114,13 @@ need a formal badge, but the checklist behind it transfers directly:
 - **A reproducible setup**, ideally a script or a repository someone else can run,
   which is the practical form the ACM's "artifacts available" badge takes outside
   academia.
-- **The negative results included**, not just the wins. The Camoufox issue above is more
+- **The negative results included**, not just the wins. The issue above is more
   credible, not less, for reporting that most tested sites showed no difference at all.
 
 ## Reading this corpus's own comparisons with the same checklist
 
-[This project's comparison pages](comparisons.md) try to apply some of this: [the
-Camoufox comparison](vs-camoufox.md) has a section titled "Where I could not verify a
-difference" that states plainly which claims about the other project's internals could
+[This project's comparison pages](comparisons.md) try to apply some of this: the
+comparison pages state plainly which claims about another project's internals could
 not be checked against their own source, rather than filling the gap with an assumption
 in this project's favor. That is a real attempt at the discipline above, and it is still
 written by the maintainer of one of the two tools being compared. Read it, and every other
@@ -174,21 +173,19 @@ is not more trustworthy than a disclosed small one; it's just a bigger unverifia
 **See also:** [How to test bot detection without a false pass](how-to-test-bot-detection.md),
 for the companion question of testing your own browser rather than reading someone else's
 published comparison; [the comparisons hub](comparisons.md), for this project's own
-attempts, imperfect as any author's, to apply this standard to itself; and
-[invisible_playwright vs Camoufox: two patched Firefoxes](vs-camoufox.md), for the
-specific comparison that names what it could and could not verify.
+attempts, imperfect as any author's, to apply this standard to itself.
 
 ## Sources
 
 - ACM, [Artifact Review and Badging](https://www.acm.org/publications/policies/artifact-review-and-badging-current),
   retrieved 2026-08-30, for the reproducibility/replicability distinction and the
   disclosed-artifact badging framework the checklist above is adapted from.
-- GitHub, [`daijro/camoufox` issue #555](https://github.com/daijro/camoufox/issues/555),
+- GitHub, a public issue on a patched-Firefox project,
   retrieved 2026-08-30, for the disclosed-methodology example: named versions, matched
   IP and network fingerprints, a specific reported inconsistency, and included negative
   results across other tested sites.
 - This project's own [how to test bot detection without a false pass](how-to-test-bot-detection.md)
-  and [invisible_playwright vs Camoufox](vs-camoufox.md) pages, for the internal
+  page, for the internal
   precedent this page holds itself to, including where each already discloses a limit
   on what it could verify.
 

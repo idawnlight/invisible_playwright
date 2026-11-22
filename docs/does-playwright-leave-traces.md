@@ -229,7 +229,7 @@ above, then compare the result against a stock browser on the same machine.
 
 - This project's own sessions, enumerating `window` and `document` on a live
   Playwright-driven Firefox rather than trusting a description of one.
-- The public detection suites (CreepJS, BotD, sannysoft, FingerprintJS, BrowserLeaks),
+- The public detection suites (a consistency checker, BotD, a basic bot-test page, an open-source fingerprinting library, a raw-value inspector),
   each read from its own source for what it collects from the document.
 - The Playwright, [WebDriver BiDi](https://www.w3.org/TR/webdriver-bidi/), and Juggler
   protocol behaviour for where driver state lives relative to the page.

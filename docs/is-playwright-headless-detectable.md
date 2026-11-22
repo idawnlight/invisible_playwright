@@ -63,7 +63,7 @@ agent does nothing for the renderer; a viewport override does nothing for the fo
 new detector reads a field you have not thought about yet. You are always one signal
 behind. Second, and worse, a patched value has to agree with every value you did not patch.
 Spoof a high-end GPU string while the pixels are still drawn in software and you have
-turned one tell into a contradiction, which [CreepJS](creepjs-explained.md) is built to
+turned one tell into a contradiction, which [a consistency checker](consistency-checker-explained.md) is built to
 catch. Overcorrecting is how a fix becomes a new fingerprint.
 
 The reliable move is to stop treating "headless" as a list of holes to plug and start
@@ -196,7 +196,7 @@ it twice and disagree.
 ## Sources
 
 - The classic headless signals as described on the public detector suites named in this set
-  (sannysoft, [CreepJS](creepjs-explained.md)), read from their own source rather than
+  (a basic bot-test page, [a consistency checker](consistency-checker-explained.md)), read from their own source rather than
   their rendered verdict.
 - This project's release gates, which run `headless=True` against those suites and compare
   the fingerprint field by field against the headful run.

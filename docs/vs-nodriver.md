@@ -67,7 +67,7 @@ undetected-chromedriver's documentation states plainly that the package does not
 IP address. Nothing in either project's
 documentation claims to change the GPU string Chrome reports, the fonts it enumerates, the
 canvas output, or the audio pipeline. That is a different layer of the problem, the one
-[Camoufox and this project work at instead](vs-camoufox.md), and pairing a CDP-native
+the engine-level builds, this project included, work at instead, and pairing a CDP-native
 driver with separate fingerprint work is the normal pattern for people using either of
 these two.
 
@@ -140,9 +140,7 @@ and IP handling as a separate problem for either tool.
 **See also:** [three ways to make Playwright undetected](playwright-stealth-levels.md),
 for where a CDP-native tool sits relative to a driver patch or an engine patch;
 [the ChromeDriver `cdc_` variable, explained](cdc-variable-explained.md), for the exact
-tell undetected-chromedriver was built to remove; and
-[invisible_playwright vs Camoufox](vs-camoufox.md), for the comparison at the fingerprint
-layer neither of these tools works at.
+tell undetected-chromedriver was built to remove.
 
 ---
 

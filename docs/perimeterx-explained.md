@@ -107,7 +107,7 @@ uses, plus a behavioral layer most of them skip:
   over many of them.
 
 None of this is exotic. It is the same fingerprint surface [BotD](botd-explained.md)
-and [CreepJS](creepjs-explained.md) read, applied by a vendor with a server-side
+and [a consistency checker](consistency-checker-explained.md) read, applied by a vendor with a server-side
 risk model behind it instead of a public score.
 
 ## The press-and-hold challenge
@@ -135,8 +135,8 @@ of a spoofed return value, `navigator.webdriver` is whatever the engine actually
 reports, built-in functions really do say `[native code]` because nothing
 patched them from JavaScript, and the TLS/HTTP2 stack is a real Firefox network
 stack rather than an imitation of one. That is the same "do not lie in
-JavaScript" property covered at length on [how CreepJS decides you are
-lying](creepjs-explained.md), and it is why passing this class of check is mostly
+JavaScript" property covered at length on [how a consistency checker decides you are
+lying](consistency-checker-explained.md), and it is why passing this class of check is mostly
 a question of being the real thing rather than performing it.
 
 Three things sit entirely outside what any browser engine can reach, and no
@@ -210,7 +210,7 @@ product, which this page does not do.
   PerimeterX's technology was folded into HUMAN rather than kept as a separate
   brand.
 
-**See also:** [how CreepJS decides you are lying](creepjs-explained.md) for the
+**See also:** [how a consistency checker decides you are lying](consistency-checker-explained.md) for the
 same "do not lie in JavaScript" property applied to a public tool,
 [mouse-dynamics behavioural biometrics](mouse-dynamics-behavioural-biometrics.md)
 for the input-telemetry layer in depth, and [ASN and IP reputation in bot

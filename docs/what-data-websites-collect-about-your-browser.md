@@ -102,7 +102,7 @@ the two disguises contradict each other. A tool that patches `navigator` but
 leaves the real WebGL renderer, or spoofs the renderer string while the pixels
 are still drawn by a software rasteriser, produces a mismatch that neither the
 original nor the patch produced alone. The auditing suite
-[CreepJS records exactly this kind of internal contradiction](creepjs-explained.md),
+[a consistency checker records exactly this kind of internal contradiction](consistency-checker-explained.md),
 and it records a blocked probe as a lie by name.
 
 ## How invisible_playwright normalises the browser surface
@@ -233,7 +233,7 @@ separate requirement you supply yourself.
 - [RFC 8446](https://datatracker.ietf.org/doc/html/rfc8446), the TLS 1.3 handshake, and
   [RFC 9113 section 6.5.2](https://datatracker.ietf.org/doc/html/rfc9113#section-6.5.2), the
   HTTP/2 settings frame, retrieved 2026-08-28.
-- [CreepJS](https://github.com/abrahamjuliot/creepjs), the auditing suite named above,
+- A consistency checker, the auditing suite named above,
   retrieved 2026-08-28.
 
 **See also:** [how to test whether your browser is detected](how-to-test-bot-detection.md)

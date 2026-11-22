@@ -82,7 +82,7 @@ visitors. It saw one visitor open eight tabs.
 
 A separate identity is a separate machine, and a separate machine here is a separate
 launch. Each `InvisiblePlaywright` launch derives its full fingerprint from its seed and
-resolves its timezone, locale and WebRTC exit address from its own proxy, once, at launch.
+resolves its timezone and locale from its own proxy, once, at launch, and sends WebRTC's UDP through that proxy or nowhere.
 So the unit of parallelism is not the context, it is the browser:
 
 ```python

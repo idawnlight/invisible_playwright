@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler
 import pytest
 
 from _servers import LocalServer
+from _waits import awatch
 
 pytestmark = pytest.mark.e2e
 
@@ -119,6 +120,10 @@ def site():
     thread.join()
 
 
+async def _pump():
+    await asyncio.sleep(0.05)
+
+
 def _run(firefox_binary, scenario):
     from invisible_playwright.async_api import InvisiblePlaywright
 
@@ -145,7 +150,11 @@ def test_a_goto_to_the_address_the_page_is_at_ends_every_time(firefox_binary, si
             response = await page.goto(url, timeout=30000)
             took = time.monotonic() - began
             title = await page.title()
-            seen.append((i, response.status if response else None, page.url, title, len(page.frames), round(took, 2)))
+            # The frames are counted once they have all been announced, within the goto's own 30 s: with Fission the innermost frame of a-b-a lives
+            # in a third process, and its announcement may reach the client after the top document's load (measured: 2 of 3 after 0.22 s, run
+            # 44888497316). A frame that never comes is still red below.
+            frames_seen = await awatch(lambda: len(page.frames), lambda n: n >= frames, 30, _pump)
+            seen.append((i, response.status if response else None, page.url, title, frames_seen.history[-1][1], round(took, 2)))
         return seen
 
     seen = _run(firefox_binary, scenario)

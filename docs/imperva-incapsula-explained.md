@@ -40,7 +40,7 @@ Two things are worth being direct about. First, none of the specific field value
 
 ## What an engine answers honestly, and what does not touch a browser at all
 
-The sensor's rendering and environment-consistency checks, canvas output, WebGL parameters, AudioContext behavior, navigator fields, are the same category [covered at length for CreepJS](creepjs-explained.md) and [PerimeterX](perimeterx-explained.md): a genuinely real browser engine, patched below the JavaScript layer rather than scripted from a content script, produces these values as an honest side effect of actually being that engine. There is no override to catch, because nothing overrode anything.
+The sensor's rendering and environment-consistency checks, canvas output, WebGL parameters, AudioContext behavior, navigator fields, are the same category [covered at length for a consistency checker](consistency-checker-explained.md) and another bot-detection service: a genuinely real browser engine, patched below the JavaScript layer rather than scripted from a content script, produces these values as an honest side effect of actually being that engine. There is no override to catch, because nothing overrode anything.
 
 That says nothing about the network-layer fingerprint, which depends on the TLS stack and the exit connection, not the rendering engine; nothing about Imperva's threat-intelligence feeds, which score reputation this project has no visibility into and no way to influence; and nothing about the CAPTCHA tier itself, which is a human-verification gate, not a fingerprint check, the same structural point made about [Cloudflare Turnstile's checkbox](cloudflare-turnstile-explained.md).
 

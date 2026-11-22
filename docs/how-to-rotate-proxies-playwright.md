@@ -11,8 +11,8 @@ nav_order: 4
 
 To rotate proxies in Playwright, assign one proxy per browser session and keep it for
 the life of that session, authenticate it on the path that carries its scheme, resolve
-DNS through it, and derive the timezone, locale and WebRTC address from that session's
-own exit IP so none of them contradicts the new address. Rotating the exit IP is the
+DNS through it, and derive the timezone and locale from that session's own exit IP, with
+WebRTC following the same proxy, so none of them contradicts the new address. Rotating the exit IP is the
 easy half; making everything that must agree with the new IP actually agree with it is
 the half that decides whether a rotated session gets flagged.
 
@@ -180,7 +180,7 @@ from the actual egress IP of that session's proxy, at launch, every time you rot
 # default: each session's timezone follows its own proxy's exit, automatically
 for proxy in proxies:
     with InvisiblePlaywright(proxy=proxy) as browser:
-        ...   # this session's timezone, locale and WebRTC address all match this proxy
+        ...   # this session's timezone and locale match this proxy, and WebRTC follows it
 ```
 
 Pin an explicit IANA zone only when you already know the proxy's country with more
@@ -192,20 +192,25 @@ with InvisiblePlaywright(proxy=proxy, timezone="America/New_York") as browser:
     ...
 ```
 
-The same lookup that resolves the timezone also feeds the locale and the WebRTC public
-address in this project, so the three cannot drift apart the way they do when a
-rotation script sets the proxy in one place and the timezone in another, if it sets it
-at all.
+The same lookup that resolves the timezone also feeds the locale in this project, so the
+two cannot drift apart the way they do when a rotation script sets the proxy in one place
+and the timezone in another, if it sets it at all. WebRTC needs no such value: no address
+is declared for it, and its candidates come from real STUN replies.
 
 WebRTC is the other half of this and it fails in both directions.
-[A SOCKS5 proxy carries TCP; STUN wants UDP](webrtc-leak-proxy.md), so on a browser that
-does not handle this deliberately, the WebRTC candidate can name your real address
+[A stock browser does not send WebRTC's UDP through the proxy](webrtc-leak-proxy.md),
+even when the proxy could carry it, so the WebRTC candidate can name your real address
 right next to the proxied one in the same session, which is a direct contradiction
 rather than a subtle one. The instinctive fix, disabling WebRTC outright, trades that
 for a worse tell: a session with zero ICE candidates is a browser announcing that
 something intercepted it, which is its own signal and arguably a stronger one. The
 goal when rotating proxies is not to make WebRTC silent, it is to make it agree with
-the rest of the session, exit address included.
+the rest of the session. Each launch measures its proxy: behind a SOCKS5 proxy whose UDP
+relay works and exits from the same address as its TCP, STUN goes through the relay and
+that session's server-reflexive candidate is its exit; behind any other proxy no datagram
+leaves the machine and there is no server-reflexive candidate. A context with its own
+SOCKS5 proxy gets its own. See
+[SOCKS5 vs HTTP proxy](socks5-vs-http-proxy-browser.md) for how the decision is made.
 
 ## Conclusion
 
@@ -213,10 +218,10 @@ Rotate at the level of a visitor, one browser launch and one proxy per session, 
 request, unless the calls are genuinely stateless. Get SOCKS5 authentication onto the
 path that actually carries it rather than the Playwright field that silently drops it,
 and route DNS through the proxy rather than around it. None of that is the part that
-gets a rotation script flagged. The part that does is leaving the timezone, locale and
-WebRTC address behind when the IP moves: derive them from each session's own exit
-instead of configuring them once, and a rotated session tells one consistent story
-instead of several contradicting ones.
+gets a rotation script flagged. The part that does is leaving the timezone and locale
+behind when the IP moves, and a WebRTC that does not follow the proxy: derive the first two
+from each session's own exit instead of configuring them once, and a rotated session
+tells one consistent story instead of several contradicting ones.
 
 ## Short answers to the questions that lead here
 
@@ -257,8 +262,9 @@ for where proxy rotation sits among the other layers a block can come from.
 - [Playwright timezone does not match the proxy IP](timezone-proxy-mismatch.md) and
   [WebRTC leak with a proxy](webrtc-leak-proxy.md), both grounding the exit-consistency
   section above.
-- This project's own default of resolving timezone, locale and WebRTC exit address from
-  one lookup per launch, so a rotated session cannot have them disagree.
+- This project's own default of resolving timezone and locale from one lookup per launch,
+  and of measuring the proxy's UDP before launch, so a rotated session cannot have them
+  disagree.
 
 ---
 

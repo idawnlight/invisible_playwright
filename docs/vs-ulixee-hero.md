@@ -56,7 +56,7 @@ a detector can look for.
 ## The injected seam a consistency check looks for
 
 Modern detection stopped reading values a while ago and started asking whether a value was
-tampered with. This is exactly what [CreepJS is built to do](creepjs-explained.md): it
+tampered with. This is exactly what [a consistency checker is built to do](consistency-checker-explained.md): it
 takes a clean copy of the built-ins from a fresh iframe, walks descriptors and prototypes,
 inspects stack traces, and checks whether a function that should be native still looks
 native. It is not asking "is this GPU unusual," it is asking "was this getter replaced."
@@ -174,7 +174,7 @@ patched Firefox, so there is no runtime override to detect.
 
 **Does replaying a captured value get detected?** Not for being wrong - the value can be
 accurate. It can be caught by the override used to apply it, which is exactly what a
-consistency check like CreepJS inspects for.
+consistency check of the kind a consistency checker inspects for.
 
 **Does invisible_playwright use Chromium?** No, it is Firefox patched at the C++ level. If
 your target specifically needs the Chromium engine, that is a reason to look elsewhere.
@@ -190,7 +190,7 @@ already-blocked exit sinks a perfect browser, and that is a separate problem.
 - Ulixee Hero's own GitHub README, for "The powerful Chrome engine sits under the hood,"
   its captured "Browser Profile Data," and the Unblocked and DoubleAgent datasets it draws
   that data from. Star count read from the repository at the time of writing.
-- This project's own [CreepJS notes](creepjs-explained.md) for what a tamper check inspects
+- This project's own [notes on how a consistency checker works](consistency-checker-explained.md) for what a tamper check inspects
   and why an override is the artifact it hunts, rather than the value.
 - This project's [Quickstart](quickstart.md) and [Configuration](configuration.md) for the
   real API used in the examples above.

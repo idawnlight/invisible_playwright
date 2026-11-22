@@ -147,7 +147,7 @@ given block.
   timing.** Those you supply: a clean proxy, human pacing, sane request volume. A stable
   fingerprint does nothing about a hundred requests a minute from one exit.
 - **Consistency still needs the exit to agree with the device.** The seed fixes the
-  browser's timezone, but a CreepJS-style consistency check compares that timezone
+  browser's timezone, but a consistency-checker-style consistency check compares that timezone
   against your exit IP. If the proxy egresses on another continent, the two disagree and
   you are flagged for a mismatch, seed or no seed. Let the timezone follow the egress IP,
   or set it to match, as covered in [configuration](configuration.md) and in the

@@ -123,7 +123,7 @@ invisible_playwright is built to **look like a real browser driven by a real per
 That is why it passes most detection checks: the fingerprint surface (GPU, audio, fonts,
 canvas, screen - roughly 400 fields), the TLS handshake and the driver layer all read as
 a genuine Firefox rather than an automated one. `navigator.webdriver` is absent, not set
-to `false`. Against the public suites - [CreepJS](creepjs-explained.md), BotD,
+to `false`. Against the public suites - [a consistency checker](consistency-checker-explained.md), BotD,
 FingerprintJS, sannysoft - that is what moves a score.
 
 What the swap does **not** touch:

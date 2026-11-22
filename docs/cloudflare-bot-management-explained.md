@@ -92,7 +92,7 @@ for custom WAF rules.
 A matching TLS fingerprint is one input clearing, not a passed score. The same point is
 made at length for a comparable vendor, where a byte-identical JA3/JA4/HTTP2 fingerprint
 still did not stop a block on one deployment: see
-[the documented Camoufox case](akamai-bot-manager-explained.md#the-case-that-shows-matching-fingerprint-is-not-passing).
+[the documented patched-Firefox case](akamai-bot-manager-explained.md#the-case-that-shows-matching-fingerprint-is-not-passing).
 Cloudflare's own ML engine is described the same way, as combining "headers, session
 characteristics, and browser signals," never any one of those alone.
 
@@ -199,7 +199,7 @@ pipeline and a documented case where a matching network fingerprint was not enou
 and JA4: why a TLS fingerprint cannot be patched](ja3-ja4-tls-fingerprint.md) and [HTTP/2
 fingerprint: the layer above the TLS handshake](http2-fingerprint-detection.md) for the
 network-layer inputs above; and [Browser trust scores explained](browser-trust-score-explained.md)
-for why a Cloudflare bot score, a CreepJS trust score and a reCAPTCHA v3 score do not imply
+for why a Cloudflare bot score, a consistency-checker trust score and a reCAPTCHA v3 score do not imply
 each other.
 
 ## Sources

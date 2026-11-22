@@ -61,7 +61,7 @@ lying around, and they exist whether or not the driver flag above was ever touch
 JavaScript stealth plugins reach into built-ins to hide the first signal, and in doing so
 they create the second: a redefined function whose `toString()` stops returning
 `[native code]`, a property descriptor that a real engine never has, a global that only a
-particular tooling stack defines. A tampering-oriented suite such as CreepJS does not ask
+particular tooling stack defines. A tampering-oriented suite such as a consistency checker does not ask
 what you report, it asks whether anything you report contradicts anything else, and a
 built-in that has been rewritten is exactly that kind of contradiction. This is
 [the native-code check](tostring-native-code-detection.md), and it is the reason stacking
@@ -190,7 +190,7 @@ rather than reading the score.
   `navigator.webdriver` property and the automation flag behind it.
 - This project's real API surface, `InvisiblePlaywright(seed=...)` and the returned
   Playwright `Browser`, as documented in the quickstart and configuration pages.
-- The public detection suites CreepJS, BotD, FingerprintJS, sannysoft and BrowserLeaks,
+- The public detection suites (a consistency checker, BotD, an open-source fingerprinting library, a basic bot-test page and a raw-value inspector),
   each of which reads one or more of the three signal families described above.
 - This project's release gates, which assert the presence of a real-browser signal rather
   than the absence of a wrong one, and separate browser tells from IP and behaviour.

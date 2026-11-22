@@ -169,8 +169,8 @@ actually has, which is the gap [the container detection
 page](playwright-docker-detection.md) describes as the one thing a stock
 setup cannot fix without help.
 
-A fingerprinting test page such as [CreepJS](creepjs-explained.md) or
-[BrowserLeaks](browserleaks-explained.md) will show the same thing from
+A fingerprinting test page such as [a consistency checker](consistency-checker-explained.md) or
+[a raw-value inspector](raw-value-inspector-explained.md) will show the same thing from
 the outside: the same seed renders the same panel whether the browser
 sits on your laptop or inside this container, because the font set
 travels with the engine rather than being read off the box it happens to
@@ -243,8 +243,7 @@ is a rendering-quality question, not a detection one.
   base image and its version tags, retrieved 2026-08-28.
 - Docker Engine reference, [`docker run`](https://docs.docker.com/engine/containers/run/),
   for the 64 MB default size of `/dev/shm` and the `--shm-size` flag, retrieved 2026-08-28.
-- [CreepJS](https://github.com/abrahamjuliot/creepjs) and
-  [BrowserLeaks](https://browserleaks.com/), the fingerprinting test pages named above,
+- Public consistency-checker and raw-value-inspector pages, the fingerprinting test pages named above,
   retrieved 2026-08-28.
 
 **See also:** [How to scrape without getting

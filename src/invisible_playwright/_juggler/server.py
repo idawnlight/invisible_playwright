@@ -1275,9 +1275,12 @@ class FrameDispatcher(Dispatcher):
                     frame_id, selector, what, *args, strict=strict,
                     timeout=deadline.left())
             except juggler.ReplyTimeout as exc:
-                # The caller's time ran out while a probe was in flight: that
-                # is this read's timeout, not the probe's.
-                if deadline.passed():
+                # The probe's bound is what was left of the caller's time, so
+                # its running out IS the caller's time running out: this
+                # read's timeout, not the probe's. Not asked of the clock
+                # again: on Windows a wait can end before it says so. With no
+                # limit the probe had no bound, and this is something else.
+                if deadline.seconds is not None:
                     raise expired() from exc
                 raise
             if found:
@@ -6304,7 +6307,11 @@ class BrowserTypeDispatcher(Dispatcher):
         # profile sees them; without it, the language alone decides.
         keyboard_layout = prefs.pop(KEYBOARD_LAYOUT_PREF, None) or profiles_pref(
             prefs.get("intl.accept_languages") or "")
-        write_user_js(profile, prefs)
+        # The security state is placed in the profile by this one call, FOR THE ENGINE THIS LAUNCH RUNS: a generation is tied to its
+        # build id, so the core is told which binary it is (`engine=`). `engine_argv` is NOT passed: the line this launch runs is
+        # headed or headless, with `-juggler-pipe` and the caller's `args`, none of which a generation may use (it is its own
+        # headless run on a work profile); the core's default line for the engine is the right one.
+        write_user_js(profile, prefs, engine=executable)
         # ⛔ THE CALLER'S TIMEOUT, not ours. `launch(timeout=)` is a
         # documented option and this server ignored it, so a caller who
         # shortened it waited the full built-in 60 s anyway - and one who

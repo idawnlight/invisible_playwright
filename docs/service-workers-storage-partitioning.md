@@ -15,7 +15,7 @@ write-ups that rank for this topic.
 The first is that a service worker is **state that outlives the thing you used to clear
 state**. Clearing cookies does not unregister it. The second is that turning them off,
 which several automation stacks do by default, removes a capability every real browser
-has, and [suppression is its own signal](creepjs-explained.md).
+has, and [suppression is its own signal](consistency-checker-explained.md).
 
 This page is what partitioning changed, why a registered worker is stickier than a
 cookie, what blocking costs, what a browser context does and does not separate, and how

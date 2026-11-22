@@ -65,7 +65,7 @@ Nothing about Enterprise's extra machinery changes what a browser engine can hon
 
 **Does a real browser engine answer Enterprise's assessment any differently than v3's?** No. Both sit on the same underlying score, and the reasoning that already applies to v3, engine realness clears fingerprint-level suspicion, not history-based suspicion, applies to Enterprise's score component unchanged. Account Defender is outside what any browser engine can address at all.
 
-**See also:** [reCAPTCHA v3 score: why a fresh browser scores badly](recaptcha-v3-score.md) for the underlying scoring mechanism this page builds on, and [browser trust scores explained](browser-trust-score-explained.md) for how a reCAPTCHA-style score differs from a CreepJS-style consistency check.
+**See also:** [reCAPTCHA v3 score: why a fresh browser scores badly](recaptcha-v3-score.md) for the underlying scoring mechanism this page builds on, and [browser trust scores explained](browser-trust-score-explained.md) for how a reCAPTCHA-style score differs from a consistency-checker-style consistency check.
 
 ## Sources
 

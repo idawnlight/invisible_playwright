@@ -191,50 +191,54 @@ def test_a_goto_stopped_on_its_way_raises_or_lands_and_never_lies(firefox_binary
     cross = "http://localhost:%d" % server
     answer, end = EXPECT[kind]
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary, headless=True) as browser:
-        page = browser.new_page()
         for site, target_base in (("same", same), ("cross", cross)):
             for i in range(2):
-                page.goto(same + "/start?k=%s&i=%d" % (kind, i))
-                page.goto(same + "/old?k=%s&i=%d" % (kind, i), wait_until="load")
-                target = target_base + "/new?k=%s&i=%d" % (kind, i)
-                gate = None
-                if answer == "stopped":
-                    # The server keeps the goto's page until this call has
-                    # returned: it can only return by being stopped (or by its
-                    # own timeout, which is not the abort asserted below).
-                    gate = GATES["k=%s&i=%d" % (kind, i)] = threading.Event()
-                began = time.monotonic()
-                error = None
+                # A page per iteration: a refresh queued by an earlier iteration (replayed late on its landed page) cannot reach this setup goto.
+                page = browser.new_page()
                 try:
-                    page.goto(target, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
-                except Error as e:
-                    error = e.message
-                finally:
-                    if gate is not None:
-                        gate.set()
-                took = time.monotonic() - began
-                where = (kind, site, i, error, took)
-                if answer == "stopped":
-                    assert error is not None, where
-                    assert ("NS_BINDING_ABORTED" in error
-                            or (kind == "back"
-                                and "is interrupted by another navigation" in error)), where
-                    expected = same + end
-                    if end in ("/old", "/start"):
-                        expected = same + "%s?k=%s&i=%d" % (end, kind, i)
-                    page.wait_for_url(expected, timeout=GOTO_TIMEOUT_MS)
-                else:
-                    assert error is None, where
-                    # It waited for its page, which the server held.
-                    assert took >= HELD_S - 0.1, where
-                    left = same + "/old?k=%s&i=%d" % (kind, i)
-                    if answer == "landed-or-refreshed":
-                        assert page.url in (target, same + end), (where, page.url)
+                    page.goto(same + "/start?k=%s&i=%d" % (kind, i))
+                    page.goto(same + "/old?k=%s&i=%d" % (kind, i), wait_until="load")
+                    target = target_base + "/new?k=%s&i=%d" % (kind, i)
+                    gate = None
+                    if answer == "stopped":
+                        # The server keeps the goto's page until this call has
+                        # returned: it can only return by being stopped (or by its
+                        # own timeout, which is not the abort asserted below).
+                        gate = GATES["k=%s&i=%d" % (kind, i)] = threading.Event()
+                    began = time.monotonic()
+                    error = None
+                    try:
+                        page.goto(target, wait_until="domcontentloaded", timeout=GOTO_TIMEOUT_MS)
+                    except Error as e:
+                        error = e.message
+                    finally:
+                        if gate is not None:
+                            gate.set()
+                    took = time.monotonic() - began
+                    where = (kind, site, i, error, took)
+                    if answer == "stopped":
+                        assert error is not None, where
+                        assert ("NS_BINDING_ABORTED" in error
+                                or (kind == "back"
+                                    and "is interrupted by another navigation" in error)), where
+                        expected = same + end
+                        if end in ("/old", "/start"):
+                            expected = same + "%s?k=%s&i=%d" % (end, kind, i)
+                        page.wait_for_url(expected, timeout=GOTO_TIMEOUT_MS)
                     else:
-                        assert page.url == target, (where, page.url)
-                    # Whatever the page did next, the goto never answers on the
-                    # document it was leaving: that is the lie [B302] was about.
-                    assert page.url != left, (where, page.url)
+                        assert error is None, where
+                        # It waited for its page, which the server held.
+                        assert took >= HELD_S - 0.1, where
+                        left = same + "/old?k=%s&i=%d" % (kind, i)
+                        if answer == "landed-or-refreshed":
+                            assert page.url in (target, same + end), (where, page.url)
+                        else:
+                            assert page.url == target, (where, page.url)
+                        # Whatever the page did next, the goto never answers on the
+                        # document it was leaving: that is the lie [B302] was about.
+                        assert page.url != left, (where, page.url)
+                finally:
+                    page.close()
 
 
 @pytest.mark.wall_clock

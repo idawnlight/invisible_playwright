@@ -209,7 +209,7 @@ should also tell you what the demonstration does not cover.
 
 Social platforms run the strictest detection of anywhere on the web. A seed-reproducible,
 C++-level fingerprint driven by stock Playwright removes the automated-browser tell: the
-engine answers CreepJS, BotD and the rest as an ordinary Firefox on ordinary hardware, and
+engine answers a consistency checker, BotD and the rest as an ordinary Firefox on ordinary hardware, and
 because the machine is derived from a seed it is internally consistent rather than a set of
 plausible values that disagree with each other. That is what keeps a session from being
 flagged the moment it starts scrolling a stranger's profile.

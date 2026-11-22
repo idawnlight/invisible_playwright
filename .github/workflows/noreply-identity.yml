@@ -1,0 +1,12 @@
+name: noreply-identity
+# Pushes the gate does not see: branches other than main and tags. Pull requests and
+# main go through the gate of tests.yml.
+on:
+  push:
+    branches-ignore: [main]
+    tags: ["**"]
+permissions:
+  contents: read
+jobs:
+  noreply-identity:
+    uses: idawnlight/invisible_core/.github/workflows/noreply-identity.yml@main

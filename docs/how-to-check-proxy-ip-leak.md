@@ -25,12 +25,11 @@ browser has it. Below is what to assert, where to run it, and runnable code.
 The usual WebRTC leak check asks two questions. Does a candidate contain my LAN IP? Does
 an IPv6 address appear? If both answers are no, it prints "no leak" and stops.
 
-We shipped exactly that gate, and it cost us. It asserted the sensible negatives, the
-host candidate does not expose the LAN address and zero IPv6 candidates appear, and it
-passed run after run. Then someone opened the actual page behind a proxy and WebRTC was
-returning nothing at all. Gathering was blocked, no candidates of any kind, and the gate
-was green because a dead feature leaks nothing. Every negative assertion is satisfied by
-a surface that never runs.
+A check that only asserts the absence of the real address also passes on a browser that
+gathers nothing. The sensible negatives, the host candidate does not expose the LAN
+address and zero IPv6 candidates appear, are all satisfied by a WebRTC that returns no
+candidates of any kind, because a dead feature leaks nothing. Every negative assertion is
+satisfied by a surface that never runs, so assert the positive shape instead.
 
 The failure generalises past WebRTC. "No real IP in the DNS log" is satisfied by DNS that
 never resolved. "Timezone does not disagree with the exit" is satisfied by a timezone API
@@ -49,14 +48,19 @@ present for the check to pass:
 - **A host candidate** whose address is a `<uuid>.local` mDNS name. A real Firefox
   obfuscates the LAN address this way by default. A raw `192.168.x.x` here is a leak; an
   absent host candidate is a broken browser.
-- **A server-reflexive candidate** (`typ srflx`) whose address equals the proxy egress IP.
-  This is what a real machine behind NAT produces, and its address is what a remote peer
-  would see.
+- **The server-reflexive candidate that the proxy allows.** Behind a SOCKS5 proxy whose UDP
+  relay works and exits from the same address as its TCP, expect a `typ srflx` whose address
+  equals the proxy egress IP. This is what a real machine behind NAT produces, and its
+  address is what a remote peer would see. Behind an HTTP or HTTPS proxy, SOCKS4, or a
+  SOCKS5 proxy that cannot carry UDP, expect no `srflx` at all, and one `icecandidateerror`
+  (701) for the STUN request when gathering ends, after about eleven seconds. No datagram
+  leaves the machine in that case, so an absent `srflx` is the correct state, not a leak.
 - **The gathering completes.** The page finishes, not "Computing" forever.
 
 A patched engine driven through stock Playwright produces this shape on its own: the host
-candidate is masked to `<uuid>.local`, and the server-reflexive candidate carries the
-proxy exit address, matching a real browser behind NAT rather than a suppressed one. Your
+candidate is masked to `<uuid>.local`, and behind a SOCKS5 proxy whose UDP relay works the
+server-reflexive candidate comes from a real STUN reply through that relay, so it carries the
+proxy exit address. Your
 job in a leak check is to confirm those values, not to hope for silence. For the full
 account of why the standard "just disable WebRTC" advice fails this bar, see
 [WebRTC leak with a proxy](webrtc-leak-proxy.md).
@@ -86,17 +90,17 @@ each one hides:
 
 | Surface | Positive value to confirm | The false "no leak" it hides |
 |---|---|---|
-| WebRTC | Host masked to `.local`, server-reflexive equal to the egress, gathering complete | WebRTC gathered nothing at all |
-| IPv6 | No global IPv6 candidate, while the v4 server-reflexive one still appears | Gathering never ran, so no v6 could appear |
+| WebRTC | Host masked to `.local`, gathering complete, and with a UDP-capable SOCKS5 proxy a server-reflexive equal to the egress | WebRTC gathered nothing at all |
+| IPv6 | No IPv6 candidate, while the `.local` host candidates still appear | Gathering never ran, so no v6 could appear |
 | DNS | Resolution happens at the proxy exit, not your local resolver | DNS never resolved |
 | Timezone and locale | Browser clock matches the exit country | Timezone API returned undefined |
 
-- **WebRTC** is the loud one, covered above: host masked to `.local`, server-reflexive
-  equal to the egress, gathering complete.
-- **IPv6** leaks past a v4-only proxy when the host has native IPv6 and a candidate carries
-  a global v6 address. The correct state here is that no global IPv6 candidate appears while
-  the v4 server-reflexive one still does. That is an absence you can only trust because the
-  v4 candidate proves gathering ran.
+- **WebRTC** is the loud one, covered above: host masked to `.local`, gathering complete,
+  and the server-reflexive equal to the egress when the proxy carries UDP.
+- **IPv6** leaks past a v4-only proxy in a stock browser when the host has native IPv6 and a
+  candidate carries a global v6 address. No IPv6 candidate is produced here, with or without
+  a proxy. That is an absence you can only trust because the `.local` host candidates prove
+  gathering ran.
 - **DNS** should resolve through the proxy, not your local resolver. With a SOCKS proxy
   this is the [remote-DNS behaviour](does-a-proxy-leak-dns-doh-explained.md); confirm
   resolution happens at the exit rather than leaking your ISP's resolver. See
@@ -137,22 +141,34 @@ with InvisiblePlaywright(seed=42, proxy=PROXY) as browser:
                 iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
             });
             pc.createDataChannel('probe');
-            const lines = [];
+            const lines = [], errors = [];
             pc.onicecandidate = e => { if (e.candidate) lines.push(e.candidate.candidate); };
+            pc.onicecandidateerror = e => errors.push(e.errorCode);
             await pc.setLocalDescription(await pc.createOffer());
-            await new Promise(r => setTimeout(r, 4000));   // let gathering finish
+            // Wait for gathering to end; the 25 s is only a safety net (a proxy that cannot
+            // carry UDP ends gathering, and delivers the 701, at about eleven seconds).
+            await new Promise(r => {
+                const cap = setTimeout(r, 25000);
+                pc.onicegatheringstatechange = () => {
+                    if (pc.iceGatheringState === 'complete') { clearTimeout(cap); r(); }
+                };
+            });
             pc.close();
-            return lines;
+            return {lines, errors};
         }
     """)
+    errors = candidates["errors"]
+    candidates = candidates["lines"]
 
     host  = [c for c in candidates if "typ host"  in c]
     srflx = [c for c in candidates if "typ srflx" in c]
 
-    # POSITIVE form: gathering must COMPLETE and produce both kinds.
+    # POSITIVE form: gathering must COMPLETE and produce what this proxy allows.
+    # This example assumes a SOCKS5 proxy whose UDP relay works: both kinds expected.
+    # Behind a proxy that cannot carry UDP, expect host candidates only (see below).
     # An empty list here is a FAIL, not a clean pass.
     assert host,  "FAIL: no host candidate - WebRTC produced nothing"
-    assert srflx, "FAIL: no server-reflexive candidate - gathering blocked"
+    assert srflx, "FAIL: no server-reflexive candidate - this proxy carries no UDP, or gathering failed"
 
     print("host :", host[0])
     print("srflx:", srflx[0])
@@ -178,13 +194,21 @@ field:
     assert host_addr.endswith(".local"), f"FAIL: host is a raw LAN IP: {host_addr}"
     assert srflx_addr == egress,         f"FAIL: srflx {srflx_addr} != egress {egress}"
 
-    # No global IPv6 candidate should appear, but only trust that because
-    # the v4 server-reflexive one above proves gathering actually ran.
-    assert not any(":" in address(c) for c in candidates if "typ srflx" in c), \
-        "FAIL: a global IPv6 candidate leaked past the proxy"
+    # No IPv6 candidate should appear, but only trust that because
+    # the host candidates above prove gathering actually ran.
+    assert not any(":" in address(c) for c in candidates), \
+        "FAIL: an IPv6 candidate leaked past the proxy"
 
     print("egress confirmed inside the browser:", egress)
 ```
+
+Behind a proxy that cannot carry UDP (an HTTP or HTTPS proxy, SOCKS4, or a SOCKS5 proxy
+whose relay refuses, stays silent or exits from another address), the same page gives the
+other correct shape: host candidates only, no `srflx`, and one `icecandidateerror` (701)
+for the STUN request after about eleven seconds, which the script above sees because it
+listens to `icecandidateerror` and waits for gathering to end (`errors == [701]`). Assert that `host` is non-empty, that no
+candidate is a real address of your machine, and that `srflx` is empty. The library decides
+this itself by measuring the proxy before launch, and no option forces UDP on.
 
 Finally, confirm the browser clock follows the exit rather than your own machine:
 
@@ -204,16 +228,17 @@ A proxy leak check is only as good as what it asserts. Written as a list of abse
 will, sooner or later, hand a clean bill to a browser whose WebRTC, DNS or timezone is
 simply dead, and a dead surface is a stronger tell than a leaky one because no real browser
 has it. Confirm the real values instead: a `.local` host candidate, a server-reflexive
-address equal to the exit, DNS through the tunnel, a clock that matches the country. Run it
+address equal to the exit whenever the proxy carries UDP, DNS through the tunnel, a clock
+that matches the country. Run it
 through the proxy on a real page, repeat it, and read the screenshot. Do that and "no leak"
 starts meaning what you wanted it to mean.
 
 ## Short answers to the questions that lead here
 
 **How do I check if my proxy leaks my real IP?** Load a real page through the proxy, gather
-WebRTC candidates in the browser, and assert the host candidate is a `.local` name and the
-server-reflexive address equals your exit IP. Confirming the correct values beats checking
-that the wrong ones are absent.
+WebRTC candidates in the browser, and assert the host candidate is a `.local` name and, when
+the proxy carries UDP, that the server-reflexive address equals your exit IP. Confirming the
+correct values beats checking that the wrong ones are absent.
 
 **My leak test says no leak. Am I safe?** Not necessarily. "No leak" is also what a dead
 WebRTC, a failed DNS lookup, or an undefined timezone produces. Check that the surface
@@ -221,20 +246,24 @@ actually returned the right value, not just that it returned nothing bad.
 
 **Should I just disable WebRTC to stop the leak?** No. A browser with WebRTC switched off is
 a rare and detectable state. Real browsers gather candidates; the fix is to mask the LAN
-address and route the reflexive candidate through the proxy, not to kill the feature.
+address and send WebRTC's UDP through the proxy when it can carry it, with no datagram
+leaving the machine otherwise, not to kill the feature.
 
 **Can I test the leak on localhost?** No. Localhost bypasses the proxy, so you measured the
 path you do not deploy. Load a remote page through the same proxy the job uses and confirm
 the egress from inside the browser.
 
-**Why does the WebRTC IP differ from my proxy IP?** If the server-reflexive candidate does
-not equal your exit, either the proxy is not carrying the media path or the browser is
-gathering on a real interface. If it is empty instead, gathering was blocked, which is a
-separate failure.
+**Why does the WebRTC IP differ from my proxy IP?** In a stock browser the server-reflexive
+candidate is the line's real address: the proxy setting covers TCP, and ICE sends its UDP
+from the machine's own interface. With this library a `srflx` is the proxy's exit or it is
+absent. If it is absent, the proxy cannot carry UDP and no datagram left the machine, which
+is correct for such a proxy. If there are no candidates at all, gathering was blocked, which
+is a separate failure.
 
-**Does an IPv6 address leak through an IPv4 proxy?** It can, when the host has native IPv6
-and the proxy only carries v4. Confirm no global IPv6 candidate appears while the v4
-reflexive candidate still does, so you know gathering ran.
+**Does an IPv6 address leak through an IPv4 proxy?** In a stock browser it can, when the host
+has native IPv6 and the proxy only carries v4. Here no IPv6 candidate is produced, with or
+without a proxy. Confirm none appears while the `.local` host candidates still do, so you
+know gathering ran.
 
 **See also:** [WebRTC leak with a proxy](webrtc-leak-proxy.md) for why the standard fixes
 fail, [when the timezone does not match the proxy](timezone-proxy-mismatch.md) for the
@@ -244,12 +273,8 @@ compare-against-a-real-browser method these checks sit inside.
 
 ## Sources
 
-- This project's release gates, including the WebRTC gate whose negative-only assertions
-  passed a fully blocked WebRTC behind a proxy, and the positive-form check that replaced
-  it: host candidate as a `.local` name, server-reflexive address equal to the proxy exit,
-  gathering completing.
-- The public leak and fingerprint pages read from their own output, including BrowserLeaks
-  for per-surface values and CreepJS for how a suppressed signal is recorded rather than
+- The public leak and fingerprint pages read from their own output, including a site that shows your IP and WebRTC candidates
+  for per-surface values and a fingerprint test page for how a suppressed signal is recorded rather than
   ignored.
 - Playwright's documented [proxy configuration](https://playwright.dev/python/docs/network)
   and `page.evaluate`, used unchanged.
@@ -257,6 +282,5 @@ compare-against-a-real-browser method these checks sit inside.
 ---
 
 *Written while maintaining [invisible_playwright](https://github.com/oss-invisible/playwright),
-a Firefox patched at the C++ level driven by stock Playwright. The negative-only WebRTC gate
-described here is a mistake this project made and then fixed, which is why the rule is
-written in the positive form.*
+a Firefox patched at the C++ level driven by stock Playwright. The rule is written in the
+positive form because a list of absences cannot tell a working surface from a dead one.*

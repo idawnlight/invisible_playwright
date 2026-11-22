@@ -6,8 +6,7 @@
 # launched Firefox in true HEADLESS mode, which is content-process unstable on
 # the hosted runners (eval-CSP / context-destroyed). The stealth wrapper instead
 # launches Firefox HEADED on a real display; under `xvfb-run` (a virtual X
-# server) that's exactly what we get on a headless CI box - stable, and the same
-# thing webrtc-e2e.yml already relies on.
+# server) that's exactly what we get on a headless CI box - stable.
 #
 # Secret-free, so it's safe in public CI: the binary is the PUBLIC firefox-9
 # release (no token), and the webrtc e2e fake a local TCP-only SOCKS. The proxy
@@ -34,28 +33,57 @@ on:
       - 'docs/**'
       - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Which job. `windows-control-a` runs only the Windows job of the keyboard shortcut (after the core of a release is on the index and its engine is published); `all` runs the whole workflow."
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - windows-control-a
 
 permissions:
   contents: read
 
-# One run of this workflow per branch at a time. A newer push cancels the older
-# in-flight run as a whole, cleanly, instead of leaving its queued jobs to be
-# cancelled one by one - which left the run marked failed even though nothing
-# had actually failed. Keyed by workflow + ref so tests and e2e never cancel
-# each other; only an older run of THIS workflow on the same branch is replaced.
+# A newer push to a pull request cancels the older in-flight run of THIS
+# workflow on that pull request as a whole, cleanly, instead of leaving its
+# queued jobs to be cancelled one by one - which left the run marked failed even
+# though nothing had actually failed. Keyed by workflow + pull request number,
+# so tests and e2e never cancel each other.
+#
+# NEVER on main. The release gate (scripts/e2e_is_green.py) asks for the e2e
+# check-run of the commit being tagged, and a cancelled one refuses the release:
+# with the group keyed by ref, the next push to main cancelled the run of the
+# commit before it. Outside a pull request the group is unique to the run
+# (`github.run_id`), so every commit of main keeps its own finished run, and a
+# pending run is not replaced by a newer one either (a group with a fixed name
+# drops the older pending run, cancel or not).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Engine and GeoIP downloads go through the release API with this token.
+# Anonymous requests share a 60-an-hour limit per runner address and are the
+# ones GitHub drops first when it is degraded (2026-11-08: timeouts for
+# unauthenticated users failed the gates three times). user-install.yml stays
+# anonymous on purpose: it is the user's path.
+env:
+  GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
-  # Keep the reusable workflow name for callers; it checks the exact Git tag.
+  # The install below resolves `invisible-core==N.M.0` from the package index,
+  # and the core is published BEFORE this package. This gate answers whether it
+  # is on the index yet; during that window the e2e job is SKIPPED with the
+  # reason in the run summary rather than faked green, and once the core is up
+  # it runs unchanged. See .github/workflows/core-on-index.yml.
   core-on-index:
     uses: ./.github/workflows/core-on-index.yml
 
   e2e:
     name: e2e (linux, xvfb)
     needs: core-on-index
-    if: needs.core-on-index.outputs.available == 'true'
+    if: needs.core-on-index.outputs.available == 'true' && inputs.only != 'windows-control-a'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -66,7 +94,7 @@ jobs:
       - name: Install wrapper + test deps (+ Playwright ONLY as a system tool)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "$(python scripts/core_requirement.py)" ".[dev]"
+          python -m pip install ".[dev]"
           # ⛔ The playwright package is NO LONGER a product dependency: the
           # client lives in invisible_playwright._pw and the driver in _driver. It
           # is installed here for ONE thing only, the `playwright install-deps
@@ -83,18 +111,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
+          # the fontconfig e2e trace the opens of the browser: strace is not in the runner image (setsid is, util-linux)
+          sudo apt-get install -y strace
           sudo "$(which python)" -m playwright install-deps firefox
-      - name: The intermediates list (a fixed file of the repository)
+      # The security state is a ready directory of the repository (ci/security-state/, a result with no data, the sha256 in ci/security-state.pin.json): with
+      # STEALTHFOX_SECURITY_STATE set the core neither downloads nor generates one. BEFORE `fetch`, which makes the state present (it would download and generate it).
+      - name: The security state (a fixed directory of the repository)
         shell: bash
-        run: python scripts/ci_lab_intermediates.py set --pin ci/intermediates.pin.json
+        run: python scripts/ci_lab_security_state.py set --pin ci/security-state.pin.json
       - name: Fetch the published firefox binary
-        run: |
-          set -euo pipefail
-          fetch_output="$(python -m invisible_playwright fetch)"
-          printf '%s\n' "$fetch_output"
-          binary="$(printf '%s\n' "$fetch_output" | tail -n 1)"
-          test -f "$binary"
-          echo "FF=$binary" >> "$GITHUB_ENV"
+        run: echo "FF=$(python -m invisible_playwright fetch | tail -1)" >> "$GITHUB_ENV"
       - name: The protocol mirror agrees with the engine it is pinned to
         # `invisible_core.juggler.protocol` is generated from the Protocol.js INSIDE the
         # shipped binary, and nothing used to tie the two together after a pin
@@ -105,7 +131,16 @@ jobs:
         # The generator moved into the core with the module it writes (0.30.0),
         # so the check runs against the core this package installs.
         run: python -m invisible_core.juggler._gen_protocol --check --binary "$(dirname "$FF")"
-      - name: Run the full e2e suite under a virtual display
+      # The GeoIP database is made by the repository (scripts/ci_lab_geoip.py: the same bytes on every run, the sha256 in ci/geoip.json), never a
+      # site and never a licensed file: without STEALTHFOX_GEOIP_MMDB the core asks GitHub which database is the latest on every call
+      # (run 43211837926). The variable reaches every later step of the job.
+      - name: The GeoIP database (made by the repository, same bytes every run)
+        shell: bash
+        run: python scripts/ci_lab_geoip.py build
+
+      # test_release_e2e.py and test_upgrade_e2e.py (pip, uv, PyPI, the GitHub release) are NOT in this run or in the Windows legs below: tests/conftest.py leaves
+      # them out of every run that does not name their file, and user-install.yml (the round after the publication) names it. tests/_post_publication.py.
+      - name: Run the full e2e suite under a virtual display, without the root ones
         # PYTHONUNBUFFERED, and it is not a nicety. Without it Python block-buffers
         # stdout when it is a pipe, and this step printed NOTHING for 39 minutes
         # before the 40-minute timeout killed it on 2026-08-04: a run with no
@@ -121,9 +156,94 @@ jobs:
           # the descriptors at the system level: whatever is captured is lost
           # when the process is killed, which is exactly the case it exists for.
           INVPW_TEST_WATCHDOG_FILE: ${{ runner.temp }}/e2e-watchdog.log
-        run: xvfb-run -a python -u scripts/run_e2e.py "$FF"
+          ROOT_FILES: tests/test_a_proxy_that_cannot_carry_udp_leaks_nothing_direct_e2e.py
+          ROOT_NODES: tests/test_the_whole_udp_chain_by_name_e2e.py::test_a_turn_srflx_by_name_arrives_through_the_relay_before_the_tick
+          SANDBOX_FILES: tests/test_the_socket_process_is_sandboxed_e2e.py
+        # The root ones are left out by name and run in the step below, as root: here, as the runner user, they errored. The sandbox one is left out
+        # by name too and runs in its own step after them: it is red on a runner whose AppArmor refuses user namespaces to a normal user.
+        run: |
+          IGNORE=(); for f in $ROOT_FILES $SANDBOX_FILES; do IGNORE+=("--ignore=$f"); done
+          DESELECT=(); for n in $ROOT_NODES; do DESELECT+=("--deselect=$n"); done
+          xvfb-run -a python -u scripts/run_e2e.py "$FF" "${IGNORE[@]}" "${DESELECT[@]}"
 
-      # Runs ONLY if the step above fails, and before 2026-08-13 it could not
+      # THE ROOT SUITE, AS THE GATE RUNS IT (wrapper.e2e.udp.exit in ci/required-suites.json). Seven e2e need root: the exit of the lab is a documentation
+      # address (198.51.100.9) added to `lo` with `ip addr add`. Collected here as the runner user they ERRORED (run 43262636367: "cannot hold 198.51.100.9
+      # on lo (needs root and iproute2 on Linux)"), so the run above leaves them out by name (ROOT_FILES / ROOT_NODES) and this step runs them, and only
+      # them, the way the gate does: the engine copied to /opt/ff (the socket process execs inside a new user namespace, where the runner's 750 home is not
+      # readable), `sudo -H -E env -u XDG_RUNTIME_DIR` (Firefox refuses to run as root in a regular user's session), no rerun plugin. Nothing is skipped
+      # silently: the step reads its own junit and refuses anything but exactly that many tests, all passed.
+      # AFTER the run of the runner user, never before it (run 43271443150 of PR 483: with this step first, every launch of the run that followed
+      # waited for the browser's readiness line until its timeout, and the job was cancelled at 40 minutes; the same head without the step had 748
+      # green). Whatever root leaves behind (files under the runner's home or /tmp, /etc/resolv.conf, an address on lo) cannot reach a launch of the
+      # runner user any more; the step after this one prints what it left, and decides nothing.
+      # tests/test_the_root_e2e_run_in_the_root_step_and_nowhere_else.py holds the two lists, this step and the run above to the suite's list, and the order.
+      - name: The root e2e (wrapper.e2e.udp.exit), as root, as the gate runs them
+        if: success() || failure()
+        env:
+          PYTHONUNBUFFERED: "1"
+          ROOT_FILES: tests/test_a_proxy_that_cannot_carry_udp_leaks_nothing_direct_e2e.py
+          ROOT_NODES: tests/test_the_whole_udp_chain_by_name_e2e.py::test_a_turn_srflx_by_name_arrives_through_the_relay_before_the_tick
+          ROOT_TESTS: "7"
+        run: |
+          sudo rm -rf /opt/ff
+          sudo cp -a "$(dirname "$FF")" /opt/ff
+          sudo chown -R root:root /opt/ff
+          sudo chmod -R go+rX /opt/ff
+          ROOT_FF="/opt/ff/$(basename "$FF")"
+          JUNIT="${RUNNER_TEMP}/root-e2e.xml"
+          sudo -H -E env -u PYTEST_ADDOPTS -u XDG_RUNTIME_DIR INVPW_REQUIRE_TRAP=1 "PATH=$PATH" INVPW_BINARY_PATH="$ROOT_FF" STEALTHFOX_E2E_BINARY="$ROOT_FF"             python -m pytest $ROOT_FILES $ROOT_NODES -m e2e -o addopts='' -o junit_family=xunit2 -q -p no:cacheprovider -p no:rerunfailures -rs --junitxml="$JUNIT" || true
+          python - <<'PY'
+          import os, sys, xml.etree.ElementTree as ET
+          root = ET.parse(os.path.join(os.environ["RUNNER_TEMP"], "root-e2e.xml")).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          counts = {k: int(suite.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
+          print("root e2e:", counts)
+          if counts["tests"] != int(os.environ["ROOT_TESTS"]) or counts["failures"] or counts["errors"] or counts["skipped"]:
+              sys.exit("the root e2e must be exactly %s tests, all passed: %s" % (os.environ["ROOT_TESTS"], counts))
+          PY
+      # THE SANDBOX E2E (wrapper.e2e.udp.sandbox), as the gate runs its first file: the browser WITH its sandbox, run by the runner user. On this runner AppArmor
+      # refuses user namespaces to a normal user (kernel.apparmor_restrict_unprivileged_userns=1), so the browser of every other step starts WITHOUT the sandbox
+      # of its socket and content processes, and tests/test_the_socket_process_is_sandboxed_e2e.py (which fails unless both have a seccomp filter) can only
+      # be green after the restriction is turned off. It is left out of the run above by name (SANDBOX_FILES) so that it cannot fail on a runner without the
+      # sysctl, and it runs here, after the run and the root step (whatever the sysctl changes cannot reach a launch of the run), as the runner user. Nothing
+      # is skipped silently: the step reads its own junit and refuses anything but exactly that many tests, all passed.
+      # tests/test_the_sandbox_e2e_runs_where_user_namespaces_are_on.py holds this step, the exclusion above and the order.
+      - name: The sandbox e2e (wrapper.e2e.udp.sandbox), with unprivileged user namespaces on
+        if: success() || failure()
+        env:
+          PYTHONUNBUFFERED: "1"
+          SANDBOX_FILES: tests/test_the_socket_process_is_sandboxed_e2e.py
+          SANDBOX_TESTS: "1"
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          JUNIT="${RUNNER_TEMP}/sandbox-e2e.xml"
+          xvfb-run -a env -u PYTEST_ADDOPTS INVPW_BINARY_PATH="$FF" STEALTHFOX_E2E_BINARY="$FF" python -m pytest $SANDBOX_FILES -m e2e -o addopts='' -o junit_family=xunit2 -q -p no:cacheprovider -p no:rerunfailures -rs --junitxml="$JUNIT" || true
+          python - <<'PY'
+          import os, sys, xml.etree.ElementTree as ET
+          root = ET.parse(os.path.join(os.environ["RUNNER_TEMP"], "sandbox-e2e.xml")).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          counts = {k: int(suite.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
+          print("sandbox e2e:", counts)
+          if counts["tests"] != int(os.environ["SANDBOX_TESTS"]) or counts["failures"] or counts["errors"] or counts["skipped"]:
+              sys.exit("the sandbox e2e must be exactly %s tests, all passed: %s" % (os.environ["SANDBOX_TESTS"], counts))
+          PY
+      - name: What the root step left behind (diagnostic, decides nothing)
+        if: always()
+        run: |
+          echo "-- files owned by root under the runner's home and /tmp"; sudo find /home/runner /tmp -maxdepth 3 -user root 2>/dev/null | head -40 || true
+          echo "-- /etc/resolv.conf"; cat /etc/resolv.conf || true
+          echo "-- lo"; ip -4 addr show lo || true
+
+      # The leg ran with the pinned database, and the core never went past it to GitHub (tests/geoip_used.py wrote what it did).
+      - name: The leg ran with the pinned GeoIP database
+        if: always()
+        shell: bash
+        run: |
+          python scripts/ci_lab_geoip.py evidence --out "$(dirname "$GEOIP_USED_OUT")/geoip-evidence.json" > /dev/null
+          python scripts/ci_lab_geoip.py verify --evidence "$(dirname "$GEOIP_USED_OUT")/geoip-evidence.json" --used "$GEOIP_USED_OUT"
+
+
+      # Runs ONLY if the full run above fails, and before 2026-08-13 it could not
       # exist: the hang was killed by the 40-minute ceiling, so the job came out
       # `cancelled` and the following steps did not start at all. With
       # `--timeout 420 --timeout-method thread` the process dies at 7 minutes and the
@@ -159,4 +279,174 @@ jobs:
           name: e2e-watchdog-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/e2e-watchdog.log
           if-no-files-found: warn
+          retention-days: 14
+
+      # The junit of every pass of the run (scripts/run_e2e.py writes one per pass, e2e-junit-*.xml, in the directory of the watchdog file) and of the two
+      # steps above that run alone (root, sandbox): what a red is read from, kept whether the run is green or red.
+      - name: Upload the junit of the run
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-junit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/e2e-junit-*.xml
+            ${{ runner.temp }}/root-e2e.xml
+            ${{ runner.temp }}/sandbox-e2e.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      # What the tests that measure save for a reader (the boxes of tests/test_a_screenshot_draws_the_text_of_the_bundled_fonts_as_the_content_does_e2e.py:
+      # the two PNG files, the screenshot and a result.json per case), under RUNNER_TEMP/invpw-evidence, whether the run is green or red. Nothing there
+      # when no such test ran (an engine older than firefox-66 skips it), which is not a warning.
+      - name: Upload what the tests saved
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: invpw-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/invpw-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ``Control+A`` selects all in a field, on the PUBLISHED engine and the core this package pins, on Windows, where the keyboard of a real
+  # user is: the shortcut letter used to reach the browser as Control+Shift+A (invisible-core 63.66.0 fixes it). The e2e is red on the
+  # keyboard that held Shift for the capital A (tests/test_control_a_selects_all_in_a_field_e2e.py: 5 ways to press it x an <input> and a
+  # <textarea>, in-process and served to the stock Playwright client). Same gate as the Linux job: it is SKIPPED, with the reason in the
+  # summary, until the core is on the index, and it runs unchanged after; `workflow_dispatch` with `only: windows-control-a` runs it alone.
+  e2e-windows-control-a:
+    name: e2e (windows, Control+A)
+    needs: core-on-index
+    if: needs.core-on-index.outputs.available == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    # TEMP and TMP on D:\a\_temp (the runner's temp folder): the Firefox profiles land in TEMP and on C: they saturate the disk (queue up to 144,
+    # latencies up to 4 s, parent main thread still 40-60 s). On the job, not in a step: `runner.temp` is not readable in a job's `env`.
+    env:
+      TEMP: 'D:\a\_temp'
+      TMP: 'D:\a\_temp'
+    # `run:` blocks are PowerShell on Windows unless said otherwise (e2e-hunt.yml had a ParserError on its first launch there).
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with: { fetch-depth: 1 }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.11' }
+      - name: Install wrapper + test deps (the stock client is in the dev extra)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+      # The security state is a ready directory of the repository (ci/security-state/, a result with no data, the sha256 in ci/security-state.pin.json): with
+      # STEALTHFOX_SECURITY_STATE set the core neither downloads nor generates one. BEFORE `fetch`, which makes the state present (it would download and generate it).
+      - name: The security state (a fixed directory of the repository)
+        shell: bash
+        run: python scripts/ci_lab_security_state.py set --pin ci/security-state.pin.json
+      - name: Fetch the published firefox binary
+        run: echo "FF=$(python -m invisible_playwright fetch | tail -1)" >> "$GITHUB_ENV"
+      - name: The keyboard shortcut selects all (the browser opens on the runner's desktop, as in e2e-hunt.yml)
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: INVPW_BINARY_PATH="$FF" python -u -m pytest -m e2e -p no:cacheprovider -v tests/test_control_a_selects_all_in_a_field_e2e.py
+
+  # THE SAME e2e ON WINDOWS (Federico, 12/11: every test of the product runs on Linux AND Windows; where Windows behaves
+  # differently the test adapts to the system). Before this, 562 of the 808 e2e had never run on Windows in any round. The census
+  # of 12/11 (run 43307193708) took ~50 minutes in one job, so the files are split in four parts (the sorted list, every fourth
+  # file: a split that does not move when a file is added elsewhere). Left out, by name, are the suites ci/required-suites.json
+  # declares `linux_only` (the reason is on the row); tests/test_every_suite_runs_on_linux_and_windows.py holds both together.
+  e2e-windows:
+    name: e2e (windows, part ${{ matrix.part }})
+    needs: core-on-index
+    if: needs.core-on-index.outputs.available == 'true' && inputs.only != 'windows-control-a'
+    runs-on: windows-2022
+    timeout-minutes: 40
+    # TEMP and TMP on D:\a\_temp (the runner's temp folder): the Firefox profiles land in TEMP and on C: they saturate the disk (queue up to 144,
+    # latencies up to 4 s, parent main thread still 40-60 s). On the job, not in a step: `runner.temp` is not readable in a job's `env`.
+    env:
+      TEMP: 'D:\a\_temp'
+      TMP: 'D:\a\_temp'
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with: { fetch-depth: 1 }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.11' }
+      - name: Install wrapper + test deps (+ Playwright ONLY as a system tool)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+          python -m pip install "playwright==$(cat scripts/playwright_pin.txt)"
+      # The security state is a ready directory of the repository (ci/security-state/, a result with no data, the sha256 in ci/security-state.pin.json): with
+      # STEALTHFOX_SECURITY_STATE set the core neither downloads nor generates one. BEFORE `fetch`, which makes the state present (it would download and generate it).
+      - name: The security state (a fixed directory of the repository)
+        shell: bash
+        run: python scripts/ci_lab_security_state.py set --pin ci/security-state.pin.json
+      - name: Fetch the published firefox binary
+        run: echo "FF=$(cd "$RUNNER_TEMP" && python -m invisible_playwright fetch | tail -1)" >> "$GITHUB_ENV"
+      # The GeoIP database made by the repository, as on the Linux run (no download, the same bytes every run).
+      - name: The GeoIP database (made by the repository, same bytes every run)
+        run: python scripts/ci_lab_geoip.py build
+      - name: The files of this part, without the linux_only suites
+        run: |
+          set -e
+          python -m pytest --collect-only -q -m e2e -o addopts= -p no:cacheprovider 2>/dev/null | grep "::" | cut -d: -f1 | sort -u > "$RUNNER_TEMP/e2e_files.txt"
+          python - "${{ matrix.part }}" "$RUNNER_TEMP" <<'PY'
+          import json, os, sys
+          part, tmp = int(sys.argv[1]), sys.argv[2]
+          rows = json.load(open("ci/required-suites.json", encoding="utf-8"))
+          left_out = [t for r in rows if r.get("linux_only") for t in r["tests"]]
+          files = [l.strip() for l in open(os.path.join(tmp, "e2e_files.txt")) if l.strip()]
+          files = [f for f in files if f not in left_out]
+          mine = [f for i, f in enumerate(files) if i % 4 == part - 1]
+          nodes = [t for t in left_out if "::" in t and t.split("::")[0] in mine]
+          open(os.path.join(tmp, "e2e_args.txt"), "w").write("\n".join(mine + ["--deselect=" + n for n in nodes]) + "\n")
+          print("%d e2e files, %d left out as linux_only, %d in part %d, %d node(s) deselected"
+                % (len(files) + len([t for t in left_out if "::" not in t]), len(left_out), len(mine), part, len(nodes)))
+          PY
+      - name: Run this part of the e2e
+        env:
+          PYTHONUNBUFFERED: "1"
+          INVPW_TEST_WATCHDOG_FILE: ${{ runner.temp }}/e2e-watchdog.log
+        run: |
+          mapfile -t ARGS < <(tr -d '\r' < "$RUNNER_TEMP/e2e_args.txt")
+          python -u scripts/run_e2e.py "$FF" "${ARGS[@]}"
+      - name: The leg ran with the pinned GeoIP database
+        if: always()
+        run: |
+          python scripts/ci_lab_geoip.py evidence --out "$(dirname "$GEOIP_USED_OUT")/geoip-evidence.json" > /dev/null
+          python scripts/ci_lab_geoip.py verify --evidence "$(dirname "$GEOIP_USED_OUT")/geoip-evidence.json" --used "$GEOIP_USED_OUT"
+      - name: Close every Firefox left
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process firefox -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          "left: " + @(Get-Process firefox -ErrorAction SilentlyContinue).Count
+      - name: Upload the hang evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-watchdog-windows-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-watchdog.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload the junit of the run
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-junit-windows-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-junit-*.xml
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload what the tests saved
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: invpw-evidence-windows-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/invpw-evidence
+          if-no-files-found: ignore
           retention-days: 14

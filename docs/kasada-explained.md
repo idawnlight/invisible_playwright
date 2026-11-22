@@ -10,7 +10,7 @@ nav_order: 25
 # How Kasada's bot detection actually works
 
 Kasada is a commercial bot-detection vendor used across retail, travel and ticketing
-sites, and unlike BotD or CreepJS its client-side script is not open source. There is no
+sites, and unlike BotD or a consistency checker its client-side script is not open source. There is no
 source tree to point at. What follows is pieced together from public
 reverse-engineering writeups, one archived proof-of-concept solver, and Kasada's own
 description of its product, which is deliberately thin on mechanism. Where the sourcing
@@ -48,11 +48,11 @@ not, so this page can say the ruleset is broad and cannot say what any one named
 specifically tests.
 
 It also runs integrity checks that read as familiar to anyone who has looked at how
-CreepJS works: cross-frame consistency between the top document and other frames,
+a consistency checker works: cross-frame consistency between the top document and other frames,
 whether the `navigator.webdriver` getter is the engine's real native getter or something
 that has been moved onto the instance, and general window-property leak detection for
-globals automation frameworks tend to leave behind ([the same lie-detection shape CreepJS
-uses](creepjs-explained.md), independently arrived at). One technique kernel.sh describes
+globals automation frameworks tend to leave behind ([the same lie-detection shape a consistency checker
+uses](consistency-checker-explained.md), independently arrived at). One technique kernel.sh describes
 that is less commonly written up elsewhere: "crash-and-capture" probes that deliberately
 trigger a `TypeError` and then inspect the resulting `Error` object, its message text and
 its stack-trace shape, against what the specific engine and version it claims to be would
@@ -169,7 +169,7 @@ reimplementation is built against one snapshot and has to be redone against the 
 writeup linked in Sources below is the most detailed public account this page found, and
 it is worth reading directly rather than through a paraphrase.
 
-**See also:** [How CreepJS decides you are lying](creepjs-explained.md), for the same
+**See also:** [How a consistency checker decides you are lying](consistency-checker-explained.md), for the same
 integrity-checking approach worked out against a tool you can actually read the source
 of; [Function.prototype.toString and the native code check](tostring-native-code-detection.md),
 for the specific native-getter argument Kasada's VM also relies on; and [what ASN and IP
@@ -200,7 +200,7 @@ network layer that sits entirely outside Kasada's client-side script.
 ---
 
 *From the notes of [invisible_playwright](https://github.com/oss-invisible/playwright).
-Kasada does not publish a source tree the way BotD or CreepJS do, so this page leans on
+Kasada does not publish a source tree the way BotD or a consistency checker do, so this page leans on
 public reverse-engineering rather than our own release gates. Where the other detector
 pages here say "read from source," this one says "read from someone else's afternoon of
 decoding it," and names them.*

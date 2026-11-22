@@ -49,7 +49,7 @@ Windows `user_agent` to "look normal".
 
 You have just built a contradiction. A consistency detector does not care that any
 single value is plausible. It cares whether values that must agree, do.
-[CreepJS is built specifically to catch that](creepjs-explained.md): a user agent
+[a consistency checker is built specifically to catch that](consistency-checker-explained.md): a user agent
 claiming Windows, sitting on top of a font set that only exists on Linux, next to a
 GPU string that only exists in a datacenter. Each field is fine alone. Together they
 describe a machine that cannot exist, and that is a cleaner signal than any single bad
@@ -184,7 +184,7 @@ Playwright `Browser`; every documented method works unchanged.
 - The public consistency detectors named across this doc set, read from their own source
   rather than from a rendered verdict.
 
-**See also:** [what CreepJS actually checks](creepjs-explained.md),
+**See also:** [what a consistency checker actually checks](consistency-checker-explained.md),
 [why a container gives itself away regardless of the stealth layer](playwright-docker-detection.md),
 and [keeping canvas and WebGL consistent across platforms](canvas-webgl-cross-platform-consistency.md).
 

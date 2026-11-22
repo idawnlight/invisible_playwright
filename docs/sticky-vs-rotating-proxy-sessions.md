@@ -61,7 +61,7 @@ holds the cookies is the IP that got them.
 
 Rotate the exit in the middle of that visit and you hand the site one visitor
 whose IP contradicts its own cookies. The session cookie says this browser
-arrived from address A a minute ago; the request carrying it now leaves from
+arrived from address a minute ago; the request carrying it now leaves from
 address B, a different network in a different city. Nothing about the browser
 changed, but the story the requests tell stopped making sense, and that
 contradiction is a cheaper signal for a site to read than any in-page fingerprint.

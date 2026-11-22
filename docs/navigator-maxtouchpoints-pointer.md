@@ -1,6 +1,6 @@
 ---
 title: "navigator.maxTouchPoints and pointer consistency"
-description: "Why navigator.maxTouchPoints reads 0 on a spoofed desktop, why the pointer media queries must agree, and how CreepJS cross-checks the pair to catch a spoof."
+description: "Why navigator.maxTouchPoints reads 0 on a spoofed desktop, why the pointer media queries must agree, and how a consistency checker cross-checks the pair to catch a spoof."
 parent: "Browser Identity"
 grand_parent: "Guides"
 nav_order: 18
@@ -14,7 +14,7 @@ pointer media queries have to agree with it: [`(pointer: fine)`](https://develop
 `(any-hover: hover)` match, while [`(any-pointer: coarse)`](https://developer.mozilla.org/en-US/docs/Web/CSS/@media/any-pointer) is false. A
 fingerprinter does not read either value on its own; it checks whether the two
 agree, because they describe the same hardware through different code paths, and
-CreepJS records a mismatch as a lie.
+a consistency checker records a mismatch as a lie.
 
 `navigator.maxTouchPoints` looks like a throwaway integer. It is one of the
 cheapest cross-checks a fingerprinter has, because it does not live alone: it
@@ -23,7 +23,7 @@ completely different code paths inside the browser. Get them from two different
 places and it is very easy to make them disagree.
 
 This page is about that agreement. What the value should be on a desktop, which
-media queries it has to match, how to read both from one session, why CreepJS
+media queries it has to match, how to read both from one session, why a consistency checker
 pairs them, and one boundary value in our own identity generation that once made
 them contradict each other on exactly the machines where it mattered.
 
@@ -140,16 +140,16 @@ for seed in (42, 1000, 7777):
         print(seed, touch, coarse)   # every row: 0 False
 ```
 
-## The consistency CreepJS is checking
+## The consistency a consistency checker is checking
 
-[CreepJS](creepjs-explained.md) does not ask whether your touch count is
+[a consistency checker](consistency-checker-explained.md) does not ask whether your touch count is
 unusual. It asks whether it contradicts something else you reported, and this
 pair is one of its cleaner contradictions because the two values come from
 different corners of the browser and a spoof that touches one often forgets the
 other.
 
 Concretely, a coarse `any-pointer` next to `maxTouchPoints: 0` is a
-self-inconsistency, and CreepJS treats a self-inconsistency as a lie regardless
+self-inconsistency, and a consistency checker treats a self-inconsistency as a lie regardless
 of how ordinary each individual value looks. This is the same style of check
 described in [how detection suites cross-reference fields rather than reading
 them](how-to-test-bot-detection.md): the danger is never one odd number, it is
@@ -239,14 +239,14 @@ are now forced to agree for every identity.
 - W3C, [Media Queries Level 4](https://www.w3.org/TR/mediaqueries-4/), retrieved
   2026-08-28, for the `pointer`, `any-pointer`, `hover` and `any-hover`
   interaction media features this page checks against the touch count.
-- [CreepJS](https://github.com/abrahamjuliot/creepjs), retrieved 2026-08-28, read
+- A consistency checker, retrieved 2026-08-28, read
   from its own source, for how it records a self-inconsistent pair as a lie.
 - This project's release gates, including the test that now asserts the shared
   gate is active for every seed the identity pool can produce.
 
 **See also:** [the CSS media-query surface](css-media-query-fingerprinting.md)
 for the rest of what stylesheets can read about your machine,
-[what CreepJS actually proves](creepjs-explained.md) before you trust a high
+[what a consistency checker actually proves](consistency-checker-explained.md) before you trust a high
 score, and [how to compare fields instead of reading verdicts](how-to-test-bot-detection.md).
 
 ---

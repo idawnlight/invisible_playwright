@@ -6,17 +6,22 @@ browser can reach directly (a documentation address held on ``lo``, see ``_turn_
 source that is not the exit of the proxy, and a test can tell a leak from a drop. It answers a STUN Binding Request with the source it
 saw, so a road that works also gives the page a server-reflexive candidate.
 
-``udp`` is every datagram as (source ip, source port, length); ``tcp`` is every connection as (source ip, source port).
+``udp`` is every datagram as (source ip, source port, length); ``tcp`` is every connection as (source ip, source port), both of a source that
+is an address of THIS host. The browser runs on this host, so a direct send of it comes from an address of this host; a source that is not
+one (a runner's address is reachable from the internet, and noise arrives) cannot be the browser. Those arrivals are written down apart,
+in ``foreign_udp`` and ``foreign_tcp``, and are never answered. ``heard()`` and ``heard_from_other_than()`` speak of the host's only.
 """
 from __future__ import annotations
 
+import ipaddress
 import socket
 import sys
 import struct
 import threading
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Set, Tuple
 
 _MAGIC = b"\x21\x12\xa4\x42"
+_IP_FAMILIES = (socket.AF_INET, socket.AF_INET6)
 
 #: How many port numbers the witness tries before it gives up, and where it draws them from after the system's own pick: the sequence of
 #: tests/_ports.py, which the HTTP/3 server and the resolver trap walk too. Below the start of Windows' dynamic range (49152), where its excluded
@@ -25,11 +30,48 @@ _MAGIC = b"\x21\x12\xa4\x42"
 from _ports import DRAW_FROM, TRIES, candidates  # noqa: E402
 
 
+def _normal(ip: str) -> str:
+    """``ip`` as the one spelling a set compares on (an IPv4-mapped IPv6 address is its IPv4 address; a zone id is dropped)."""
+    try:
+        parsed = ipaddress.ip_address(ip.split("%")[0])
+    except ValueError:
+        return ip
+    mapped = getattr(parsed, "ipv4_mapped", None)
+    return (mapped or parsed).compressed
+
+
+def host_addresses() -> Set[str]:
+    """Every IPv4 and IPv6 address assigned to an interface of this machine (loopback and link-local included), normalised.
+    ``psutil`` is a dependency of the package and answers the same on Linux and on Windows."""
+    import psutil
+
+    found: Set[str] = set()
+    for addresses in psutil.net_if_addrs().values():
+        for entry in addresses:
+            if entry.family in _IP_FAMILIES:
+                found.add(_normal(entry.address))
+    return found
+
+
+def is_host_source(ip: str, known: Set[str]) -> bool:
+    """Whether a source ip is an address of this host: any 127.0.0.0/8, ::1, or one of ``known`` (the host's addresses)."""
+    ip = _normal(ip)
+    try:
+        if ipaddress.ip_address(ip).is_loopback:
+            return True
+    except ValueError:
+        return False
+    return ip in known
+
+
 class Witness:
     def __init__(self, address: str, port: int = 0) -> None:
         self.address = address
         self.udp: List[Tuple[str, int, int]] = []
         self.tcp: List[Tuple[str, int]] = []
+        self.foreign_udp: List[Tuple[str, int, int]] = []
+        self.foreign_tcp: List[Tuple[str, int]] = []
+        self._host: Set[str] = host_addresses() | {_normal(address)}
         self._lock = threading.Lock()
         self._closed = False
         # One port number for both, TCP and UDP. Each try binds TCP and then UDP on the same number; if either is refused, both
@@ -74,6 +116,21 @@ class Witness:
         with self._lock:
             return {"udp": list(self.udp), "tcp": list(self.tcp)}
 
+    def heard_foreign(self) -> Dict[str, list]:
+        """What reached the witness from a source that is NOT an address of this host: not the browser, noise from the network."""
+        with self._lock:
+            return {"udp": list(self.foreign_udp), "tcp": list(self.foreign_tcp)}
+
+    def _is_host(self, ip: str) -> bool:
+        """Whether ``ip`` is an address of this host; a miss looks at the interfaces again (an address added since) before it is foreign."""
+        if is_host_source(ip, self._host):
+            return True
+        try:
+            self._host |= host_addresses()
+        except Exception:
+            return False
+        return is_host_source(ip, self._host)
+
     def heard_from_other_than(self, allowed: Iterable[str]) -> Dict[str, list]:
         """What the witness heard from a source that is not one of ``allowed`` (the exit of the proxy): a direct send."""
         ok = set(allowed)
@@ -107,6 +164,10 @@ class Witness:
                 continue
             except OSError:
                 return
+            if not self._is_host(peer[0]):
+                with self._lock:
+                    self.foreign_udp.append((peer[0], peer[1], len(data)))
+                continue
             with self._lock:
                 self.udp.append((peer[0], peer[1], len(data)))
             if len(data) >= 20 and data[0:2] == b"\x00\x01" and data[4:8] == _MAGIC:
@@ -125,7 +186,7 @@ class Witness:
             except OSError:
                 return
             with self._lock:
-                self.tcp.append((peer[0], peer[1]))
+                (self.tcp if self._is_host(peer[0]) else self.foreign_tcp).append((peer[0], peer[1]))
             try:
                 conn.close()
             except OSError:

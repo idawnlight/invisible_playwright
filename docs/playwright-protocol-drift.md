@@ -149,7 +149,7 @@ the same shallow-probe-versus-real-usage gap in a different context.
   retrieved 2026-08-28: where Playwright itself defines and ships the Juggler protocol
   for Firefox, apart from the Chromium DevTools Protocol path.
 - An independently reported case of the same failure shape on a different Juggler-based
-  Firefox fork: [camoufox issue #653](https://github.com/daijro/camoufox/issues/653),
+  Firefox fork: a public issue on another patched-Firefox project,
   retrieved 2026-08-28, where a Playwright 1.61 viewport field arrived undeclared in
   the bundled Juggler schema.
 

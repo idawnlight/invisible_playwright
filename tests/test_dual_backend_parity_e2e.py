@@ -131,9 +131,9 @@ def test_sync_dual_backend_stealth_navigation_and_isolation(
     ) as browser:
         assert browser.browser_type.name == backend
         if backend == "firefox":
-            assert browser.version == "160.0"
+            assert browser.version == "160.0.1"
         else:
-            assert browser.version == "157.0.8103.78"
+            assert browser.version == "158.0.8127.36"
 
         page = browser.new_page()
         page.goto(f"{parity_server}/")
@@ -320,7 +320,7 @@ def test_simultaneous_firefox_and_chromium_in_single_process(
             assert fx_sig["wd"] is False
             assert fx_sig["traps"] == {"qsHits": 0, "stackHits": 0}
 
-            assert "Chrome/157." in cr_sig["ua"]
+            assert "Chrome/158." in cr_sig["ua"]
             assert cr_sig["platform"] == "Linux x86_64"
             assert cr_sig["wd"] is False
             assert cr_sig["traps"] == {"qsHits": 0, "stackHits": 0}

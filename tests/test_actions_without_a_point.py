@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import pytest
 
+from _evidence_on_failure import FailureEvidence
+from _frame_evidence import FrameWatch, OnFailure, ProcessProbes
 from invisible_core.juggler.actions import Actions, ElementNotActionable
 
 MAIN = "frame-main"
@@ -101,17 +103,38 @@ t.addEventListener('blur', e => got.push('blur'));
 </script>"""
 
 
+@pytest.fixture
+def evidence():
+    """What a failing run leaves for a reader and nothing a test waits for or asserts: the Juggler wire and the engine's own trace (armed before the
+    browser is launched: the engine reads its trace folder at launch), the client's view of the frames and calls, the reading of the wire (every
+    evaluate with the context, frame and times it went to, and the ones with no answer), and the stalls of the test process and the runner's load.
+    Saved only when the body of the test fails (``OnFailure``); the folder is the one the e2e jobs upload."""
+    held = FailureEvidence("actions-without-a-point")
+    watch = FrameWatch()
+    probes = ProcessProbes()
+    held.note_records("client-view-of-the-frames", watch)
+    held.note_records("juggler-wire-reading", watch.wire)
+    probes.keep_in(held)
+    held.arm()
+    try:
+        yield held, watch, probes
+    finally:
+        held.__exit__(None, None, None)
+
+
 @pytest.mark.e2e
-def test_hidden_elements_take_the_actions_playwright_allows(firefox_binary):
+def test_hidden_elements_take_the_actions_playwright_allows(firefox_binary, evidence):
     from invisible_playwright import InvisiblePlaywright
 
+    held, watch, probes = evidence
     with InvisiblePlaywright(seed=42, binary_path=firefox_binary,
-                             humanize=False, headless=True) as browser:
-        page = browser.new_page()
-        page.set_content(PAGE)
-        page.dispatch_event("#b", "click", timeout=30_000)
-        page.focus("#t", timeout=30_000)
-        page.locator("#t").blur(timeout=30_000)
+                             humanize=False, headless=True) as browser, OnFailure(held, watch, probes):
+        page = watch.observed("new_page", browser.new_page)
+        watch.listen(page, "page")
+        watch.observed("set_content", lambda: page.set_content(PAGE))
+        watch.observed("dispatch_event", lambda: page.dispatch_event("#b", "click", timeout=30_000))
+        watch.observed("focus", lambda: page.focus("#t", timeout=30_000))
+        watch.observed("blur", lambda: page.locator("#t").blur(timeout=30_000))
         # A display:none input cannot take focus, so only the dispatched
         # click reaches a listener; what matters is that none of the three
         # timed out asking a hidden element for a point.

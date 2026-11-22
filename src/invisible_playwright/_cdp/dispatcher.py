@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from invisible_core import parse_proxy
 from invisible_core.juggler import SessionFiles
 from invisible_core.juggler.keyboard import KEYBOARD_LAYOUT_PREF, profiles_pref
-from invisible_core.process import alive
+from invisible_core.process import alive, psutil
 
 from .._juggler._marshal import _caller_timeout
 from .._juggler._reaped import SessionRemoval
@@ -21,6 +21,21 @@ _SHORT_TMP_PREFIX = "ipw_t_"
 # Chromium's ProcessSingletonPosix creates `<TMPDIR>/org.chromium.Chromium.XXXXXX/SingletonSocket`
 # (+45 bytes) and calls LOG(FATAL) if `sun_path` exceeds 107 bytes.
 _POSIX_TMP_MAX_BYTES = 52
+
+
+def _pid_alive(pid: int) -> bool:
+    if psutil is not None:
+        try:
+            return alive(psutil.Process(pid))
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 
 
 def _sweep_short_tmps(root: str = "/tmp") -> None:
@@ -36,7 +51,7 @@ def _sweep_short_tmps(root: str = "/tmp") -> None:
         if not head.isdigit():
             continue
         pid = int(head)
-        if pid == my_pid or alive(pid):
+        if pid == my_pid or _pid_alive(pid):
             continue
         path = os.path.join(root, name)
         if os.path.isdir(path):

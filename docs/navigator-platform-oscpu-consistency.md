@@ -88,7 +88,7 @@ fingerprint on its own.
 Two things follow. First, if you are presenting as Firefox, `navigator.oscpu` must be
 present and it must name the same OS as everything else, because a real Firefox has it
 and a real Firefox agrees with itself. Second, `navigator.oscpu` is one of the strings a
-suite like [CreepJS](how-to-test-bot-detection.md) or a public detector reads directly,
+suite like [a consistency checker](how-to-test-bot-detection.md) or a public detector reads directly,
 so it is not an obscure corner - it is on the list of things that get compared.
 
 An empty or missing `navigator.oscpu` on a browser claiming to be Firefox is the worst of

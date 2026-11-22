@@ -1,0 +1,15 @@
+{
+  "firefox-68": {
+    "carries": [
+      "the in-memory caches of the core are gone (core 67.78.0, no engine change)",
+      "revocations and intermediates as ready-made files (the security-state component)",
+      "a navigation that committed is not cut by the parent (the held cut: networkidle)",
+      "the Juggler trace and the MOZ_LOG modules of the gate",
+      "TEMP on D: in the Windows jobs"
+    ],
+    "files": {
+      "tests/test_a_page_that_moves_on_e2e.py": "a navigation that committed is not cut by the parent: goto answers on our own page, networkidle is reached on the one that replaced it",
+      "tests/test_fakeweb_p2_e2e.py": "under a load of other browsers the page that leaves with beacons reaches networkidle every round (the held cut of a committed navigation); on an older engine the run is made and not judged"
+    }
+  }
+}

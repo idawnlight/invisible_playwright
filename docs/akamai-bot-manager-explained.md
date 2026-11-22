@@ -16,10 +16,10 @@ fingerprint into a Bot Score from 0 (human) to 100 (bot). Passing one layer of t
 pipeline, even the hardest layer, does not mean you pass the rest.
 
 A real, documented case makes that concrete, not theoretical. In April 2026 a
-user of [Camoufox](https://github.com/daijro/camoufox), a separate open-source project
+user of a separate open-source project
 that also patches Firefox at the C++ level for automation, filed
-[an issue](https://github.com/daijro/camoufox/issues/555) reporting that an
-Akamai-protected site blocked their Camoufox session with a flat 403 while stock,
+an issue reporting that an
+Akamai-protected site blocked their patched-Firefox session with a flat 403 while stock,
 unpatched Firefox driven through the same Playwright automation reached the page and a
 solvable challenge. The reporter had already checked the one thing everyone checks
 first, the TLS and HTTP/2 handshake, and it matched byte for byte. This page walks
@@ -115,7 +115,7 @@ It does not remove the other six.
 Here is what the GitHub issue actually contains, read directly, not summarized
 from memory.
 
-The reporter, running Camoufox v135.0.1-beta.24 through Playwright 1.58.0 on Linux, was
+The reporter, running that project's v135.0.1-beta.24 build through Playwright 1.58.0 on Linux, was
 being blocked with a flat 403 by one specific Akamai-protected site, while the same
 automated request pattern against the same site using stock Firefox through Playwright
 returned a normal page and a solvable challenge. Before filing, the reporter had already
@@ -123,12 +123,12 @@ run the check this whole article leads with: they compared JA3, JA4, and Akamai'
 HTTP/2 signature between the two browsers and found them identical, and confirmed the
 HTTP headers matched except for the User-Agent version string. Their own conclusion,
 stated in the issue, was that this "means detection is NOT TLS/HTTP2," and that
-"something in Camoufox's C++ patches is being detected" further up the stack.
+"something in the C++ patches is being detected" further up the stack.
 
 The reporter also tested several other Akamai-protected sites in the same session: most
 treated both browsers identically, either passing both or blocking both, which is itself
-useful information, because it means the divergence was not a blanket Camoufox
-signature, it was specific to one deployment's tuning.
+useful information, because it means the divergence was not a blanket signature of that
+build, it was specific to one deployment's tuning.
 
 Working the problem, the reporter ruled out a content-blocking browser extension,
 changing the reported OS, enabling the page cache, and matching window sizes by hand,
@@ -146,7 +146,7 @@ it caused the block, and nobody in the thread went on to confirm which one, or w
 any one of them individually, was responsible.
 
 What actually closed the issue was different from what anyone expected going in. Another
-user suggested trying a newer Camoufox build, version 140 or higher from an unofficial
+user suggested trying a newer build, version 140 or higher from an unofficial
 fork rather than the mainline release the reporter had been running. The reporter tried
 it, confirmed the previously-blocked site and the others now loaded normally, reopened
 the issue asking for the fix to land in the mainline branch, and a third participant
@@ -174,7 +174,7 @@ that had nothing to do with the browser at all.
 That lesson generalizes to any project taking this approach, and it does not stop at the
 project this issue was filed against. This project also compiles Firefox from source and
 sets its fingerprint at the C++ level rather than in JavaScript, for
-[the same reasons Camoufox does](vs-camoufox.md): an injected override is a function
+the same reasons that project does: an injected override is a function
 whose source can be read, and a value decided below the JavaScript layer is not. That
 shared decision is a real advantage over page-level spoofing, and it is not a guarantee
 against a specific commercial detector's tuning on a specific deployment. This project
@@ -192,10 +192,10 @@ against that same session's history, not just evaluated once.
 
 **Does a matching TLS/JA3/JA4 fingerprint mean I pass Akamai?** No. It means one input to
 the score, out of roughly seven categories Akamai evaluates, agrees with a real browser.
-The documented Camoufox case had a byte-identical network fingerprint and was still
+The documented case had a byte-identical network fingerprint and was still
 blocked.
 
-**What actually happened in the Camoufox GitHub issue?** An older patched build was
+**What actually happened in the GitHub issue?** An older patched build was
 blocked by one Akamai-protected site while stock Firefox passed, despite matching
 TLS/JA3/JA4/HTTP2 fingerprints. Switching to a newer patched build resolved it in
 practice. No mechanism was confirmed in the thread.
@@ -217,8 +217,7 @@ the parts that are hardest to verify from outside: the JavaScript-collected brow
 device fingerprint, behavioral telemetry across the session, and reputation tied to the
 IP and cookie history, none of which a single clean test can rule in or out.
 
-**See also:** [Playwright stealth vs Camoufox: two patched Firefoxes](vs-camoufox.md),
-for how this project and Camoufox compare on everything else; [JA3 and JA4: why a TLS
+**See also:** [JA3 and JA4: why a TLS
 fingerprint cannot be patched](ja3-ja4-tls-fingerprint.md) and [HTTP/2 fingerprint: the
 layer above the TLS handshake](http2-fingerprint-detection.md), for the two layers that
 matched in the case above; and [How do websites detect bots?](how-do-websites-detect-bots.md),
@@ -226,8 +225,8 @@ for where a JavaScript-collected fingerprint sits among the other layers.
 
 ## Sources
 
-- GitHub issue [`daijro/camoufox#555`](https://github.com/daijro/camoufox/issues/555),
-  "Akamai-protected sites block Camoufox but not stock Firefox via Playwright," retrieved
+- A public GitHub issue on a patched-Firefox project,
+  "Akamai-protected sites block the patched build but not stock Firefox via Playwright," retrieved
   2026-08-30, for the test results, the matched network fingerprints, the suspected
   patches, the viewport inconsistency, and the resolution.
 - Akamai's own documentation, [Detection
@@ -247,7 +246,7 @@ for where a JavaScript-collected fingerprint sits among the other layers.
 ---
 
 *From the notes of [invisible_playwright](https://github.com/oss-invisible/playwright),
-a Firefox patched at the C++ level. The Camoufox issue above is someone else's bug
+a Firefox patched at the C++ level. The issue above is someone else's bug
 tracker and someone else's engine build; it is quoted here because it is the clearest
 public evidence that this whole approach narrows a gap rather than closing one, and that
 applies to this project exactly as much as it applies to theirs.*

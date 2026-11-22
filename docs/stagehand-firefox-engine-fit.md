@@ -109,7 +109,7 @@ swapping the engine buys you, so the framing has to stay honest.
 The GPU, canvas, audio, fonts and screen are seed-derived and internally consistent; the
 TLS handshake is a real Firefox handshake because it is a real Firefox; and there is no
 driver flag announcing automation. Those are the layers a public suite like
-[CreepJS, sannysoft or BotD](how-to-test-bot-detection.md) reads, and they are the layers
+[a consistency checker, a basic bot-test page or BotD](how-to-test-bot-detection.md) reads, and they are the layers
 where a genuine engine wins by being genuine rather than by patching over a Chromium one.
 
 What the engine does **not** touch, and no engine choice does:

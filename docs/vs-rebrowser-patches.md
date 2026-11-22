@@ -72,7 +72,7 @@ about any page-level patch, regardless of which tool applies it.
 
 ## How to actually choose
 
-- **Need Firefox specifically?** This project or [Camoufox](vs-camoufox.md). Neither
+- **Need Firefox specifically?** This project or another patched Firefox. Neither
   rebrowser-patches nor Patchright reaches this engine at all.
 - **Committed to Chromium, chasing the `Runtime.enable` leak specifically?**
   Either rebrowser-patches or Patchright fixes it, by close to the same method;

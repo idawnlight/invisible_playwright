@@ -100,7 +100,7 @@ This is not hypothetical fussiness. Fixed-interval access is one of the cheapest
 things to measure on the receiving end - it needs no JavaScript, no challenge, just
 timestamps you were already logging. It survives a proxy rotation, because rotating
 the exit IP does not change *when* the requests come. And it is invisible to every
-in-page test you can run against yourself: [sannysoft, CreepJS, BotD and BrowserLeaks
+in-page test you can run against yourself: [a basic bot-test page, a consistency checker, BotD and a raw-value inspector
 all read one moment](how-to-test-bot-detection.md) and have nothing to say about the
 shape of a week.
 

@@ -67,8 +67,8 @@ fake rather than as private. We know because we did it. An early version of this
 randomised the numeric limits per session, on the reasonable-sounding theory that
 varying values are harder to track.
 
-The result was the opposite of privacy. [CreepJS](https://abrahamjuliot.github.io/creepjs/)
-([what CreepJS checks](creepjs-explained.md)) compares the parameter set against a
+The result was the opposite of privacy. A consistency checker
+([what a consistency checker checks](consistency-checker-explained.md)) compares the parameter set against a
 collection of hashes seen on real browsers. Ours
 matched none of them, so it was classified as low entropy and the **entire WebGL section
 was dropped from the report**.
@@ -151,7 +151,7 @@ to it.
 do not occur, and at least one well-known detector explicitly compares against the set
 of real ones.
 
-**Why does my WebGL section disappear from a CreepJS report?** Often because the
+**Why does my WebGL section disappear from a consistency checker report?** Often because the
 parameter set was not recognised as a real one, which gets it treated as low entropy
 rather than as an identity.
 
@@ -178,7 +178,7 @@ the host platform rather than the card.
   2026-08-28, the public survey of real-world WebGL parameter and extension support
   referenced above.
 - This project's own testing: an earlier version of this project randomised the numeric
-  WebGL limits per session, and the CreepJS low-entropy classification described above is
+  WebGL limits per session, and the consistency checker low-entropy classification described above is
   what drove the numbers back to the canonical block.
 
 **See also:** [Firefox WebGL renderer strings](webgl-renderer-strings.md) for the string

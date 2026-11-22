@@ -131,7 +131,7 @@ invisible_playwright is a Firefox patched at the C++ level and driven by stock
 Playwright, built to look like a real browser operated by a real person. That is why it
 passes most detection checks that live in the browser: the fingerprint (GPU, canvas,
 audio, fonts, screen, roughly 400 fields, seed-reproducible), the TLS handshake and the
-driver layer all read as a genuine Firefox rather than an automated one. A CreepJS,
+driver layer all read as a genuine Firefox rather than an automated one. A consistency checker,
 BotD, FingerprintJS or sannysoft run reads it as an ordinary browser because at those
 layers it is one.
 

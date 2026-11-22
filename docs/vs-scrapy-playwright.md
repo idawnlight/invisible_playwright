@@ -51,7 +51,7 @@ The tells fall into two groups, and neither is fixed by orchestration.
   survive every in-page patch because they are not JavaScript's to change.
 
 You can confirm which group you are hitting the same way you would for any Playwright
-job: open a public suite such as CreepJS or sannysoft in the browser Scrapy launched,
+job: open a public suite such as a consistency checker or a basic bot-test page in the browser Scrapy launched,
 and compare it field by field against a stock browser on the same machine. A verdict
 alone will mislead you, for reasons the [bot-detection testing
 guide](how-to-test-bot-detection.md) works through. The point here is only that the

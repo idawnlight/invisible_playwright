@@ -2,8 +2,8 @@
 unit test feeds them the red case and the green case without a browser).
 
 None of them reads how long something took: a loop that is held is told by WHERE the thread of the loop was (inside a blocking step of
-the close), a browser that keeps answering is told by the ORDER of the events (a call that began and ended while the close was in
-flight, and answers that came while the removal of the profile was held), and the removal of the profile is told by WHICH THREAD
+the close), a browser that keeps answering is told by the ORDER of the events (a reply that arrived while the close was in flight,
+and answers that came while the removal of the profile was held), and the removal of the profile is told by WHICH THREAD
 reached it (the reaper's or its continuation's, never the loop's nor one of the close's) and by the order of the close's return and
 the release of the hold. A machine that is slow stretches every duration and changes none of these.
 
@@ -85,21 +85,35 @@ def charged_more_than_ran_problem(held: float, busy_run: float) -> Optional[str]
             "its selector (the machine did not schedule it) was counted as held" % (held * 1000, busy_run * 1000))
 
 
-def others_answered_problem(others: Sequence[dict], gate: dict) -> Optional[str]:
+def others_answered_problem(others: Sequence[dict], gate: dict, loop_inside: Dict[str, dict]) -> Optional[str]:
     """What is wrong with the way the other browsers answered while the first one closed, or None.
 
-    ``others`` has one record per other browser: ``inside`` is the calls that began AFTER the close began and ended BEFORE it ended
-    (a call that was answered during the close, in the order of the events, not by how long it took), ``during_removal`` the calls
-    that began after the removal of the closing browser's profile was reached and ended while it was still held. ``gate`` says how that
-    hold ended: ``reached`` (the removal ran), ``released_by``: ``answered`` (the close had returned and every other browser had
-    answered a call that began after the removal was reached: the loop was free while the removal waited) or ``deadline`` (they had not,
-    in 30 s: the loop could not run while the removal was waiting, which is a removal made on the loop's thread)."""
+    ``others`` has one record per other browser: ``answered`` is the replies that ARRIVED while the close was in flight, whenever the
+    call began (a reply read during the close is proof that the loop ran then; a call that began a moment before the close and ended
+    in it is one), ``inside`` the calls that began AND ended in it (printed, not judged), ``during_removal`` the calls that began after
+    the removal of the closing browser's profile was reached and ended while it was still held. ``gate`` says how that hold ended:
+    ``reached`` (the removal ran), ``released_by``: ``answered`` (the close had returned and every other browser had answered a call
+    that began after the removal was reached: the loop was free while the removal waited) or ``deadline`` (they had not, in 30 s: the
+    loop could not run while the removal was waiting, which is a removal made on the loop's thread). ``loop_inside`` is what the
+    watcher saw of the loop's thread during the close (see the head of this file).
+
+    A browser that answered nothing inside the close is the loop's fault only if the loop was HELD: the watcher saw its thread inside
+    a step of the close that waits, or no browser answered at all (nothing shows that the loop ran). One engine that did not answer
+    while the others did, and the loop was seen free, is a browser the machine did not run: the removal's hold below still asks every
+    browser to answer, once the close is over."""
     if len(others) != 3:
         return "the client followed %d other browsers instead of 3: %r" % (len(others), others)
-    silent = [i for i, r in enumerate(others) if r["inside"] < 1]
+    silent = [i for i, r in enumerate(others) if r["answered"] < 1]
     if silent:
-        return ("the other browsers %s did not answer a single call that began and ended inside the close (calls inside it, per "
-                "browser: %s): the loop that serves them did not run during the close" % (silent, [r["inside"] for r in others]))
+        held = blocked_by(loop_inside)
+        counts = [r["answered"] for r in others]
+        if held:
+            return ("the other browsers %s did not answer a single call inside the close (replies that arrived inside it, per "
+                    "browser: %s) and the watcher saw the loop's thread inside %s: the loop that serves them did not run during "
+                    "the close" % (silent, counts, held))
+        if len(silent) == len(others):
+            return ("no other browser answered a single call inside the close (replies that arrived inside it, per browser: %s): "
+                    "nothing shows that the loop ran during the close" % counts)
     if gate.get("reached") and gate.get("released_by") != "answered":
         return ("the removal of the profile was held until every other browser answered, and they did not (%s): the loop that "
                 "serves them could not run while the removal waited, so the removal ran on it (answers during the removal, per "

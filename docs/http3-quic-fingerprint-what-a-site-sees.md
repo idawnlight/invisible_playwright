@@ -218,7 +218,7 @@ separate and untouched by it.
   as evidence that matching a browser's transport-parameter profile by hand is a real,
   actively maintained engineering problem rather than a hypothetical one, retrieved
   2026-08-28.
-- [BrowserLeaks' QUIC client test](https://browserleaks.com/quic), a public page that reads
+- A public QUIC client test page that reads
   back a connecting client's QUIC transport parameters and HTTP/3 frames, the kind of
   server-side read the "compact profile" described above refers to, retrieved 2026-08-28.
 - This project's network-layer parity checks, which compare a session's negotiated

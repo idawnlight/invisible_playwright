@@ -31,10 +31,10 @@ most of why people get confused by contradictory results.
 | Suite | Question it actually asks | What a pass proves |
 |---|---|---|
 | sannysoft | Are you an unmodified, old headless browser? | Table stakes only - nothing about a modern one |
-| CreepJS | Are you lying about your environment? | Nothing here contradicts anything else here |
+| A consistency checker | Are you lying about your environment? | Nothing here contradicts anything else here |
 | BotD | Which engine are you really running? | A verdict, not a fingerprint |
 | FingerprintJS | Can you be recognised again? | Linkability, not "looks human" |
-| BrowserLeaks | What does one specific surface report? | A single value, not a score |
+| A raw-value inspector | What does one specific surface report? | A single value, not a score |
 
 **[bot.sannysoft.com](sannysoft-explained.md)** is a smoke test. Its main table
 describes headless Chrome as it behaved around 2018, and every serious tool fixes
@@ -42,7 +42,7 @@ those on day one. Passing it proves you are not running an unmodified headless b
 The interesting part is not the table: three canvas tests are also run inside an iframe
 and compared, which is a consistency check instead of a fingerprint check.
 
-**[CreepJS](creepjs-explained.md)** asks whether you are lying, not what you report. It
+**[A consistency checker](consistency-checker-explained.md)** asks whether you are lying, not what you report. It
 takes a clean copy of the built-ins from a fresh iframe, inspects stack traces, walks
 descriptors and prototypes, and records a blocked probe as a lie by name. A high score
 means nothing here contradicts anything else here.
@@ -56,7 +56,7 @@ of roughly forty-one components. It answers "can I be recognised again", which i
 different question from "do I look automated". The commercial version adds signals the
 open-source library does not have.
 
-**[BrowserLeaks](browserleaks-explained.md)** is per-surface instead of a verdict:
+**[A raw-value inspector](raw-value-inspector-explained.md)** is per-surface instead of a verdict:
 WebRTC, canvas, WebGL, fonts. It is the one to reach for when you want to read a
 specific value in place of a score.
 
@@ -79,10 +79,10 @@ So the rule, which applies to every surface and not just that one:
 > **Assert the presence of the right signal, not the absence of a wrong one.** A page that
 > comes back empty, blocked or still loading is a failure, not a pass.
 
-Concretely: the WebRTC section must complete and show a host candidate and a server
+Concretely: the WebRTC section must complete and show a host candidate and, when there is no proxy or the proxy relays UDP, a server
 reflexive one. The canvas must produce a hash, twice, matching. The font list must be
 non-empty and belong to the platform you claim. A suppressed signal is itself a signal,
-and [CreepJS records blocking by name](creepjs-explained.md).
+and [a consistency checker records blocking by name](consistency-checker-explained.md).
 
 The same trap shows up one level down, inside a test itself rather than in what it
 tests. [A cleanup-identification check once passed for exactly this reason](orphaned-browser-process-windows.md) -
@@ -187,8 +187,8 @@ will eventually tell you that a broken browser is fine.
 ## Short answers to the questions that lead here
 
 **Which bot detection test should I use?** Several, because they answer different
-questions. sannysoft as a smoke test, CreepJS for tampering, BotD for a verdict,
-FingerprintJS for linkability, BrowserLeaks to read a specific surface.
+questions. A basic bot-test page as a smoke test, a consistency checker for tampering, BotD for a verdict,
+an open-source fingerprinting library for linkability, a raw-value inspector to read a specific surface.
 
 **I pass every test and still get blocked. Why?** Because the suites do not see the TLS
 handshake, your behaviour, or your address, and because a consistent browser on a
@@ -213,10 +213,10 @@ linked throughout.
 ## Sources
 
 - The five public suites named above, each read from its own source rather than its
-  rendered output: [CreepJS](https://github.com/abrahamjuliot/creepjs),
+  rendered output: a consistency checker,
   [BotD](https://github.com/fingerprintjs/BotD), [sannysoft](https://bot.sannysoft.com/),
   [FingerprintJS](https://github.com/fingerprintjs/fingerprintjs), and
-  [BrowserLeaks](https://browserleaks.com/), retrieved 2026-08-28.
+  a raw-value inspector, retrieved 2026-08-28.
 - This project's release gates, including the WebRTC gate whose negative-only assertions
   produced the false pass described above, and the velocity flag that turned out to be
   the harness.

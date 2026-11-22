@@ -72,7 +72,7 @@ the value is not JavaScript's to rewrite.
 There is a second-order trap here too. Patching `getVoices()` to return a
 hand-built Windows list looks like the fix and is not. A tampering-focused suite
 does not read the list, it reads whether the method was touched. A comparison
-detector like [CreepJS](creepjs-explained.md) takes a clean copy of the built-ins
+detector like [a consistency checker](consistency-checker-explained.md) takes a clean copy of the built-ins
 from a fresh iframe and records an overridden method by name, so a fabricated
 voice list trades a platform mismatch for a lie about the API, which scores worse.
 

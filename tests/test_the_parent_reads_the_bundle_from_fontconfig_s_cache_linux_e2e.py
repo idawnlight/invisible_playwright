@@ -12,8 +12,7 @@ cache under ``$XDG_CACHE_HOME/fontconfig``. On a WARM cache it must read that ca
 the scan: it is the difference between a start that reads 121 fonts and a start that reads one file.
 
 The measurement. Two launches of the same binary with the same ``XDG_CACHE_HOME``, a new folder of the test: the first is cold, the second
-warm. Each runs under ``strace -f -ttt`` (the same stand-in as ``test_fontconfig_reads_nothing_of_the_host_linux_e2e.py``: its helpers
-are the ones used here) that traces the opens of the browser. The environment reaches the browser as it does for a user: the test sets
+warm. Each runs under ``strace -f -ttt`` (the stand-in of ``tests/_strace_stand_in.py``) that traces the opens of the browser. The environment reaches the browser as it does for a user: the test sets
 ``XDG_CACHE_HOME`` in its own environment, and the core composes the engine's environment from it (``build_launch_env``: it removes the
 host's ``MOZ_*``, ``LANG``, ``TZ`` and the toolkit families, and nothing else); that the variable did arrive is shown by the cache that is
 written under it.
@@ -53,10 +52,24 @@ pref is Mozilla's, ``mirror: once``, read at start; ``ActivateBundledFonts`` is 
 correction. The core does not declare that pref anywhere, so the caller's ``extra_prefs`` (applied last, ``_apply_caller_overlay``) is
 the only place that says it. If that launch fails, its error is in the evidence and nothing else changes.
 
+What is a cache "of the bundle", and what is an open that happened. fontconfig names the cache of a folder by the md5 of the folder's
+path (``<md5>-le64.cache-9``), so the cache of the bundle is the file whose name starts with the md5 of ``<GRE>/fonts`` (and, in the same
+launch, with the name fontconfig itself prints for that folder, ``FC_DEBUG=16``); a ``*.cache-*`` file of a system folder
+(``/usr/share/fonts``...) is a different cache and proves nothing about the bundle. An open counts only when its result is on the log:
+strace splits a call that another thread interrupts in "PID openat(... <unfinished ...>" and "PID <... openat resumed>) = -1 ENOENT", the
+result is on the second line, and an unfinished line with no resumed line has no result and is not counted either way.
+
+The evidence of a launch (when ``RUNNER_TEMP`` is set) also holds what fontconfig says: the browser runs with ``FC_DEBUG=16`` (what it
+does with caches: the folders it examines, the caches it finds valid, the writes), strace saves the writes to the descriptors 1 and 2
+(``fc-debug-<launch>.txt``), and ``trace-<launch>.tsv`` has every open of a ``*.cache-*`` file or of a ``CACHEDIR.TAG`` by any process, in any
+folder, and every line that names the bundle's folder or the cache folder: where fontconfig found a valid cache is on it.
+
 Run: pytest tests/test_the_parent_reads_the_bundle_from_fontconfig_s_cache_linux_e2e.py -m e2e -v
 """
 from __future__ import annotations
 
+import codecs
+import hashlib
 import json
 import os
 import re
@@ -70,8 +83,8 @@ import pytest
 
 from _waits import wait_until
 from test_a_screenshot_draws_the_text_of_the_bundled_fonts_as_the_content_does_e2e import EVIDENCE_FOLDER, FAMILIES
-from test_fontconfig_reads_nothing_of_the_host_linux_e2e import (
-    _detached, _group_members, _group_of, _kill_group, _LINE, _require_strace_can_trace, _roles, _stand_in, _wait_for_exit)
+from _strace_stand_in import (
+    _detached, _group_members, _group_of, _kill_group, _LINE, _require_strace_can_trace, _RESUMED, _roles, _stand_in, _wait_for_exit)
 
 pytestmark = [
     pytest.mark.e2e,
@@ -79,7 +92,13 @@ pytestmark = [
 ]
 
 #: Opens, and what is needed to tell the parent from a content process (``_roles`` reads the execve and the clones).
-TRACE = "execve,clone,clone3,fork,vfork,openat,openat2"
+TRACE = "execve,clone,clone3,fork,vfork,openat,openat2,write"
+
+#: What fontconfig prints with ``FC_DEBUG=16`` goes to the descriptor 1 (the core reads it as the browser's output, and keeps 200 lines): the
+#: strace log also holds the ``write`` calls, and ``_fc_debug_text`` keeps those to the descriptors 1 and 2. NOT ``--trace-fds=1,2``: it
+#: filters EVERY traced call by descriptor, so the execve, clone and openat lines (which the parent's identity and the opens are read
+#: from) are gone and the test saw no parent (candidate run 44749623531).
+FC_DEBUG = "16"
 
 SEED = 21
 
@@ -150,9 +169,36 @@ def _parent_pid(argv_of: dict, real: str) -> int:
     return parents[0]
 
 
-def _opens_of_the_parent(lines, times, role, begin, end, under):
+def _results_of_unfinished(lines) -> dict:
+    """``{index of an unfinished openat/openat2 line: its result}``: strace -f writes a call that another thread interrupts as
+    "PID openat(...<unfinished ...>" and gives the result on the next line of that pid, "PID <... openat resumed>) = -1 ENOENT". An
+    unfinished line with no resumed line has no entry."""
+    pending, results = {}, {}
+    for i, line in enumerate(lines):
+        m = _LINE.match(line)
+        if m and m.group(2) in ("openat", "openat2") and "<unfinished ...>" in m.group(3):
+            pending[int(m.group(1))] = i
+            continue
+        r = _RESUMED.match(line)
+        if r and r.group(2) in ("openat", "openat2") and int(r.group(1)) in pending:
+            result = _RETURN.search(r.group(3))
+            if result:
+                results[pending.pop(int(r.group(1)))] = int(result.group(1))
+    return results
+
+
+def _open_result(lines, i, results):
+    """The result of the open on ``lines[i]``: on the line itself, or on the resumed one; None when the log has none."""
+    m = _LINE.match(lines[i])
+    result = _RETURN.search(m.group(3)) if m else None
+    return int(result.group(1)) if result else results.get(i)
+
+
+def _opens_of_the_parent(lines, times, role, begin, end, under, results=None):
     """The opens (openat, openat2) by the parent, in ``lines[begin:end]``, of a path under one of ``under`` (folders):
-    ``[{"t", "path", "ok"}]``. An open whose result is on a resumed line is counted as made: it was asked."""
+    ``[{"t", "path", "ok"}]``, ``ok`` = the open succeeded. An open with no result on the log (an unfinished line with no resumed
+    line) is left out: it is neither made nor refused as far as the log knows."""
+    results = _results_of_unfinished(lines) if results is None else results
     found = []
     for i in range(begin, end):
         m = _LINE.match(lines[i])
@@ -163,9 +209,37 @@ def _opens_of_the_parent(lines, times, role, begin, end, under):
             continue
         if role(int(m.group(1))) != "parent":
             continue
-        result = _RETURN.search(m.group(3))
-        found.append({"t": times[i], "path": quoted[0], "ok": (int(result.group(1)) >= 0) if result else True})
+        result = _open_result(lines, i, results)
+        if result is None:
+            continue
+        found.append({"t": times[i], "path": quoted[0], "ok": result >= 0})
     return found
+
+
+def _bundle_cache_prefixes(folders, fc_debug_text: str = "") -> set:
+    """The first part of the name of a cache OF THE BUNDLE: fontconfig names the cache of a folder by the md5 of its path; and the name
+    fontconfig itself prints for the folder in the same launch (``cache: <name> (dir: <folder>)``), when it printed one."""
+    prefixes = {hashlib.md5(f.rstrip("/").encode()).hexdigest() for f in folders}
+    for f in folders:
+        for name in re.findall(r"cache: (\S+) \(dir: %s\)" % re.escape(f.rstrip("/")), fc_debug_text):
+            prefixes.add(name.split("-")[0])
+    return prefixes
+
+
+def _is_a_cache_of(path: str, prefixes) -> bool:
+    """A cache file that is read: ``<md5>-<arch>.cache-<n>`` of one of ``prefixes`` (not the ``.NEW`` and ``.TMP-*`` it is written through)."""
+    return re.match(r"^[0-9a-f]{32}-[^.]+\.cache-\d+$", os.path.basename(path)) is not None and os.path.basename(path).split("-")[0] in prefixes
+
+
+def _fc_debug_text(lines, role) -> str:
+    """What the browser printed to the descriptors 1 and 2 (``FC_DEBUG``), from the writes strace saved, with the pid and role of each."""
+    out = []
+    for line in lines:
+        m = re.match(r'^(\d+)\s+write\([12], "(.*)"(?:\.\.\.)?, \d+', line)
+        if m:
+            text = codecs.escape_decode(m.group(2).encode("latin-1", errors="replace"))[0].decode("utf-8", errors="replace")
+            out.extend("%s %s\t%s" % (m.group(1), role(int(m.group(1))), t) for t in text.splitlines() if t.strip())
+    return "\n".join(out)
 
 
 def _summary(opens):
@@ -177,6 +251,19 @@ def _summary(opens):
         "refused_opens": len(opens) - len(made),
         "first_to_last_s": round(max(stamps) - min(stamps), 6) if stamps else None,
     }
+
+
+def _environ_of(pid: int, name: str):
+    """The value of ``name`` in the environment the process ``pid`` was started with (``/proc/<pid>/environ``); None when it has none or
+    the file cannot be read."""
+    try:
+        for item in Path("/proc/%d/environ" % pid).read_bytes().split(b"\0"):
+            key, _eq, value = item.partition(b"=")
+            if key == name.encode():
+                return value.decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    return None
 
 
 def _fontconfig_cache(xdg: Path):
@@ -203,13 +290,14 @@ def _launch(firefox_binary, work: Path, xdg: Path, extra_prefs=None):
     stand_in = _stand_in(firefox_binary, work / "engine", log, pidfile, syscalls=TRACE, timestamps=True)
     real = os.path.realpath(firefox_binary)
     gre_fonts = os.path.join(os.path.dirname(real), "fonts")
-    rss, boundary, pid = {}, None, None
+    rss, boundary, pid, environ_xdg = {}, None, None, None
     try:
         with InvisiblePlaywright(seed=SEED, binary_path=stand_in, headless=True, extra_prefs=extra_prefs) as browser:
             # The launch has returned: the parent has built its font list. No page has been opened yet.
             boundary = log.stat().st_size
             _lines, _times, _role, argv_of, _start = _read(log, real, boundary)
             pid = _parent_pid(argv_of, real)
+            environ_xdg = _environ_of(pid, "XDG_CACHE_HOME")
             page = browser.new_page()
             rss["after_about_blank_kb"] = _vmrss_kb(pid)
             page.set_content(_page_with_every_family())
@@ -221,17 +309,56 @@ def _launch(firefox_binary, work: Path, xdg: Path, extra_prefs=None):
 
     lines, times, role, _argv_of, start = _read(log, real, boundary)
     under = sorted({gre_fonts, os.path.realpath(gre_fonts)})
-    scan = _opens_of_the_parent(lines, times, role, 0, start, under)
-    later = _opens_of_the_parent(lines, times, role, start, len(lines), under)
+    results = _results_of_unfinished(lines)
+    scan = _opens_of_the_parent(lines, times, role, 0, start, under, results)
+    later = _opens_of_the_parent(lines, times, role, start, len(lines), under, results)
+    fc_debug = _fc_debug_text(lines, role)
+    prefixes = _bundle_cache_prefixes(under, fc_debug)
     fonts, left_out = _the_folder(gre_fonts)
     opened = sorted({os.path.basename(o["path"]) for o in scan if o["ok"]})
     cache_dir = str(xdg / "fontconfig")
-    cache_reads = [o for o in _opens_of_the_parent(lines, times, role, 0, start, [cache_dir]) if ".cache-" in o["path"] and o["ok"]]
+    # Evidence for a launch whose cache is missing: every line of the log, by ANY process, that names the bundle's folder, the cache
+    # folder or a ``.uuid``, with the role of the process and the window it is in (the opens above count only the parent's, and only
+    # in the window). The raw lines say who scanned (or did not), and where fontconfig wrote.
+    trace = []
+    for i, line in enumerate(lines):
+        if any(u in line for u in under) or cache_dir in line or "/.uuid" in line:
+            m = _LINE.match(line) or re.match(r"^(\d+)\s", line)
+            who = role(int(m.group(1))) if m else "?"
+            trace.append("%s\t%s\t%s\t%s" % (times[i], "startup" if i < start else "later", who, line[:400]))
+    # The reads of the cache of the BUNDLE (not of a system folder), by the parent in the window: under the cache folder, and anywhere.
+    cache_reads = [o for o in _opens_of_the_parent(lines, times, role, 0, start, [cache_dir], results)
+                   if o["ok"] and _is_a_cache_of(o["path"], prefixes)]
+    anywhere = []
+    for i, line in enumerate(lines[:start]):
+        m = _LINE.match(line)
+        if m and m.group(2) in ("openat", "openat2") and role(int(m.group(1))) == "parent":
+            quoted = _QUOTED.findall(m.group(3))
+            if quoted and _is_a_cache_of(quoted[0], prefixes) and (_open_result(lines, i, results) or -1) >= 0:
+                anywhere.append(quoted[0])
+    # Every open of a cache file or of a CACHEDIR.TAG by any process, in any folder, with its result: where fontconfig found a valid cache.
+    cache_opens = []
+    for i, line in enumerate(lines):
+        m = _LINE.match(line)
+        if m and m.group(2) in ("openat", "openat2"):
+            quoted = _QUOTED.findall(m.group(3))
+            if quoted and (".cache-" in quoted[0] or "CACHEDIR.TAG" in quoted[0]):
+                result = _open_result(lines, i, results)
+                cache_opens.append("%s\t%s\t%s\t%s\t%s" % (
+                    times[i], "startup" if i < start else "later", role(int(m.group(1))),
+                    "no-result" if result is None else ("ok" if result >= 0 else "refused"), quoted[0]))
+    trace = cache_opens + trace
     return {
         "parent_pid": pid,
+        "parent_environ_xdg_cache_home": environ_xdg,
         "startup": _summary(scan),
         "after_startup": _summary(later),
         "cache_files_read_at_startup": sorted({o["path"] for o in cache_reads}),
+        "bundle_cache_read_anywhere_at_startup": sorted(set(anywhere)),
+        "bundle_cache_names": sorted(prefixes),
+        "bundle_cache_written": [f for f in _fontconfig_cache(xdg) if _is_a_cache_of(f["name"], prefixes)],
+        "fc_debug_about_the_bundle": [l for l in fc_debug.splitlines() if any(u in l for u in under)],
+        "_fc_debug": fc_debug,
         "fontconfig_cache": _fontconfig_cache(xdg),
         "vmrss_kb": rss,
         "bundle_font_files": len(fonts),
@@ -241,6 +368,7 @@ def _launch(firefox_binary, work: Path, xdg: Path, extra_prefs=None):
         "files_opened_at_startup": opened,
         "_scan_opens": scan,
         "_later_opens": later,
+        "_trace": trace,
     }
 
 
@@ -302,6 +430,7 @@ def test_the_warm_parent_reads_the_bundle_from_fontconfig_cache_and_does_not_sca
     xdg = tmp_path / "xdg-cache"
     xdg.mkdir()
     monkeypatch.setenv("XDG_CACHE_HOME", str(xdg))
+    monkeypatch.setenv("FC_DEBUG", FC_DEBUG)  # it only prints; the core passes it to the browser as it passes XDG_CACHE_HOME
 
     cold = _launch(firefox_binary, tmp_path / "cold", xdg)
     cold_cache = cold["fontconfig_cache"]
@@ -338,11 +467,17 @@ def test_the_warm_parent_reads_the_bundle_from_fontconfig_cache_and_does_not_sca
                 rows = ["%s\t%s\t%s" % (o["t"], "ok" if o["ok"] else "refused", o["path"])
                         for o in measure["_scan_opens"] + measure["_later_opens"]]
                 (where / ("bundle-opens-%s.tsv" % name)).write_text("\n".join(rows) + "\n", encoding="utf-8")
+                (where / ("trace-%s.tsv" % name)).write_text("\n".join(measure["_trace"]) + "\n", encoding="utf-8")
+                (where / ("fc-debug-%s.txt" % name)).write_text(measure["_fc_debug"] + "\n", encoding="utf-8")
 
     # The measurement is valid or the test says it cannot judge.
-    assert cold_cache, (
-        "the cold launch wrote nothing under XDG_CACHE_HOME=%s: either the variable did not reach the browser or fontconfig keeps no "
-        "cache for the bundle; there is nothing for a warm launch to read" % xdg)
+    assert cold["bundle_cache_written"], (
+        "the cold launch wrote no cache of the bundle under XDG_CACHE_HOME=%s (there: %s; the names of a cache of the bundle: %s). "
+        "XDG_CACHE_HOME in the parent's environment: %s. Cache of the bundle opened by the parent before a page, in any folder: %s. "
+        "What fontconfig printed about the folder of the bundle (FC_DEBUG=16): %s. The window: %s. Nothing for a warm launch to read."
+        % (xdg, [f["name"] for f in cold_cache] or "nothing", cold["bundle_cache_names"], cold["parent_environ_xdg_cache_home"],
+           cold["bundle_cache_read_anywhere_at_startup"] or "none", cold["fc_debug_about_the_bundle"] or "nothing (or FC_DEBUG not saved)",
+           cold["startup"]))
     assert not cold["font_files_not_opened_at_startup"] and cold["bundle_font_files"], (
         "the parent of the cold launch did not open every font file of <GRE>/fonts (%d of %d) before a page was opened: the window does "
         "not see the scan; the test cannot judge. Not opened: %s"

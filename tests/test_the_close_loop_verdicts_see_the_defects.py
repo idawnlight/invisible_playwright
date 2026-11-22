@@ -267,41 +267,147 @@ def test_what_the_loop_runs_between_two_awaits_of_the_close_is_not_a_blocking_st
 # the other browsers
 # ---------------------------------------------------------------------------------------------------------------------------------
 
-def _others(inside=(2, 2, 2), removal=(1, 1, 1)):
-    return [{"inside": a, "during_removal": b, "slowest": 9.9} for a, b in zip(inside, removal)]
+#: What the watcher saw of the loop's thread during a close: nothing of a step that waits (a loop that was free), or the transport's
+#: `shutdown` on it (a loop that was held: the defect).
+_LOOP_FREE = {}
+_LOOP_HELD = {_CLOSE_STEP_FILE + ":shutdown": {"n": 3, "stack": [_CLOSE_STEP_FILE + ":shutdown"]}}
+_ANSWERED = {"reached": True, "released_by": "answered"}
+
+
+def _others(answered=(2, 2, 2), removal=(1, 1, 1), inside=None):
+    inside = answered if inside is None else inside
+    return [{"answered": a, "inside": i, "during_removal": b, "slowest": 9.9, "open_for": 0.0, "spans": []}
+            for a, i, b in zip(answered, inside, removal)]
 
 
 def test_the_others_that_answered_inside_the_close_and_during_the_removal_are_green_whatever_the_seconds_they_took():
     # The calls took 9.9 s each in these records: the seconds decide nothing.
-    assert verdicts.others_answered_problem(_others(), {"reached": True, "released_by": "answered"}) is None
+    assert verdicts.others_answered_problem(_others(), _ANSWERED, _LOOP_FREE) is None
+    assert verdicts.others_answered_problem(_others(), _ANSWERED, _LOOP_HELD) is None
 
 
-def test_a_browser_that_answered_nothing_inside_the_close_is_red():
-    problem = verdicts.others_answered_problem(_others(inside=(4, 0, 4)), {"reached": True, "released_by": "answered"})
-    assert problem is not None and "[1]" in problem
+def test_a_browser_that_answered_nothing_inside_the_close_while_the_loop_was_held_is_red():
+    # The defect: the close on the loop's thread. The watcher saw it inside the step, and one browser has no reply inside the close.
+    problem = verdicts.others_answered_problem(_others(answered=(4, 0, 4)), _ANSWERED, _LOOP_HELD)
+    assert problem is not None and "[1]" in problem and _CLOSE_STEP_FILE + ":shutdown" in problem
+
+
+def test_every_browser_silent_inside_the_close_is_red_even_when_the_watcher_saw_nothing():
+    # Nothing shows that the loop ran: a loop held in a step the watcher does not know is the same as no reply at all.
+    problem = verdicts.others_answered_problem(_others(answered=(0, 0, 0)), _ANSWERED, _LOOP_FREE)
+    assert problem is not None and "no other browser answered" in problem
+
+
+def test_one_engine_silent_inside_the_close_while_the_loop_was_free_is_green():
+    # The rosso of the corsa 44856198702 (Windows): replies [47, 0, 46] and the loop never seen inside a step of the close. The
+    # second browser's engine did not run; the loop read the others' replies. The removal's hold still asks it to answer afterwards.
+    assert verdicts.others_answered_problem(_others(answered=(47, 0, 46)), _ANSWERED, _LOOP_FREE) is None
+
+
+def test_a_reply_that_arrived_inside_the_close_counts_whenever_its_call_began():
+    # A call that began just before the close and was read by the loop inside it: no call began AND ended inside (`inside` 0), one
+    # reply arrived inside (`answered` 1), and that is a browser that answered.
+    assert verdicts.others_answered_problem(_others(answered=(1, 1, 1), inside=(0, 0, 0)), _ANSWERED, _LOOP_HELD) is None
 
 
 def test_a_removal_that_went_on_only_at_its_deadline_is_red():
     # The loop could not run while the removal waited for the answers: the removal ran on it. Calls that began and ended inside the
     # close after the deadline do not make it green.
-    problem = verdicts.others_answered_problem(_others(inside=(5, 5, 5), removal=(0, 0, 0)), {"reached": True, "released_by": "deadline"})
+    problem = verdicts.others_answered_problem(_others(removal=(0, 0, 0)), {"reached": True, "released_by": "deadline"}, _LOOP_FREE)
     assert problem is not None and "deadline" in problem
 
 
 def test_the_hold_of_the_removal_is_not_asked_when_no_removal_was_reached():
     # Another verdict says the removal must have been reached (`removal_never_reached_problem`); this one still asks for the calls
     # inside the close.
-    assert verdicts.others_answered_problem(_others(), {"reached": False, "released_by": None}) is None
-    assert verdicts.others_answered_problem(_others(inside=(1, 1, 0)), {"reached": False, "released_by": None}) is not None
+    assert verdicts.others_answered_problem(_others(), {"reached": False, "released_by": None}, _LOOP_FREE) is None
+    assert verdicts.others_answered_problem(_others(answered=(1, 1, 0)), {"reached": False, "released_by": None}, _LOOP_HELD) is not None
+    assert verdicts.others_answered_problem(_others(answered=(1, 1, 0)), {"reached": False, "released_by": None}, _LOOP_FREE) is None
 
 
 def test_fewer_than_three_other_browsers_followed_is_red():
-    assert verdicts.others_answered_problem(_others()[:2], {"reached": True, "released_by": "answered"}) is not None
+    assert verdicts.others_answered_problem(_others()[:2], _ANSWERED, _LOOP_FREE) is not None
 
 
 def test_a_browser_that_answered_nothing_while_the_removal_was_held_is_red():
-    problem = verdicts.others_answered_problem(_others(removal=(2, 0, 1)), {"reached": True, "released_by": "answered"})
+    problem = verdicts.others_answered_problem(_others(removal=(2, 0, 1)), _ANSWERED, _LOOP_FREE)
     assert problem is not None and "[1]" in problem
+
+
+def _pinger():
+    """`pinger` of the client, exactly as the e2e writes it."""
+    text = e2e._CLIENT
+    source = text[text.index("async def pinger"):text.index("def hold_the_loop")]
+    scope = {"asyncio": asyncio, "time": time}
+    exec(compile(source, "client_pinger", "exec"), scope)
+    return scope["pinger"]
+
+
+class _Page:
+    """A page whose `evaluate` is answered when the test says so: ``replies`` is a list of the events that the successive calls wait for
+    (the calls after the last wait for nothing and never return)."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+
+    async def evaluate(self, expression):
+        if self.replies:
+            await self.replies.pop(0).wait()
+        else:
+            await asyncio.Event().wait()
+
+
+def _run_the_pinger(script):
+    """Run the client's pinger on a page of ``script(closing, replies)``: it makes the order of the events happen. Returns the record."""
+    async def main():
+        closing, gate = asyncio.Event(), {"since": None, "released_by": None}
+        record = {"stop": False, "answered": 0, "inside": 0, "during_removal": 0, "slowest": 0.0, "open_since": None, "spans": []}
+        replies = [asyncio.Event() for _ in range(3)]
+        task = asyncio.create_task(_pinger()(_Page(replies), record, closing, gate, [record]))
+        await asyncio.sleep(0.01)
+        await script(closing, replies)
+        await asyncio.sleep(0.01)
+        record["stop"] = True
+        task.cancel()
+        return record
+    return asyncio.run(main())
+
+
+def test_a_call_that_began_before_the_close_and_was_read_inside_it_is_an_answer_but_not_a_call_inside():
+    async def script(closing, replies):
+        closing.set()                      # the first call is waiting: it began before the close
+        replies[0].set()                   # and the loop reads its reply inside the close
+        await asyncio.sleep(0.01)
+    record = _run_the_pinger(script)
+    assert record["answered"] == 1 and record["inside"] == 0
+    assert verdicts.others_answered_problem(
+        [dict(record, during_removal=1)] * 3, _ANSWERED, _LOOP_HELD) is None
+
+
+def test_a_call_that_waited_through_the_whole_close_is_silent_and_says_where_it_was():
+    async def script(closing, replies):
+        closing.set()
+        await asyncio.sleep(0.01)
+        closing.clear()                    # the close returned and the reply has not come: the engine did not run
+    record = _run_the_pinger(script)
+    assert record["answered"] == 0 and record["inside"] == 0
+    assert record["open_since"] is not None and record["spans"] == []
+    # With the loop free this browser is not the close's doing (the others answered); with the loop held it is.
+    others = [dict(record, answered=0, during_removal=1), _others()[0], _others()[2]]
+    assert verdicts.others_answered_problem(others, _ANSWERED, _LOOP_FREE) is None
+    assert verdicts.others_answered_problem(others, _ANSWERED, _LOOP_HELD) is not None
+
+
+def test_a_call_that_began_and_ended_inside_the_close_is_an_answer_and_a_call_inside():
+    async def script(closing, replies):
+        replies[0].set()
+        await asyncio.sleep(0.01)          # the first call ended before the close: not counted
+        closing.set()
+        replies[1].set()                   # the second began after the close's start and ended inside it
+        await asyncio.sleep(0.04)
+    record = _run_the_pinger(script)
+    assert record["answered"] >= 1 and record["inside"] >= 1
+    assert len(record["spans"]) >= 2
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------

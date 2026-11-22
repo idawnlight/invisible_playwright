@@ -116,7 +116,7 @@ contradiction that lowers the score.
 Because the fingerprint, the engine behaviour and the driver layer all read as a genuine
 Firefox, this design passes most detection checks that live in the browser. The canvas
 produces a real hash that is stable across the session. The engine answers descriptor and
-prototype probes the way a real Firefox does, so a [tampering-focused suite like CreepJS](creepjs-explained.md)
+prototype probes the way a real Firefox does, so a [tampering-focused suite like a consistency checker](consistency-checker-explained.md)
 finds nothing contradicting anything else. There is no
 [`navigator.webdriver`](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/webdriver),
 no leftover automation global, no headless user agent for a [verdict tool like
@@ -194,7 +194,7 @@ stability pull against each other.
   retrieved 2026-08-28, which defines the confidence score as one minus the
   false-positive probability of an identification, not as a measure of how
   automated the browser looked.
-- [CreepJS](https://github.com/abrahamjuliot/creepjs) and
+- A consistency checker and
   [BotD](https://github.com/fingerprintjs/BotD) on GitHub, retrieved 2026-08-28,
   the two detection tools named above, for what each one checks.
 - This project's release gates, which assert that a value read twice in one session

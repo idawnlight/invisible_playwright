@@ -99,7 +99,7 @@ unrelated to anything a driver fork patches.
 
 ## How to actually choose
 
-- **Need Firefox specifically?** This project or Camoufox; Patchright does not run on
+- **Need Firefox specifically?** This project or another patched Firefox; Patchright does not run on
   either engine.
 - **Committed to Chromium, and the tells you are chasing are CDP-specific?** Patchright
   fixes exactly that category, and does it without a browser fork to maintain.

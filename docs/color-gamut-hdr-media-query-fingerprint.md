@@ -73,7 +73,7 @@ surface that reports the same underlying fact through CSS.
 If your approach to fingerprinting is injecting JavaScript, this surface is a problem,
 because there is nothing in JavaScript's gift to change here. You can redefine
 `matchMedia` to lie about `color-gamut`, but redefining a built-in is itself one of
-the loudest tells there is: [CreepJS](how-to-test-bot-detection.md) walks descriptors
+the loudest tells there is: [a consistency checker](how-to-test-bot-detection.md) walks descriptors
 and prototypes and records a patched built-in by name. And even if you patch
 `matchMedia`, the pure-CSS path that applies a `@media (color-gamut: ...)` rule
 without ever calling script is still resolving against the real value. You cannot

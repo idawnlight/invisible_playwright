@@ -77,7 +77,7 @@ without any cleverness at all.
 created, that prevention is written down as a finding. Suppressing the probe is not
 neutral; it is a distinct, nameable event.
 
-[The page on CreepJS](creepjs-explained.md) goes through these against a real
+[The page on a consistency checker](consistency-checker-explained.md) goes through these against a real
 implementation.
 
 ## Why this argues for the engine, and what that does not fix
@@ -157,10 +157,10 @@ machine you are running on still answers for itself.
   retrieved 2026-08-28, for the specified requirement that a native function's string
   representation follow the `NativeFunction` grammar rather than reproduce source text,
   which is why `[native code]` is the honest answer and not a convention someone chose.
-- [CreepJS](https://github.com/abrahamjuliot/creepjs), read 2026-08-28, for a real
+- A consistency checker, read 2026-08-28, for a real
   implementation of the pristine-reference, stack-trace, and descriptor-walking checks
   described in "The four ways this is actually checked," covered in more detail on
-  [the page on CreepJS](creepjs-explained.md).
+  [the page on a consistency checker](consistency-checker-explained.md).
 
 **See also:** [navigator.webdriver is not the tell you think it is](navigator-webdriver-explained.md),
 which is the same argument from the most famous property, and

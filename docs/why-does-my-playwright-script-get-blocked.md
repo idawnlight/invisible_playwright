@@ -171,9 +171,9 @@ and the honest claim stops there.
   product for velocity during testing when the flag belonged to the test harness.
 - The public detection suites, each answering a different one of these layers, read from
   their own source rather than their rendered verdict:
-  [CreepJS](https://github.com/abrahamjuliot/creepjs), [BotD](https://github.com/fingerprintjs/BotD),
+  A consistency checker, BotD,
   [sannysoft](https://bot.sannysoft.com/), [FingerprintJS](https://github.com/fingerprintjs/fingerprintjs),
-  and [BrowserLeaks](https://browserleaks.com/), retrieved 2026-08-29.
+  and a raw-value inspector, retrieved 2026-08-29.
 - The wrapper's real API surface: seed-reproducible identity, proxy pass-through, and
   egress-derived timezone.
 

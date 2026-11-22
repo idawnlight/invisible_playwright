@@ -71,7 +71,7 @@ The engine layer answers those questions before any page loads, which is why
 this project patches Firefox at the C++ level instead of injecting scripts. The
 same reasoning shows up when you compare
 [a patched Firefox against a patched Chromium](firefox-vs-chromium-antidetect.md)
-or against [another Firefox-based build](vs-camoufox.md): the durable difference
+or against another Firefox-based build: the durable difference
 is always where the patch lives, not the brand on the box.
 
 ## The layers the paid product adds: proxy and identity management

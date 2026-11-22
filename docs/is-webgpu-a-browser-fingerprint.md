@@ -61,7 +61,7 @@ An automated browser only reproduces that agreement if whoever built it thought 
 second API. A stealth layer that rewrites the WebGL renderer to say "Windows NVIDIA" and
 does nothing to `navigator.gpu` now ships a machine whose two GPU stories were written by
 two different authors, which is exactly the shape of tell that
-[reading a specific surface's raw value](browserleaks-canvas-webgl-hash.md) is designed to
+[reading a specific surface's raw value](canvas-webgl-readback-hash-explained.md) is designed to
 expose.
 
 ## The failure mode: two GPU stories that disagree
@@ -218,7 +218,7 @@ pacing too.
 
 **See also:** [WebGL renderer strings](webgl-renderer-strings.md) for the older half of
 the pair, [why the WebGL parameters must be identical to a real machine](webgl-parameters-are-identical.md),
-and [reading the canvas and WebGL hashes on BrowserLeaks](browserleaks-canvas-webgl-hash.md).
+and [reading the canvas and WebGL hashes on a raw-value inspector](canvas-webgl-readback-hash-explained.md).
 
 ---
 

@@ -83,7 +83,7 @@ invisible_playwright generates those same surfaces together from one seed, with 
 profile file for you to copy or adjust. The canvas hash, the WebGL renderer string
 and the font metrics are drawn as one coherent identity by the tool itself, so they
 agree with each other rather than depending on whoever assembled the profile getting
-every field right. That mutual consistency is what a tampering check like CreepJS
+every field right. That mutual consistency is what a tampering check like a consistency checker
 actually grades, and it is a harder property to hold one field at a time than it
 looks, generated or hand-built.
 

@@ -46,7 +46,7 @@ misunderstood. Detectors rarely block a value for being unusual. They block a
 A user agent that says Windows, a WebGL renderer that says a software rasterizer, a
 font list from a Linux server, a timezone three continents from the exit IP. Each of
 those is plausible alone. Together they describe a machine that does not exist.
-[CreepJS](creepjs-explained.md) is built almost entirely around this idea: it takes a
+[a consistency checker](consistency-checker-explained.md) is built almost entirely around this idea: it takes a
 clean copy of the built-ins, walks descriptors and prototypes, and records any place
 where one answer disagrees with another - including a blocked probe, which it counts
 as a lie rather than a blank.
@@ -201,10 +201,10 @@ in layer one rather than hiding anything.
   Firefox on the same machine, which is how the four-layer split was measured rather
   than assumed.
 - The public detection suites named in these notes, each read from its own source and
-  given its own page in this set: [CreepJS](https://github.com/abrahamjuliot/creepjs),
+  given its own page in this set: a consistency checker,
   [BotD](https://github.com/fingerprintjs/BotD), [sannysoft](https://bot.sannysoft.com/),
   [FingerprintJS](https://github.com/fingerprintjs/fingerprintjs), and
-  [BrowserLeaks](https://browserleaks.com/), retrieved 2026-08-28.
+  a raw-value inspector, retrieved 2026-08-28.
 
 **See also:** [the checklist for a site that blocks you](playwright-detected-as-bot.md)
 for working the layers in order, [what the webdriver flag really proves](navigator-webdriver-explained.md)

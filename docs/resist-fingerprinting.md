@@ -155,7 +155,7 @@ machine derived from a seed, and leaves the mode off.
 - This project's own default preferences, for the five values it sets to `false` and
   why the seeded profile is used instead.
 
-**See also:** [how CreepJS decides you are lying](creepjs-explained.md), whose `resistance` module exists to identify this mode, and [the three levels](playwright-stealth-levels.md).
+**See also:** [how a consistency checker decides you are lying](consistency-checker-explained.md), whose `resistance` module exists to identify this mode, and [the three levels](playwright-stealth-levels.md).
 
 ---
 

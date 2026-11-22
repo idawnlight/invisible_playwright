@@ -51,11 +51,11 @@ which is exactly why it is worth understanding on its own.
 ## WebRTC candidates and leaks
 
 - [WebRTC leak with a proxy in Playwright and Selenium](webrtc-leak-proxy.md) - A SOCKS5 proxy does not stop a leak, and disabling WebRTC trades it for a detectable signature.
-- [WebRTC IP that matches the proxy exit, by design](webrtc-ip-match-proxy-exit.md) - The server-reflexive candidate equals the exit IP, with the real NAT port preserved.
-- [WebRTC IPv6 leak: why a proxy does not stop it](webrtc-ipv6-leak-proxy.md) - A SOCKS proxy carries only TCP, so an IPv6 host still emits its real global address.
-- [WebRTC has no ICE candidates behind a proxy](webrtc-no-candidates-behind-proxy.md) - An empty candidate list reads as tampering: why residential proxies drop the UDP STUN needs.
+- [WebRTC IP that matches the proxy exit, by design](webrtc-ip-match-proxy-exit.md) - Behind a SOCKS5 proxy whose UDP relay works, the server-reflexive candidate is the proxy exit; behind any other proxy there is none.
+- [WebRTC IPv6 leak: why a proxy does not stop it](webrtc-ipv6-leak-proxy.md) - A stock browser sends WebRTC's UDP from the machine's own interface, outside the proxy, so an IPv6 host can still expose its real address; here no IPv6 candidate is produced.
+- [No public ICE candidate behind a proxy](webrtc-no-candidates-behind-proxy.md) - Most residential exits cannot carry the UDP that STUN needs: without it there is no server-reflexive candidate, only `.local` host candidates and one gathering error.
 - [WebRTC ICE candidate spoofing: the fields that give it away](webrtc-ice-candidate-spoofing.md) - Priority, foundation and arrival time are all checkable, not just the address.
-- [about:webrtc: read your real ICE candidates](about-webrtc-debug-ice-candidates.md) - Tell a real LAN-IP leak from a masked .local host and a proxy-egress srflx line.
+- [about:webrtc: read your real ICE candidates](about-webrtc-debug-ice-candidates.md) - Tell a real LAN-IP leak from a masked .local host and, behind a UDP-capable SOCKS5 proxy, a proxy-egress srflx line.
 
 ## TLS and HTTP fingerprint
 

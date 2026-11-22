@@ -162,7 +162,7 @@ get individually right and only interesting when compared with the others.
 Disabling the API entirely, by turning `webspeech.synth.enabled` off, removes the
 list. It also removes `speechSynthesis` behaviour that a real browser has, which puts
 you back in the same position as an empty array: a browser missing a capability every
-normal browser has, and [suppression is not neutral](creepjs-explained.md).
+normal browser has, and [suppression is not neutral](consistency-checker-explained.md).
 
 ## Short answers to the questions that lead here
 

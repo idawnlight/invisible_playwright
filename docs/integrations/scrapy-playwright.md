@@ -16,7 +16,7 @@ below are in that released version; the first needs 0.0.48 or newer.
 
 `scrapy-playwright`'s own documentation already names this project in
 [pluggable-browser-providers.md](https://github.com/scrapy-plugins/scrapy-playwright/blob/main/docs/pluggable-browser-providers.md),
-alongside patchright and camoufox, and carries a worked provider example. That page
+alongside patchright and other browser builds, and carries a worked provider example. That page
 is the reference; this one explains which route to pick and what each one costs.
 
 ## Install

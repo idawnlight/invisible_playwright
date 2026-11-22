@@ -174,7 +174,7 @@ per-call randomisation specifically fails; [how to make Linux and macOS report r
 Windows fonts](bundled-fonts-cross-platform.md), for the same architecture applied to
 fonts; [WebGL renderer strings](webgl-renderer-strings.md), for the adjacent
 surface of what the GPU claims to be rather than what it draws; and
-[how the BrowserLeaks canvas and WebGL hash is computed](browserleaks-canvas-webgl-hash.md),
+[how the raw-value inspector canvas and WebGL hash is computed](canvas-webgl-readback-hash-explained.md),
 for what that hash actually measures.
 
 ---

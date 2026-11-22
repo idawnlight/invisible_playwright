@@ -48,57 +48,30 @@ from __future__ import annotations
 
 import http.server
 import threading
+import time
+import types
 
 import pytest
+import _moving_page
+from _moving_page import _goto, _landing, forget
+
+from _evidence_on_failure import FailureEvidence
 
 pytestmark = pytest.mark.e2e
 
 ROUNDS = 5
 
 
-def _landing(url: str) -> str:
-    """Where the page of `url` sends itself: /landed with the query of its round, which no other round of the module has."""
-    return "/landed" + url[url.index("?"):]
+#: What the client heard, for the evidence a failing test leaves (`FailureEvidence`; it only listens and changes no wait or assertion).
+_CLIENT_LOG: list = []
 
 
-#: The address each page (by `id`) was last sent to, or the page it went with instead (`_goto`).
-_SENT: dict = {}
+def _note(what: str, **fields) -> None:
+    """One line of the client's own view of the module: what the test sent or heard, on the clocks of the evidence (`t` wall, `m` perf_counter)."""
+    _CLIENT_LOG.append({"t": round(time.time(), 4), "m": round(time.perf_counter(), 6), "what": what, **fields})
 
 
-def _goto(page, url, *, the_page_before_may_move, our_page_may_stop_ours, **kwargs) -> str:
-    """`page.goto`, and the address of the page the frame went with: `url` when `goto` answers.
-
-    - ``the_page_before_may_move``: the page sent before ours may still be moving (the rounds of the read test go on
-      while it does, module docstring). Its `location.replace` may win: `goto` says ours was interrupted by it, or
-      stopped (NS_BINDING_ABORTED), and the frame lands on the landing of THAT page, whose address is returned.
-    - ``our_page_may_stop_ours``: an engine before firefox-68, where `goto` may say NS_BINDING_ABORTED for our own
-      document, which had committed and then moved
-      (`test_networkidle_is_reached_only_on_the_page_that_replaced_a_document_still_arriving`); the frame then lands on
-      our landing.
-
-    Any other answer is red. The detector of a navigation that never answers is the timeout of the `goto` itself (each
-    caller passes one): a bound of the test stricter than it only judged the speed of the machine."""
-    from invisible_playwright.sync_api import Error
-
-    before = _SENT.get(id(page)) if the_page_before_may_move else None
-    _SENT[id(page)] = url
-    try:
-        page.goto(url, **kwargs)
-        return url
-    except Error as e:
-        text = str(e)
-        if "NS_BINDING_ABORTED" in text:
-            ends = tuple(_landing(u) for u in (before, url if our_page_may_stop_ours else None) if u)
-            assert ends, e
-            page.wait_for_url(lambda u: u.endswith(ends), timeout=30_000)
-            went = url if page.url.endswith(_landing(url)) else before
-        else:
-            assert before is not None, e
-            assert "is interrupted by another navigation to" in text, e
-            assert _landing(before) in text.split("another navigation to")[1], e
-            went = before
-        _SENT[id(page)] = went
-        return went
+_moving_page.note = _note
 
 
 def _replace_after_load(ms: int, cross_site: bool) -> bytes:
@@ -160,12 +133,18 @@ for _name, _held in (("0", False), ("50", True)):
 HELD_DOCUMENTS = {"/hdr": _replace_while_the_document_is_held(False), "/hdx": _replace_while_the_document_is_held(True)}
 
 
+#: The test server's own record of every request it served, in the shape `FailureEvidence.watch_server` reads (`.state.lock`, `.state.records`).
+RECORD = types.SimpleNamespace(lock=threading.Lock(), records=[])
+
+
 @pytest.fixture(scope="module")
 def site():
     release = threading.Event()
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            with RECORD.lock:
+                RECORD.records.append({"t": round(time.time(), 4), "m": round(time.perf_counter(), 6), "method": "GET", "path": self.path})
             if self.path.split("?")[0] == "/hold":
                 # a response that has begun and does not end: 16 KiB so the first chunk is delivered at once,
                 # then it stays open until the page that asked for it moves away (or the module's teardown)
@@ -215,17 +194,71 @@ def site():
 
 
 @pytest.fixture(scope="module")
-def page(firefox_binary):
+def evidence():
+    """What a failing test of this module leaves for a reader (only on a failure; nothing is changed in what the tests wait for or assert):
+    the client's view of every request and navigation, the Juggler wire, the engine's own trace, the record of the test server.
+    Armed before the browser is launched (the engine reads its trace folder at launch) and held for the module."""
+    held = FailureEvidence("a-page-that-moves-on")
+    held.client_log = _CLIENT_LOG
+    held.watch_server(types.SimpleNamespace(state=RECORD))
+    held.arm()
+    try:
+        yield held
+    finally:
+        held.__exit__(None, None, None)
+
+
+class _on_failure:
+    """``with _on_failure(evidence):`` around the body of a test: when the body raises, the evidence held for the module is saved
+    (the folder the e2e jobs upload), and the exception goes on."""
+
+    def __init__(self, held):
+        self.held = held
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            self.held._save(exc_type, exc)
+        return False
+
+
+@pytest.fixture(scope="module")
+def _browser(firefox_binary, evidence):
     from invisible_playwright import InvisiblePlaywright
 
     with InvisiblePlaywright(seed=4321, binary_path=firefox_binary,
                              headless=True) as browser:
-        yield browser.new_page()
+        yield browser
+
+
+@pytest.fixture
+def page(_browser):
+    """A page of its own for each test, closed at its end: a page that is still moving when its test ends (`goto` raised for the page before,
+    and ours went on) cannot reach the next test."""
+    page = _browser.new_page()
+    page.on("request", lambda r: _note("request", url=r.url, navigation=r.is_navigation_request()))
+    page.on("requestfinished", lambda r: _note("requestfinished", url=r.url))
+    page.on("requestfailed", lambda r: _note("requestfailed", url=r.url, failure=str(r.failure)))
+    page.on("framenavigated", lambda f: _note("framenavigated", url=f.url, main=f.parent_frame is None))
+    page.on("domcontentloaded", lambda p: _note("domcontentloaded", url=p.url))
+    page.on("load", lambda p: _note("load", url=p.url))
+    try:
+        yield page
+    finally:
+        forget(page)
+        page.close()
 
 
 @pytest.mark.parametrize("path", ["/head", "/r0", "/r50", "/r300",
                                   "/x0", "/x50", "/x300"])
-def test_a_read_right_after_goto_answers(page, site, path, engine_reaches):
+def test_a_read_right_after_goto_answers(page, site, path, engine_reaches, evidence):
+    with _on_failure(evidence):
+        _a_read_right_after_goto_answers(page, site, path, engine_reaches)
+
+
+def _a_read_right_after_goto_answers(page, site, path, engine_reaches):
     older = not engine_reaches("firefox-68")
     for i in range(ROUNDS):
         _goto(page, "%s%s?i=%s-%d" % (site, path, path[1:], i), the_page_before_may_move=True,
@@ -255,8 +288,6 @@ def test_a_read_right_after_goto_answers(page, site, path, engine_reaches):
             assert page.evaluate("1 + 1") == 2
         except Error as e:
             assert "Execution context was destroyed" in str(e), e
-    # The next test starts on a page that stays: the last page this frame went with has landed.
-    page.wait_for_url(lambda u, end=_landing(_SENT[id(page)]): u.endswith(end), timeout=30_000)
 
 
 @pytest.mark.parametrize("path", ["/r0", "/r50", "/x0", "/x50"])
@@ -266,12 +297,12 @@ def test_networkidle_is_reached_on_the_page_that_replaced_ours(page, site, path,
     Playwright), or on the page that replaced it. Either way the page then lands, and `networkidle` is reached there.
     A `goto` that never answers because the new frame forgot the navigation ([B228]) is still red; the answer that
     must never come on the first page is the strict case below. Each round starts on a page that stays (the round
-    before waited for its landing, and so did the test before)."""
+    before waited for its landing; the page is the test's own)."""
     older = not engine_reaches("firefox-68")
     for i in range(ROUNDS):
         url = "%s/i%s?n=%s-%d" % (site, path[1:], path[1:], i)
         assert _goto(page, url, the_page_before_may_move=False, our_page_may_stop_ours=older,
-                     wait_until="networkidle", timeout=30_000) == url
+                     wait_until="networkidle", timeout=30_000) == {url}
         assert page.url.split("?")[0].endswith(("/i" + path[1:], "/landed")), page.url
         page.wait_for_url(lambda u, end=_landing(url): u.endswith(end), timeout=30_000)
         page.wait_for_load_state("networkidle", timeout=30_000)
@@ -299,7 +330,7 @@ def test_networkidle_is_reached_only_on_the_page_that_replaced_a_document_still_
     for i in range(ROUNDS):
         url = "%s%s?n=%s-%d" % (site, path, path[1:], i)
         assert _goto(page, url, the_page_before_may_move=False, our_page_may_stop_ours=older,
-                     wait_until="networkidle", timeout=30_000) == url
+                     wait_until="networkidle", timeout=30_000) == {url}
         assert page.url.endswith(_landing(url)), page.url
 
 

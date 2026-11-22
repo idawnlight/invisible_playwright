@@ -33,7 +33,7 @@ how-tos, then how to test any of this without fooling yourself.
 - [**AI Agents and Frameworks**](guides-ai-agents.md) - agent frameworks that drive a
   browser, checked from source: which use Playwright, which are CDP/Chromium-only.
 - [**Detectors, Explained**](guides-detectors-explained.md) - how well-known detectors
-  work - sannysoft, CreepJS, BotD, FingerprintJS, reCAPTCHA v3 - read from their own
+  work - a basic bot-test page, a consistency checker, BotD, an open-source fingerprinting library, reCAPTCHA v3 - read from their own
   source.
 - [**Scraping with Playwright**](guides-scraping-with-playwright.md) - practical
   how-tos: blocked headless browsers, infinite scroll, proxy rotation, sessions behind
@@ -42,6 +42,6 @@ how-tos, then how to test any of this without fooling yourself.
   check, and in what order, when automation is detected or a preference silently does
   nothing.
 
-Looking for a specific tool instead? [Comparisons](comparisons.md) covers Camoufox,
+Looking for a specific tool instead? [Comparisons](comparisons.md) covers
 Patchright, nodriver and playwright-stealth against this project, and the case for
 Firefox over Chromium generally.

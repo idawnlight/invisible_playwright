@@ -1,0 +1,168 @@
+# fakeweb.yml - on the offline fake web (tests/fakeweb/), does our browser get the same outcome as stock Firefox, step by step?
+#
+# ONE QUESTION. The fake web is two small local sites (127.0.0.1 and localhost) whose every response is finite and made by the page of the test: no real
+# site, no proxy, no request that leaves the runner. Profile P2 is one reused, routed page that loads the hard pages (beacons on pagehide, keepalive fetches,
+# frames of another site removed or navigated away, requests the page aborts), each followed by a quiet canary. Profile P4 is the journey of a person over a
+# multi-page site (17 steps: links, back and forward, a filter that changes the URL, a new tab, a download, a keyboard search, a sign-in), compared field by
+# field with stock Firefox. Both profiles run in the SAME job as Playwright's own Firefox (scripts/playwright_pin.txt): stock first, ours second, one browser
+# at a time, both driven by the stock Playwright client (scripts/run_fakeweb.py). The verdict is "the same outcome as stock", never a time: no step asserts a
+# duration, and a stock Firefox that is not what tests/fakeweb/pages.json declares makes the leg red as a BROKEN CONTROL, not as a finding about ours.
+#
+# WHICH ENGINE. The published one (`python -m invisible_playwright fetch`), as e2e.yml. The candidate of the engine repository runs the same entry on its own
+# binary (scripts/run_fakeweb.py --binary), and judges the four e2e tests of this fake web as the suite `wrapper.e2e.fakeweb` of ci/required-suites.json.
+#
+# WHEN. A pull request or a push to main that touches the fake web or this file (the journey and the hard pages are not a round for every change); again by hand
+# with `workflow_dispatch`. Four legs, a profile on a system each (Linux under Xvfb, Windows); no leg is repeated or forgiven, and the ONE verdict of the workflow is the
+# job `fakeweb verdict`: red unless all four legs are green (a skipped leg, for a core that is not on the index yet, is not green: nothing was measured).
+
+name: fakeweb
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/fakeweb/**'
+      - 'tests/test_fakeweb_*.py'
+      - 'scripts/run_fakeweb.py'
+      - 'scripts/fakeweb_p4_report.py'
+      - 'scripts/playwright_pin.txt'
+      - '.github/workflows/fakeweb.yml'
+  pull_request:
+    paths:
+      - 'tests/fakeweb/**'
+      - 'tests/test_fakeweb_*.py'
+      - 'scripts/run_fakeweb.py'
+      - 'scripts/fakeweb_p4_report.py'
+      - 'scripts/playwright_pin.txt'
+      - '.github/workflows/fakeweb.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels the older run of THIS workflow on that pull request, and nothing else cancels (the same group as e2e.yml).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The engine download goes through the release API with the token of the job (anonymous requests are the ones GitHub drops first).
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  core-on-index:
+    uses: ./.github/workflows/core-on-index.yml
+
+  walk:
+    name: fakeweb ${{ matrix.profile }} (${{ matrix.os }})
+    needs: core-on-index
+    if: needs.core-on-index.outputs.available == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { profile: p2, os: linux, runner: ubuntu-24.04 }
+          - { profile: p2, os: windows, runner: windows-2022 }
+          - { profile: p4, os: linux, runner: ubuntu-24.04 }
+          - { profile: p4, os: windows, runner: windows-2022 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with: { fetch-depth: 1 }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: '3.11' }
+      - name: Install wrapper + test deps, and the stock Playwright client
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+          python -m pip install "playwright==$(cat scripts/playwright_pin.txt)"
+      - name: System deps (xvfb + Firefox runtime libs)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          sudo "$(which python)" -m playwright install-deps firefox
+      - name: Playwright's own Firefox (the control)
+        run: python -m playwright install firefox
+      # The security state is a ready directory of the repository (ci/security-state/, a result with no data, the sha256 in ci/security-state.pin.json): with
+      # STEALTHFOX_SECURITY_STATE set the core neither downloads nor generates one. BEFORE `fetch`, which makes the state present (it would download and generate it).
+      - name: The security state (a fixed directory of the repository)
+        run: python scripts/ci_lab_security_state.py set --pin ci/security-state.pin.json
+      - name: Fetch the published firefox binary
+        run: echo "FF=$(cd "$RUNNER_TEMP" && python -m invisible_playwright fetch | tail -1)" >> "$GITHUB_ENV"
+      # The GeoIP database made by the repository (no download, the same bytes every run).
+      - name: The GeoIP database (made by the repository, same bytes every run)
+        run: python scripts/ci_lab_geoip.py build
+      - name: Profile P2, stock first and ours second, on a reused routed page
+        if: matrix.profile == 'p2'
+        run: |
+          PREFIX=""; [ "$RUNNER_OS" = Linux ] && PREFIX="xvfb-run -a"
+          $PREFIX python -u scripts/run_fakeweb.py --profile p2 --binary "$FF" --repetitions 10 --out fakeweb-p2.json
+      - name: Profile P4, stock first and ours second, three walks of the journey
+        if: matrix.profile == 'p4'
+        run: |
+          PREFIX=""; [ "$RUNNER_OS" = Linux ] && PREFIX="xvfb-run -a"
+          set +e
+          $PREFIX python -u scripts/run_fakeweb.py --profile p4 --binary "$FF" --repetitions 3 --out fakeweb-p4.json 2>&1 | tee fakeweb-p4.log
+          python scripts/fakeweb_p4_report.py journey fakeweb-p4.json > fakeweb-p4-summary.md
+          rc=$?
+          cat fakeweb-p4-summary.md >> "$GITHUB_STEP_SUMMARY"
+          cat fakeweb-p4-summary.md
+          case "$rc" in
+            0) echo "journey: green, ours equals stock on every step";;
+            1) echo "journey: RED, ours differs from stock on a step of a walk whose control is sound";;
+            2) echo "journey: RED, BROKEN CONTROL: stock Firefox is not as tests/fakeweb/pages.json declares (not a finding about ours)";;
+            3) echo "journey: RED, ours differs from stock, and a control is broken";;
+            4) echo "journey: RED, the runner wrote no report";;
+            *) echo "journey: RED, the report did not finish ($rc)";;
+          esac
+          exit "$rc"
+      - name: Profile P4, the types of the requests of stock and of ours (one traced walk each)
+        if: matrix.profile == 'p4' && always()
+        run: |
+          PREFIX=""; [ "$RUNNER_OS" = Linux ] && PREFIX="xvfb-run -a"
+          set +e
+          $PREFIX python -u scripts/run_fakeweb.py --profile p4 --binary "$FF" --repetitions 1 --trace --out fakeweb-p4-trace.json 2>&1 | tee fakeweb-p4-trace.log
+          python scripts/fakeweb_p4_report.py trace fakeweb-p4-trace.json > fakeweb-p4-trace-summary.md
+          rc=$?
+          cat fakeweb-p4-trace-summary.md >> "$GITHUB_STEP_SUMMARY"
+          cat fakeweb-p4-trace-summary.md
+          case "$rc" in
+            0) echo "request types: green, ours does what stock does";;
+            1) echo "request types: RED, ours differs from stock, see the summary";;
+            2) echo "request types: RED, BROKEN CONTROL: stock reported no sendBeacon (not a finding about ours)";;
+            *) echo "request types: RED ($rc), see the summary";;
+          esac
+          exit "$rc"
+      - name: Upload the numbers
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fakeweb-${{ matrix.profile }}-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            fakeweb-*.json
+            fakeweb-*.log
+            fakeweb-*.md
+          if-no-files-found: warn
+          retention-days: 14
+
+  # THE VERDICT of the workflow, the only one: green only when all four legs ran and passed.
+  verdict:
+    name: fakeweb verdict
+    needs: [core-on-index, walk]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: red unless every leg is green
+        run: |
+          echo "core-on-index: ${{ needs.core-on-index.result }}"
+          echo "walk (p2 and p4, linux and windows): ${{ needs.walk.result }}"
+          if [ "${{ needs.walk.result }}" != "success" ]; then
+            echo "RED: the four legs did not all pass (a leg that did not run measured nothing)"
+            exit 1
+          fi
+          echo "green: ours equals stock on the fake web, on both systems"

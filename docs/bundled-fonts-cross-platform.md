@@ -28,7 +28,7 @@ same contradiction: the list says Windows, the pixels say something else.
 
 The fix that actually holds is upstream of the whole problem: ship the real font
 files inside the browser, and read only from that bundle, on every platform. This is
-the same direction Camoufox took first, and for the same reason - a real file produces
+the same direction other patched Firefox builds took first, and for the same reason - a real file produces
 real glyphs, real metrics, and a real hash, because nothing about it is simulated.
 
 ## One manifest, so three backends can't disagree with each other
@@ -218,12 +218,11 @@ and a script cannot change what the OS actually draws.
 **Does this fix cost anything?** A larger binary, and a font list that's frozen at
 build time rather than tracking whatever the real OS might add later.
 
-**Is this the same thing Camoufox does?** The same direction - real files, not a
+**Is this the same thing other patched Firefox builds do?** The same direction - real files, not a
 filter - checked independently rather than assumed to work the same way underneath.
 
 **See also:** [why headless browsers render different fonts](headless-fonts-differ.md),
-for the detection side this architecture answers; [invisible_playwright vs Camoufox](vs-camoufox.md),
-for where this approach sits relative to theirs; and
+for the detection side this architecture answers; and
 [WebGL renderer strings](webgl-renderer-strings.md), for the same shape of problem on
 different hardware.
 

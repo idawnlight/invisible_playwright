@@ -64,7 +64,7 @@ convincingly: the property has to be gone from the prototype, absent from a
 a detector fetches a clean copy of `Navigator.prototype` from a fresh iframe and compares.
 A partial delete that patches the obvious access but leaves a trace elsewhere is worse than
 leaving the API alone, because now there is both a Firefox user agent and evidence of
-tampering. This is the pattern CreepJS is built to catch: it does not ask what you report,
+tampering. This is the pattern a consistency checker is built to catch: it does not ask what you report,
 it asks whether the shape of your environment is internally consistent and whether anything
 looks deleted.
 

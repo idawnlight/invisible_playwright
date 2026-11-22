@@ -181,11 +181,11 @@ fingerprint, TLS and driver layer. The proxy, the account and the pacing are you
   and inject:
   [berstend/puppeteer-extra, packages/playwright-extra](https://github.com/berstend/puppeteer-extra/tree/master/packages/playwright-extra)
   and [berstend/puppeteer-extra](https://github.com/berstend/puppeteer-extra), retrieved 2026-08-29.
-- The public detection suites (CreepJS, BotD, FingerprintJS, sannysoft, BrowserLeaks)
+- The public detection suites (a consistency checker, BotD, an open-source fingerprinting library, a basic bot-test page, a raw-value inspector)
   for the native-vs-override checks described above, each read from its own source:
-  [CreepJS](https://github.com/abrahamjuliot/creepjs), [BotD](https://github.com/fingerprintjs/BotD),
+  A consistency checker, BotD,
   [FingerprintJS](https://github.com/fingerprintjs/fingerprintjs), [sannysoft](https://bot.sannysoft.com/),
-  and [BrowserLeaks](https://browserleaks.com/), retrieved 2026-08-29.
+  and a raw-value inspector, retrieved 2026-08-29.
 - This project's own release gates, for the fingerprint, TLS and driver behaviour of
   the patched build.
 

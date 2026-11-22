@@ -72,6 +72,7 @@ COMMANDS = frozenset({
     "Page.stopScreencast",
     "Runtime.addBinding",
     "Runtime.callFunctionOn",
+    "Runtime.compileScript",
     "Runtime.enable",
     "Runtime.evaluate",
     "Runtime.getProperties",

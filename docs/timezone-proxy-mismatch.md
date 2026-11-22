@@ -43,7 +43,7 @@ new Date().toLocaleString()                         // month names, order, separ
 Plus two things that are not in JavaScript at all:
 
 - the **`Accept-Language` header** your requests actually carry
-- the **country of the IP** the request left from, which is also what [WebRTC reports independently](webrtc-leak-proxy.md)
+- the **country of the IP** the request left from, which is also what [WebRTC can report independently](webrtc-leak-proxy.md)
 
 Nine values. A mismatch check does not need any of them to be strange. It needs two of
 them to disagree.
@@ -100,8 +100,9 @@ How this project does it, because the details are the part that bites:
   request that does not go through the proxy tells you about your own connection.
 - That IP maps to a zone with an **offline database**, so there is no third-party
   request per launch announcing that a new session started.
-- The **same** lookup feeds the locale and the WebRTC public address, so those three
-  cannot drift apart. They come from one answer, not three.
+- The **same** lookup feeds the locale, and when the proxy relays UDP the WebRTC public
+  address is that same exit, so those three cannot drift apart. They come from one answer,
+  not three.
 - **On failure it fails the launch**, with a proxy or without one, instead of falling
   back to the host timezone. That fallback is the exact mismatch you set out to avoid, and a
   silent fallback to it is worse than an error.
@@ -138,8 +139,8 @@ A flagged timezone is rarely the one setting you already changed. It is usually 
 the other surfaces still answering for your original machine: the locale, the
 `Accept-Language` header, the exit IP's country, or an offset that was right for one
 season and wrong for the other. The fix is structural, not another preference: derive
-the zone, the locale and the WebRTC address from the same proxy lookup, at launch, and
-refuse to fall back to the host when that lookup fails. Then check it the way a detector
+the zone and the locale from the same proxy lookup, at launch, send WebRTC's UDP through
+that same proxy or nowhere, and refuse to fall back to the host when that lookup fails. Then check it the way a detector
 does, in a cross-origin iframe, against today's date.
 
 ## Short answers to the questions that lead here

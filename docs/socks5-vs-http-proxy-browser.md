@@ -39,6 +39,7 @@ option you set separately. The scheme is the only switch.
 | DNS resolution | Forced at the exit (`network.proxy.socks_remote_dns = true`) | Depends on the setup |
 | Passed to Playwright | No proxy (the engine does the whole job) | The proxy dictionary, unchanged |
 | Needed a source patch | Yes, to speak authenticated SOCKS5 | No, Basic auth was already handled |
+| UDP (WebRTC, HTTP/3) | SOCKS5 can relay it (UDP ASSOCIATE); SOCKS4 cannot | Not carried: CONNECT is TCP only |
 
 ## The one distinction that actually changes behaviour
 
@@ -153,6 +154,57 @@ number: with SOCKS the resolution of `example.com` happened at the exit and the 
 was spoken by the engine, and with HTTP the driver authenticated to the proxy first.
 The exit IP being equal is the point. It tells you both paths reach the same place;
 which layer authenticated is a property of your setup, not of the exit.
+
+## UDP: SOCKS5 can relay it, an HTTP proxy cannot
+
+SOCKS5 is not TCP only. [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) defines a second
+command next to CONNECT, **UDP ASSOCIATE**: the client asks the proxy for a UDP relay,
+sends its datagrams to that relay inside a small SOCKS header, and the proxy forwards
+them. SOCKS4 has no such command, and an HTTP or HTTPS proxy only opens TCP tunnels with
+CONNECT, so it carries no UDP at all.
+
+Two facts about practice matter here. Most residential exits do not implement UDP
+ASSOCIATE, or relay UDP from an address different from their TCP exit. And a stock
+browser does not ask the proxy to relay WebRTC's UDP even when the proxy could: its proxy
+setting covers TCP traffic, and the ICE stack sends UDP from the machine's own interface.
+That is why a proxy alone does not stop the WebRTC leak in a stock browser, whatever the
+proxy supports.
+
+This library measures before it relies on UDP. Before launch, and before a context that
+brings its own SOCKS5 proxy, it opens a UDP ASSOCIATE, sends a STUN Binding request
+through the relay, and compares the address the STUN server saw with the proxy's TCP
+exit. The measurement fits in about three seconds and runs in parallel with the exit
+discovery. Only if a reply comes back and the two addresses are equal does the browser
+send WebRTC's UDP through the relay; the server-reflexive candidate is then the proxy's
+exit, produced by a real STUN reply.
+
+Anything else (ASSOCIATE refused, no reply, a different address, an IPv6 TCP exit, a
+proxy that is not SOCKS5) makes the browser treat the proxy as a router that drops UDP: no
+datagram leaves the machine, neither through the proxy nor directly, there is no
+server-reflexive candidate, and the host candidates stay `.local` names. Gathering ends
+with one `icecandidateerror` (701) for the STUN request after about eleven seconds. There is
+never a fallback to a direct datagram, and no option forces UDP on, declares a public IP
+or edits a candidate. Each context uses its own proxy for WebRTC, so a context with its
+own SOCKS5 proxy gets its own server-reflexive candidate.
+
+HTTP/3 follows the same road: over the relay when the proxy carries coherent UDP,
+otherwise the browser falls back to HTTP/2. The only knob is which STUN servers the
+measurement uses (IPv4 literals, used by the Python process only; two public ones by
+default):
+
+```python
+from invisible_playwright import InvisiblePlaywright
+
+proxy = {"server": "socks5://gate.example.com:1080", "username": "u", "password": "p"}
+
+# 192.0.2.10 is a placeholder: put a STUN server you can reach, or leave
+# udp_stun_servers out to use the defaults. An unreachable one means no UDP.
+with InvisiblePlaywright(seed=42, proxy=proxy, udp_stun_servers=["192.0.2.10:3478"]) as browser:
+    page = browser.new_page()
+```
+
+For what a page then sees, and how to check it, see
+[how to check if a proxy leaks your real IP](how-to-check-proxy-ip-leak.md).
 
 ## Which one to choose
 

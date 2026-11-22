@@ -69,7 +69,7 @@ Distinct is easy. Distinct *and* consistent is the part that matters, because a
 detector does not score a single value, it cross-checks values against each other. A
 browser that reports one platform in its user agent, a GPU string from a different
 platform, and a font list from a third is not a new identity, it is a broken one, and
-[CreepJS records that kind of contradiction by name](creepjs-explained.md).
+[a consistency checker records that kind of contradiction by name](consistency-checker-explained.md).
 
 Deriving every field from one seed is what keeps a given agent coherent. The canvas
 hash, the WebGL vendor and renderer, the screen geometry and the audio context are

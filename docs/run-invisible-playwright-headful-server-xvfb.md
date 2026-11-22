@@ -211,7 +211,7 @@ That single package covers both the automatic virtual display and manual `xvfb-r
   Firefox in headed mode, and refuses with an install hint when the package is absent.
 - The project's fingerprint, TLS and driver patches, which are what clear the detectors
   independently of the display mode, verified against the public detection suites
-  (CreepJS, BotD, FingerprintJS, sannysoft, BrowserLeaks).
+  (a consistency checker, BotD, an open-source fingerprinting library, a basic bot-test page, a raw-value inspector).
 - Playwright's own [`Browser` class API](https://playwright.dev/python/docs/api/class-browser),
   which every method on the `browser` object above implements unchanged.
 

@@ -119,7 +119,7 @@ browsers are indistinguishable on the check that usually catches a patched gette
 A real audit checks a whole fingerprint, not one boolean: descriptor hygiene,
 cross-surface consistency, rendering output, and behaviour. Open any of the public
 fingerprinting test suites and look at what they collect -
-[CreepJS](creepjs-explained.md), [BotD](botd-explained.md), [sannysoft](sannysoft-explained.md), fpscanner - and none of them
+[a consistency checker](consistency-checker-explained.md), [BotD](botd-explained.md), a basic bot-test page, fpscanner - and none of them
 stop at `navigator.webdriver`. They build a picture and then check whether the
 picture is internally consistent.
 
@@ -168,7 +168,7 @@ because nothing was patched. What it does not change is anything about the
 machine underneath.
 
 **In the browser engine, before it ships.** Change the values in the C++ source
-and rebuild. [Camoufox](vs-camoufox.md) does this for Firefox, and so does the project I maintain,
+and rebuild. Other patched Firefox builds do this, and so does the project I maintain,
 `invisible_playwright`. At this level there is no override to detect, because
 there is no override: the engine simply reports the value you compiled in, through
 the same native code path a normal build uses. `Function.prototype.toString` says
@@ -248,7 +248,7 @@ answering honestly.
   `false` by default, specifically to match Gecko and WebKit.
 - [MDN, `Function.prototype.toString()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/toString),
   retrieved 2026-08-28, for the native-code string a builtin getter returns.
-- [CreepJS](https://github.com/abrahamjuliot/creepjs), retrieved 2026-08-28, one of the
+- A consistency checker, retrieved 2026-08-28, one of the
   public fingerprinting suites named on this page.
 - [BotD](https://github.com/fingerprintjs/BotD), retrieved 2026-08-28, another of the
   named public suites.
@@ -258,10 +258,10 @@ answering honestly.
   fourth suite named on this page.
 - [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright), retrieved 2026-08-28,
   the named example of a driver-level fix on the Chromium side.
-- [Camoufox](https://github.com/daijro/camoufox), retrieved 2026-08-28, the named example
+- Public patched-Firefox projects, retrieved 2026-08-28, the example
   of an engine-level Firefox patch this page contrasts with `invisible_playwright`.
 
-**See also:** [the three levels a stealth tool can work at](playwright-stealth-levels.md), [what CreepJS does to catch an override](creepjs-explained.md), [the ChromeDriver `cdc_` variable](cdc-variable-explained.md) for the same problem in a different place, and [whether stock Playwright sets navigator.webdriver to true](does-playwright-set-navigator-webdriver.md).
+**See also:** [the three levels a stealth tool can work at](playwright-stealth-levels.md), [what a consistency checker does to catch an override](consistency-checker-explained.md), [the ChromeDriver `cdc_` variable](cdc-variable-explained.md) for the same problem in a different place, and [whether stock Playwright sets navigator.webdriver to true](does-playwright-set-navigator-webdriver.md).
 
 ---
 

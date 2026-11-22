@@ -187,8 +187,8 @@ datacenter IP still loses. The browser supplies the disguise; you supply the exi
 - This project's own measurements comparing a stock engine's fingerprint on a headless
   host against a patched build's Windows Firefox fingerprint on the same host.
 - The public detection suites used to read the per-surface values the table above
-  compares: [CreepJS](https://github.com/abrahamjuliot/creepjs) and
-  [BrowserLeaks](https://browserleaks.com/), retrieved 2026-08-29.
+  compares: a consistency checker and
+  a raw-value inspector, retrieved 2026-08-29.
 
 **See also:** [the driver leaks undetected-chromedriver strips](cdc-variable-explained.md),
 [a patched build versus a page-level stealth plugin](vs-nodriver.md), and

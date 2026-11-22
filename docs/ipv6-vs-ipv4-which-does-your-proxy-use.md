@@ -85,11 +85,15 @@ measuring on its own.
 The [WebRTC IPv6 leak](webrtc-ipv6-leak-proxy.md) and this one rhyme, and telling them
 apart is the point.
 
-- **WebRTC IPv6** is not a connection at all. WebRTC enumerates the host's network
-  interfaces locally and emits your global IPv6 as an ICE *candidate*. Nothing was
-  dialed; the address was read off the interface list and printed to the page. A SOCKS
-  proxy cannot stop it because there is no TCP to tunnel, and the pref
-  `media.peerconnection.ice.disableIPv6` no longer reaches the code that emits it.
+- **WebRTC IPv6** is not a connection at all. A stock browser's WebRTC enumerates the
+  host's network interfaces locally and emits your global IPv6 as an ICE *candidate*.
+  Nothing was dialed; the address was read off the interface list and printed to the
+  page. A proxy setting does not stop it in a stock browser, because WebRTC's UDP is
+  sent from the machine's own interface rather than through the proxy (SOCKS5 does
+  define a UDP mode, UDP ASSOCIATE, but a stock browser does not use it for WebRTC),
+  and the pref `media.peerconnection.ice.disableIPv6` no longer reaches the code that
+  emits it. invisible_playwright does not read the machine's interfaces and produces
+  no IPv6 candidate, host or srflx, in any session, with or without a proxy.
 - **Transport IPv6** is a real connection. A socket opened over IPv6 outside the proxy,
   logged by the site as an ordinary request from your machine.
 
@@ -106,25 +110,33 @@ The cleanest fix is to remove the choice. If your proxy carries IPv4, deny the b
 IPv6 for outbound name resolution so no connection can prefer a v6 path in the first
 place.
 
-- **Route DNS through the proxy.** invisible_playwright does this by default: DNS is
-  resolved at the proxy, not locally, so the browser never gets a local AAAA answer to
-  chase onto a direct IPv6 socket. That default closes the most common seam without you
-  touching anything.
+- **Route DNS through the proxy.** In a stock Firefox, turn on remote DNS for the
+  SOCKS proxy (`network.proxy.socks_remote_dns`), so the browser never gets a local
+  AAAA answer to chase onto a direct IPv6 socket.
 - **Disable AAAA resolution at the browser.** The public Firefox pref
   `network.dns.disableIPv6` set to `true` makes Firefox stop doing IPv6 name lookups
   host-wide, so every connection is IPv4 and matches an IPv4-only proxy. Note this is a
   *different* pref from the WebRTC one above and it actually takes effect on the
-  transport path. If you drive `firefox.launch()` yourself, set it in
-  `firefox_user_prefs` alongside the SOCKS preferences from
-  `get_default_stealth_prefs(proxy=...)`.
+  transport path. If you drive Firefox yourself, set it in the profile's user prefs
+  alongside your SOCKS preferences. invisible_playwright needs no pref for this: the
+  browser does no AAAA lookups in any session.
 - **Or match the proxy to the host.** The other honest answer is a dual-stack proxy: if
   the exit carries IPv6 too, an IPv6 connection exits at the proxy and there is nothing
   to leak. Forcing IPv4 is the fix when the proxy is v4-only; a v6-capable exit is the
-  fix when you would rather keep IPv6.
+  fix when you would rather keep IPv6. With invisible_playwright, a proxy whose TCP
+  exit is IPv6 is not measured as able to carry UDP, so the session behaves as if the
+  proxy could not carry UDP: no `typ srflx` candidate and one `icecandidateerror` 701
+  after about eleven seconds.
 
 Pick removal of the choice (force v4) or coverage of both (dual-stack exit). What you
 do not want is the middle state: an IPv6-capable host and a v4-only proxy with nothing
 holding the browser to v4.
+
+Two limits of invisible_playwright on the host side. With no proxy, on a machine that
+has both IPv4 and IPv6, the page sees IPv4 candidates only; a retail browser on the
+same machine would also show IPv6 candidates, and that is a known difference. A
+machine that has only IPv6 and no proxy is not supported: the launch fails with an
+error.
 
 ## Measure which family your proxy actually exposes
 
@@ -210,13 +222,15 @@ application answer, read from a request that rode the tunnel. The site's access 
 records the transport answer, which can be a different family if another connection
 went direct.
 
-**How do I force IPv4 through the proxy?** Route DNS through the proxy so no AAAA is
-resolved locally (the default here), and set the public pref
+**How do I force IPv4 through the proxy?** In a stock Firefox, route DNS through the
+proxy so no AAAA is resolved locally, and set the public pref
 `network.dns.disableIPv6` to `true` so Firefox stops doing IPv6 name lookups entirely.
+invisible_playwright does no AAAA lookups in any session.
 
-**Is this the same as the WebRTC IPv6 leak?** Same address, different layer. WebRTC
-reads your IPv6 off the interface list without opening a connection; this is a real TCP
-connection made outside the proxy. Fixing one does not fix the other.
+**Is this the same as the WebRTC IPv6 leak?** Same address, different layer. In a
+stock browser WebRTC reads your IPv6 off the interface list without opening a
+connection; this is a real TCP connection made outside the proxy. Fixing one does not
+fix the other.
 
 **Does `media.peerconnection.ice.disableIPv6` help here?** No. That pref is about
 WebRTC candidate gathering and no longer reaches even that path. For transport, the
@@ -228,7 +242,7 @@ rate limits or behaviour. Those need a clean proxy and human pacing, which you s
 
 ## Sources
 
-- This project's proxy handling, which resolves DNS at the proxy by default so a local
+- This project's behaviour, in which the browser does no AAAA lookups, so a local
   AAAA record cannot steer a connection onto the host's IPv6, and the transport-answer
   measurement above, read from inside the proxied browser rather than assumed.
 - A read of standard Firefox proxy and DNS preferences (`network.dns.disableIPv6`,

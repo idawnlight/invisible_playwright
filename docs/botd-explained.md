@@ -165,7 +165,7 @@ see.
   release and read which detectors fired rather than only the verdict.
 
 **See also:** [what sannysoft checks](sannysoft-explained.md), which is the older
-list of the same kind, and [how CreepJS detects tampering](creepjs-explained.md),
+list of the same kind, and [how a consistency checker detects tampering](consistency-checker-explained.md),
 which takes the consistency idea considerably further.
 
 ---

@@ -202,7 +202,7 @@ is not a subtle tell; it is a contradiction a first-party script finds in one li
 is enough to serve you a challenge or a stripped page before any pricing loads.
 
 This is where a real fingerprint earns its place and where it is not sufficient on its
-own. Passing [CreepJS](creepjs-explained.md) means the browser is internally consistent
+own. Passing [a consistency checker](consistency-checker-explained.md) means the browser is internally consistent
 and does not announce automation, which this project's engine handles by deriving every
 surface from one seed so the GPU, canvas, audio and font values all agree. But
 consistency across the browser's own fields does not cover the browser against its exit.

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.1] - 2026-11-23
+
+### Changed
+- **Upgraded both bundled browser engines to latest stable releases**:
+  - **Firefox 160.0.1** (`FIREFOX_160_0_1_RELEASE`, `firefox-160.0.1-r1`) with upstream `firefox-68` enhancements (`StealthSecurityState` offline intermediates + OneCRL + CRLite certificate revocation state without Remote Settings sync, Fission cross-process `FrameNavigations` held-cut barrier, and `nsUDPSocket` post-bind SOCKS5 UDP association).
+  - **Chromium 158.0.8127.36** (`chromium-158.0.8127.36-r1`, Linux Desktop M158 stable) with all four Chromium & V8 stealth patchsets ported and verified.
+- **Paired with `invisible_core 160.81.0`**: Absorbs `68.81.0` (`update_security_state` / `ensure_security_state`, atomic `os.link` font manifest cache creation, and public `InputLatency` export) plus probe timeout accounting and drag button preservation in `_juggler/server.py`.
+
+### Fixed
+- **Chromium CDP backend hardening**:
+  - Fixed `_sweep_short_tmps` to pass `psutil.Process(pid)` into `invisible_core.process.alive()`, preserving live sibling drivers' `/tmp/ipw_t_<pid>_*` `SingletonSocket` directories.
+  - Prevented runtime `SyntaxError` exceptions (e.g., `JSON.parse(...)`) from triggering a duplicate evaluation pass in `caller:` contexts by checking expression parseability via `Runtime.compileScript(persistScript=False)`, and prevented mid-evaluation navigations (`Inspected target navigated or closed`) from re-executing expressions in replacement documents.
+  - Deferred `Fetch.requestPaused` for Dedicated Worker subrequests until the Worker's `Network.requestWillBeSent` supplies exact Blink `ResourceType` (`fetch` vs `xhr`) and owning OOPIF `frameId`, preserved Worker request ownership across `route()` + `worker.terminate()`, propagated dynamic `set_offline` / header updates to live Workers, bounded completed request tracking memory on long-lived pages, and ensured graceful `localStorage` flush before POSIX guardian teardown.
+
 ## [0.57.4] - 2026-11-20
 
 ### Fixed

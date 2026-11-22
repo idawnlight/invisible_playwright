@@ -44,7 +44,7 @@ telling the difference before you ship a fix, not after.
 
 - [Playwright detected as a bot on one site: a checklist](playwright-detected-as-bot.md) - a checklist that checks the free fixes first, before buying a better proxy on day one.
 - [Why Does My Playwright Script Get Blocked?](why-does-my-playwright-script-get-blocked.md) - a four-layer diagnostic across fingerprint, IP reputation, rate and quota, and behaviour.
-- [Why am I blocked with a clean fingerprint?](why-blocked-with-a-clean-fingerprint.md) - you pass CreepJS, BotD and sannysoft and still get blocked; how to isolate which of four layers is failing.
+- [Why am I blocked with a clean fingerprint?](why-blocked-with-a-clean-fingerprint.md) - you pass a consistency checker, BotD and a basic bot-test page and still get blocked; how to isolate which of four layers is failing.
 - [Why Playwright Works Locally but Fails in the Cloud](why-playwright-works-locally-fails-in-cloud.md) - the same script fails on CI because the exit IP moved from residential to datacenter, not because your code changed.
 
 ## Launch, process and preference problems

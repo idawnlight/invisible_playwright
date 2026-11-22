@@ -101,8 +101,7 @@ already know what you want to click.
   Playwright script does that, and this project's job is making the Firefox underneath it
   read as genuine.
 - **The target reads the browser itself closely** (fonts, GPU, canvas, TLS)**?** That
-  question sits at the engine layer, covered in [vs Patchright](vs-patchright.md) and
-  [vs Camoufox](vs-camoufox.md), regardless of which framework drives the browser.
+  question sits at the engine layer, covered in [vs Patchright](vs-patchright.md), regardless of which framework drives the browser.
 - **Undecided?** Run the task both ways against your real target and compare what each gets
   flagged for.
 
@@ -120,8 +119,7 @@ launch-option swap.
 launch configuration. An agent driving a Firefox engine like this one goes through MCP
 instead, a different integration path than a shared config file.
 
-**See also:** [invisible_playwright vs Patchright: driver vs engine](vs-patchright.md),
-[invisible_playwright vs Camoufox: two patched Firefoxes](vs-camoufox.md), and [what you can
+**See also:** [invisible_playwright vs Patchright: driver vs engine](vs-patchright.md), and [what you can
 and cannot change about browser-use's own detection surface](browser-use-detection.md).
 
 ## Sources

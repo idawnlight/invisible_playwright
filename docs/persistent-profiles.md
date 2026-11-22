@@ -85,7 +85,9 @@ or microphone access:
   address, the mechanism specified in
   [draft-ietf-mmusic-mdns-ice-candidates](https://datatracker.ietf.org/doc/draft-ietf-mmusic-mdns-ice-candidates/).
 
-Both are switched off together when a permission is present.
+Both are switched off together when a permission is present. In this library the address
+that then becomes readable is the declared home-network address drawn from the seed, never
+the machine's own.
 
 The critical detail is that the check counts a **persisted** permission, not only an
 active capture. Granting camera access once on an origin, in a directory you then reuse,

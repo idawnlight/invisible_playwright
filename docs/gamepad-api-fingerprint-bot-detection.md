@@ -75,7 +75,7 @@ The failure modes are the opposite of emptiness:
   says a different engine.
 - **An over-eager patch that changes the function's signature or throws.** Anything that
   makes `getGamepads` look overridden, non-native, or inconsistent with a fresh copy of
-  the built-in is exactly what tampering detectors like [CreepJS](creepjs-explained.md)
+  the built-in is exactly what tampering detectors like [a consistency checker](consistency-checker-explained.md)
   look for.
 
 The real invisible_playwright build does none of these. It behaves as stock Firefox

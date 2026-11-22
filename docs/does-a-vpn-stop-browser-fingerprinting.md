@@ -225,8 +225,8 @@ the clean IP.
 - This project's release gates, including the WebRTC gate whose negative-only checks
   once passed on a feature that was returning nothing, and the timezone derivation
   that resolves the zone from the egress address.
-- The public fingerprinting suites - CreepJS, BotD, FingerprintJS, sannysoft and
-  BrowserLeaks - read field by field before and after a VPN, which is where the
+- The public fingerprinting suites - a consistency checker, BotD, an open-source fingerprinting library, a basic bot-test page and
+  A raw-value inspector - read field by field before and after a VPN, which is where the
   "one field changed, the rest did not" observation comes from.
 - [MDN: `Navigator.userAgent`](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/userAgent),
   [`Navigator.platform`](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/platform)

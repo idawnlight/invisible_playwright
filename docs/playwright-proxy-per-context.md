@@ -102,8 +102,8 @@ with a German timezone. The second one is the mismatch that
 [the timezone page](timezone-proxy-mismatch.md) is entirely about, and the recommended
 proxy pattern created it.
 
-The same applies to the locale, and to the public address reported through WebRTC, which
-[has its own failure mode behind a proxy](webrtc-leak-proxy.md).
+The same applies to the locale. WebRTC, by contrast, uses the proxy of each context for its
+UDP, and [has its own failure mode behind a proxy](webrtc-leak-proxy.md).
 
 If you use per-context proxies, you have to set `timezone_id` and `locale` per context to
 match each proxy's country, by hand, and keep that mapping correct. Nothing does it for
@@ -194,7 +194,7 @@ and [Playwright SOCKS5 proxy with authentication](playwright-socks5-proxy-authen
   listed above: [MDN: hardwareConcurrency](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/hardwareConcurrency),
   [MDN: deviceMemory](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/deviceMemory).
 - The surfaces listed above are each documented on their own page, linked in place.
-- This project resolves the timezone, locale and WebRTC exit address from one lookup per
+- This project resolves the timezone and locale from one lookup per
   launch, which is why one identity is one launch here.
 
 ---

@@ -18,7 +18,7 @@ the thing it describes, and several of them record something we got wrong first.
 - **[Guides](guides.md)** - how detection actually works, in seven groups: browser
   identity, canvas/WebGL/fonts/audio, network and WebRTC, the automation layer, AI
   agents, the detectors themselves explained from source, and testing.
-- **[Comparisons](comparisons.md)** - against Camoufox, Patchright, nodriver and
+- **[Comparisons](comparisons.md)** - against Patchright, nodriver and
   playwright-stealth, and the case for Firefox over Chromium generally.
 - **[Integrations](integrations/)** - running this inside Scrapy, Crawlee, Robot
   Framework, CodeceptJS, test runners and Playwright MCP, including which frameworks
@@ -50,7 +50,7 @@ ask whether two values that must agree, do. A user agent claiming one platform o
 font set from another is caught by a comparison, not by a blocklist.
 
 **Suppressing a signal is a signal.** A browser that refuses to answer is louder than
-one that answers plainly, because refusing is rare. CreepJS literally records a
+one that answers plainly, because refusing is rare. A consistency checker literally records a
 blocked probe as a lie.
 
 **Server tells are not automation tells, and they need different fixes.** A software

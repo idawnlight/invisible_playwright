@@ -181,10 +181,10 @@ machine and network. If the manual visit is also challenged, it is the exit, and
   they agree with each other rather than contradicting.
 - The comparison method in the testing guide linked above, used to read the fingerprint
   contribution to a score directly rather than trusting a verdict.
-- Public detector suites ([CreepJS](https://github.com/abrahamjuliot/creepjs),
+- Public detector suites (a consistency checker,
   [BotD](https://github.com/fingerprintjs/BotD),
   [FingerprintJS](https://github.com/fingerprintjs/fingerprintjs),
-  [sannysoft](https://bot.sannysoft.com/), [BrowserLeaks](https://browserleaks.com/)), each
+  a basic bot-test page, a raw-value inspector), each
   read from its own source, retrieved 2026-08-28, for what a coherence check actually
   inspects.
 

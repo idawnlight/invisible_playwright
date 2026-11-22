@@ -73,8 +73,8 @@ normal.
 
 Change the values in the browser's C++ source, compile, and ship the binary.
 
-**Tools:** [Camoufox](vs-camoufox.md), and `invisible_playwright`, which I
-maintain. Both are patched Firefox builds.
+**Tools:** `invisible_playwright`, which I
+maintain, and other patched Firefox builds.
 
 **What it fixes:** the distinction between a spoofed value and a real one
 disappears, because the engine reports through the same native code path a normal
@@ -141,7 +141,7 @@ Not by star count. By this order of questions:
    about it. Level 1 shipped today beats level 3 abandoned in three months.
 
 And whichever you pick, measure it yourself. Run one of the open test suites,
-[CreepJS](creepjs-explained.md) or [BotD](botd-explained.md) or [sannysoft](sannysoft-explained.md), and read the whole report instead of the headline. The
+[a consistency checker](consistency-checker-explained.md) or [BotD](botd-explained.md) or a basic bot-test page, and read the whole report instead of the headline. The
 published comparisons in this space are mostly written by companies selling a
 managed alternative, and the ones that are not are usually a single run on a single
 machine from a single IP. Your setup is not their setup.
@@ -191,16 +191,15 @@ choosing, because the honest answer is usually lower than the marketing suggests
 - rebrowser-patches' own GitHub repository,
   [rebrowser/rebrowser-patches](https://github.com/rebrowser/rebrowser-patches),
   read 2026-08-30, for the same CDP fix, reached independently of Patchright.
-- Camoufox's own GitHub repository,
-  [daijro/camoufox](https://github.com/daijro/camoufox),
-  read 2026-08-30, for its own C++-level patching of a Firefox fork.
-- The three test suites named above: [CreepJS](https://github.com/abrahamjuliot/creepjs),
+- The public repositories of other patched-Firefox projects,
+  read 2026-08-30, for their own C++-level patching of a Firefox fork.
+- The three test suites named above: a consistency checker,
   [BotD](https://github.com/fingerprintjs/BotD) and
   [sannysoft](https://bot.sannysoft.com/), read 2026-08-30.
 - This project's own early fingerprint data, where the software-renderer GPU string
   mistake described above was found.
 
-**See also:** [how CreepJS detects tampering](creepjs-explained.md), which explains why level one has a ceiling, and [WebGL renderer strings](webgl-renderer-strings.md) for a surface no level reaches by lying.
+**See also:** [how a consistency checker detects tampering](consistency-checker-explained.md), which explains why level one has a ceiling, and [WebGL renderer strings](webgl-renderer-strings.md) for a surface no level reaches by lying.
 
 ---
 

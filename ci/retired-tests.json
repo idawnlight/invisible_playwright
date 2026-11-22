@@ -1,0 +1,12 @@
+[
+  {"file": "tests/test_css_calc_is_windows_e2e.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 1, "wrapper.unit.all.windows": 1}},
+  {"file": "tests/test_math_sin_cos_tan_are_windows_e2e.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 1, "wrapper.unit.all.windows": 1}},
+  {"file": "tests/test_system_fonts_and_colors_are_windows_e2e.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 1, "wrapper.unit.all.windows": 1}},
+  {"file": "tests/test_webgl_dot_has_the_declared_gpu_s_bits_e2e.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 3, "wrapper.unit.all.windows": 3}},
+  {"file": "tests/unit/test_canvas_icc_refs.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 9, "wrapper.unit.all.windows": 9}},
+  {"file": "tests/unit/test_canvas_text_colors_refs.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 8, "wrapper.unit.all.windows": 8}},
+  {"file": "tests/unit/test_canvas_text_refs.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 7, "wrapper.unit.all.windows": 7}},
+  {"file": "tests/unit/test_compare_canvas_text_runs.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 3, "wrapper.unit.all.windows": 3}},
+  {"file": "tests/unit/test_fontconfig_criterion.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 5, "wrapper.unit.all.windows": 5}},
+  {"file": "tests/unit/test_theme_refusal_drop.py", "reason": "feature cancelled with the 69 backlog (21/11)", "date": "2026-11-21", "tests": {"wrapper.unit.all.linux": 3, "wrapper.unit.all.windows": 3}}
+]

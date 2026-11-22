@@ -21,8 +21,11 @@ that could not see a held loop does not pass the test for nothing.
 
 Nothing here is judged by how long it took (that is a verdict on the runner: a loop that a starved machine runs late is late without
 a defect). The loop is held when its thread was SEEN inside a step of the close that waits (`_close_loop_verdicts.blocked_by`), and the
-other browsers keep answering when, in the order of the events, a call of each began and ended while the close was in flight and
-while the removal of the closing browser's profile was held.
+other browsers keep answering when, in the order of the events, the loop read replies of them while the close was in flight (a reply
+that ARRIVED inside it counts, whenever its call began: a call that straddles the start of the close is a call the loop answered) and
+every one of them answered while the removal of the closing browser's profile was held. A browser that is silent inside the close
+while the others answer and the loop was never seen held is an engine the machine did not run (the printed spans say where it was):
+it is red only with a loop seen held, or with every browser silent (nothing shows that the loop ran).
 
 THE REMOVAL OF THE PROFILE IS NOT THE CLOSE'S. `close()` returns once the browser has exited; the removal of its session's directories
 is handed to the launch's reaper (`invisible_core.process.Reaper.then`) and runs on the thread that ends the tree, or on the
@@ -211,14 +214,22 @@ _CLIENT = textwrap.dedent("""
 
 
     async def pinger(page, record, closing, gate, records):
-        # A call counts as answered DURING the close when it began after the close began and ended before it ended, and as answered
-        # DURING THE REMOVAL when it began after the removal of the profile was reached and ended while it was still held: the order
-        # of the events, not how long it took. The close has returned by then or not: the removal is the reaper's, not the close's.
+        # A reply counts as ARRIVED DURING the close (`answered`) when the close was in flight at the moment the loop read it, whenever
+        # its call began: that is what shows the loop ran then. `inside` counts the calls that began AND ended in the close (printed,
+        # not judged); `spans` keeps (began, ended) of every call and `open_since` the call that is still waiting, to say WHERE a silent
+        # browser was (its engine did not reply, or the loop did not read it). A call is answered DURING THE REMOVAL when it began after
+        # the removal of the profile was reached and ended while it was still held. The order of the events, not how long it took. The
+        # close has returned by then or not: the removal is the reaper's, not the close's.
         while not record["stop"]:
             while_closing = closing.is_set()
-            started = time.monotonic()
+            started = record["open_since"] = time.monotonic()
             await page.evaluate("1 + 1")
-            took = time.monotonic() - started
+            record["open_since"] = None
+            ended = time.monotonic()
+            took = ended - started
+            record["spans"].append((started, ended))
+            if closing.is_set():
+                record["answered"] += 1
             if while_closing and closing.is_set():
                 record["inside"] += 1
                 record["slowest"] = max(record["slowest"], took)      # printed, never judged
@@ -322,7 +333,7 @@ _CLIENT = textwrap.dedent("""
         records = []
         tasks = []
         for page in pages[1:]:
-            record = {"stop": False, "inside": 0, "during_removal": 0, "slowest": 0.0}
+            record = {"stop": False, "answered": 0, "inside": 0, "during_removal": 0, "slowest": 0.0, "open_since": None, "spans": []}
             records.append(record)
             tasks.append(asyncio.create_task(pinger(page, record, closing, gate, records)))
         await asyncio.sleep(0.5)
@@ -333,9 +344,12 @@ _CLIENT = textwrap.dedent("""
         closing.set()
         started = time.monotonic()
         await sessions[0].__aexit__(None, None, None)
-        took = time.monotonic() - started
+        returned = time.monotonic()
+        took = returned - started
         with gate_lock:
             gate["order"].append("close_returned")
+        # Where each other browser was when the close returned: the age of the call it was still waiting for, if any.
+        open_for = [round(returned - r["open_since"], 3) if r["open_since"] is not None else 0.0 for r in records]
         closing.clear()
         await instrument.finish()
         report = instrument.report()
@@ -360,7 +374,12 @@ _CLIENT = textwrap.dedent("""
             "took": took, "launched": launched,
             "control": control.report(),
             "unscheduled": unscheduled.report(),
-            "others": [{"inside": r["inside"], "during_removal": r["during_removal"], "slowest": r["slowest"]} for r in records],
+            "others": [{"answered": r["answered"], "inside": r["inside"], "during_removal": r["during_removal"],
+                        "slowest": r["slowest"], "open_for": open_for[i],
+                        # the calls that touched the close, as (began, ended) in seconds from the close's start; the first eight
+                        "spans": [[round(a - started, 3), round(b - started, 3)] for a, b in r["spans"]
+                                  if b >= started and a <= returned][:8]}
+                       for i, r in enumerate(records)],
             "gate": {"reached": gate["since"] is not None, "released_by": gate["released_by"], "order": gate["order"],
                      "removal": gate["removal"]},
             "ended": {"reaped": reaped, "profile_gone": gone},
@@ -492,12 +511,18 @@ def test_no_blocking_step_of_the_close_runs_on_the_loop_s_thread(report):
 
 
 def test_the_other_three_keep_answering_during_the_close(report):
-    """Each of the other three browsers answers a call that began and ended while the first one closes, the removal of the first one's
-    profile is held until every one of them has answered, and the three are alive after. The order of the events decides; the
-    seconds a call took are printed."""
-    problem = others_answered_problem(report["others"], report["gate"])
-    assert problem is None, "%s\n(printed, not judged: the slowest call of each browser inside the close, in s: %s)" % (
-        problem, [round(r["slowest"], 3) for r in report["others"]])
+    """The loop reads replies of the other three browsers while the first one closes (a reply that ARRIVED inside the close counts,
+    whenever its call began), the removal of the first one's profile is held until every one of them has answered, and the three are
+    alive after. A browser whose engine did not reply during the close while the others did, and the loop was never seen held, is a
+    browser the machine did not run: it is the removal's hold that asks every one of them to answer afterwards. The order of the
+    events decides; the seconds are printed."""
+    problem = others_answered_problem(report["others"], report["gate"], report["inside"])
+    assert problem is None, (
+        "%s\n(printed, not judged: the close took %.0f ms; per browser: replies that arrived inside the close, calls that began and "
+        "ended inside it, the slowest of those in s, the age in s of the call still waiting when the close returned, and the calls that "
+        "touched the close as (began, ended) in s from its start: %s)" % (
+            problem, report["took"] * 1000,
+            [(r["answered"], r["inside"], round(r["slowest"], 3), r["open_for"], r["spans"]) for r in report["others"]]))
     assert report["texts"] == ["browser 1", "browser 2", "browser 3"]
 
 

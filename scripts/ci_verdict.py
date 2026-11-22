@@ -21,6 +21,9 @@ pytest wrote and fails on every one of them.
         missing (--binary is mandatory: without it exit 2) or the commit cannot be known; the --seal is unreadable.
         With --main-required (the list of main) the list only grows: a suite of main is gone, its minimum went down,
         its `exact` went from true to false, its os or tests lost an element, or its marker changed is red.
+        The one exception is `retired-tests.json` NEXT TO main's list (read from main, never from the judged branch): a file it names that
+        no longer exists in the checkout may leave the rows, and the minimum of a row may go down by the tests main counted for it in that
+        row (`tests: {row id: n}`), and by no more. A retired file still on disk, or any other lost test, stays red.
         What the file of main is can be said only by the gate, which checks main out (a failed download is not
         "main has no list"): the file exists -> it is compared; it does not exist and the gate passed
         --main-has-no-list (main was checked out and has no such file) -> passed, declared; it does not exist
@@ -248,12 +251,65 @@ def _int(value):
     return value if _is_int(value) else 0
 
 
-def against_main(current, main):
+RETIRED_NAME = "retired-tests.json"
+
+
+def validate_retired(data):
+    """-> the reasons why `data` is not a well-formed list of retired files (empty if it is). An entry: the file, why it went, the date, and
+    for each row id the number of tests the file had in that row on main (counted with the row's marker)."""
+    if not isinstance(data, list):
+        return ["the retired list must be a JSON list"]
+    problems, seen = [], set()
+    for i, e in enumerate(data):
+        where = "retired entry %d" % i
+        if not isinstance(e, dict):
+            problems.append("%s is not an object" % where)
+            continue
+        f = e.get("file")
+        if not isinstance(f, str) or not f.strip():
+            problems.append("%s has no file" % where)
+        elif f in seen:
+            problems.append("%s: the file %s appears more than once" % (where, f))
+        else:
+            seen.add(f)
+            where = "retired %s" % f
+        for key in ("reason", "date"):
+            if not isinstance(e.get(key), str) or not e.get(key).strip():
+                problems.append("%s: %s must be a non-empty string" % (where, key))
+        counts = e.get("tests")
+        if not (isinstance(counts, dict) and counts and all(isinstance(k, str) and _is_int(v) and v > 0 for k, v in counts.items())):
+            problems.append("%s: tests must be {row id: number of tests of the file in that row (> 0)}" % where)
+    return problems
+
+
+def retired_of_main(main_required):
+    """The retired files of main: ``ci/retired-tests.json`` next to main's list, read from main and never from the judged branch. It may not
+    exist (main older than the format): nothing is retired. A malformed one is a problem, never an empty list. -> (entries, problems)."""
+    path = Path(main_required).with_name(RETIRED_NAME)
+    if not path.is_file():
+        return [], []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [], ["the retired list of main %s cannot be read: %s" % (path, exc)]
+    bad = validate_retired(data)
+    if bad:
+        return [], ["the retired list of main %s is malformed: %s" % (path, "; ".join(bad))]
+    return data, []
+
+
+def against_main(current, main, retired=(), exists=os.path.exists):
     """The list only grows: every suite of main is still here, with no lower minimum, no exact turned off, no lost
-    test or OS and the same marker. `main` is read leniently (it may be older than the current format)."""
+    test or OS and the same marker. `main` is read leniently (it may be older than the current format).
+
+    The one way a test leaves a row is `retired` (the list of MAIN, never of the branch): a file that main retired and that no longer exists
+    (`exists`, in the checkout judged) is not a lost test, and the minimum of the row may go down by exactly the tests main counted for that file
+    in that row (``tests[row id]``), and by no more. A retired file that is still on disk is not excused: it must stay in its rows."""
     problems = []
     if not isinstance(main, list):
         return ["the list of main is not a JSON list: it cannot be compared"]
+    gone = {e["file"]: e["tests"] for e in retired if isinstance(e, dict) and isinstance(e.get("file"), str)
+            and isinstance(e.get("tests"), dict) and not exists(e["file"])}
     by_id = {s.get("id"): s for s in current if isinstance(s, dict)}
     for old in main:
         if not isinstance(old, dict):
@@ -263,12 +319,16 @@ def against_main(current, main):
         if new is None:
             problems.append("the suite %s of main is gone from the list" % sid)
             continue
-        if _int(new.get("min_tests")) < _int(old.get("min_tests")):
-            problems.append("the minimum of %s went down: %s on main, %s here"
-                            % (sid, old.get("min_tests"), new.get("min_tests")))
+        lost = [t for t in old.get("tests", []) if t not in new.get("tests", [])]
+        excused = [t for t in lost if t in gone]
+        lost = [t for t in lost if t not in gone]
+        allowed = sum(_int(gone[t].get(sid)) for t in excused)
+        if _int(new.get("min_tests")) < _int(old.get("min_tests")) - allowed:
+            problems.append("the minimum of %s went down: %s on main, %s here%s"
+                            % (sid, old.get("min_tests"), new.get("min_tests"),
+                               " (retired files account for %d of it)" % allowed if allowed else ""))
         if old.get("exact") is True and new.get("exact") is not True:
             problems.append("the suite %s is no longer exact, as it is on main" % sid)
-        lost = [t for t in old.get("tests", []) if t not in new.get("tests", [])]
         if lost:
             problems.append("the suite %s lost %d required test(s) that main has: %s" % (sid, len(lost), ", ".join(lost)))
         lost_os = [o for o in old.get("os", []) if o not in new.get("os", [])]
@@ -406,7 +466,9 @@ def cmd_judge(ns):
             problems.append("the list of main %s exists, but --main-has-no-list says main has none" % ns.main_required)
         elif exists:
             try:
-                problems += against_main(suites, _read_json_list(ns.main_required))
+                retired, retired_problems = retired_of_main(ns.main_required)
+                problems += retired_problems
+                problems += against_main(suites, _read_json_list(ns.main_required), retired)
             except Usage as exc:
                 problems.append(str(exc))
         elif ns.main_has_no_list:

@@ -79,7 +79,7 @@ starting point and says plainly not to expect it to get past anything but the si
 detection methods.
 That is not marketing copy undercutting itself, it is an accurate scope statement, and
 taking a tool's own stated limits at face value is the same approach this page took with
-[Camoufox's](vs-camoufox.md), [Patchright's](vs-patchright.md), and
+[Patchright's](vs-patchright.md) and
 [nodriver's](vs-nodriver.md) documentation.
 
 ## When playwright-stealth is actually the right call
@@ -126,7 +126,7 @@ an init script runs inside the page, and those values come from native code the 
 cannot reach or fully rewrite convincingly.
 
 **Is playwright-stealth a Firefox tool?** No, it works against whatever browser
-Playwright launches; it is not engine-specific the way this project or Camoufox are.
+Playwright launches; it is not engine-specific the way this project is.
 
 **Can I use playwright-stealth and a driver patch like Patchright together?** Yes, they
 address different layers; combining them is a normal pattern on Chromium.

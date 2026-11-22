@@ -61,8 +61,7 @@ because it is passing the question through. Upgrading Scrapling can change the e
 under you, and with it the fingerprint, without a line of your own code changing.
 
 Both of the engines it has wrapped are ones this documentation already covers directly:
-see [how invisible_playwright compares to the Firefox-based one](vs-camoufox.md) and
-[to the patched-Chromium one](vs-patchright.md). The comparison you are on this page to
+see [how invisible_playwright compares to the patched-Chromium one](vs-patchright.md). The comparison you are on this page to
 make is, underneath, one of those two.
 
 ## What invisible_playwright does instead
@@ -199,8 +198,7 @@ the fetch, the parser handles the extraction.
   read 2026-08-06, for what the returned object exposes once you switch from plain
   Playwright.
 
-**See also:** [the comparison with the Firefox-based engine](vs-camoufox.md),
-[the comparison with the patched-Chromium engine](vs-patchright.md), and
+**See also:** [the comparison with the patched-Chromium engine](vs-patchright.md), and
 [what the stealth levels actually mean](playwright-stealth-levels.md).
 
 ---

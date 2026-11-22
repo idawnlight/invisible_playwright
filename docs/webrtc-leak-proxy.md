@@ -9,10 +9,13 @@ nav_order: 1
 
 # WebRTC leak with a proxy in Playwright and Selenium
 
-A SOCKS5 or HTTP proxy does not stop a WebRTC leak: proxies carry TCP, but
-WebRTC's STUN step needs UDP, so the browser asks a STUN server directly and
-the real IP comes back. Disabling WebRTC avoids that leak, but a browser with
-zero ICE candidates is its own signature.
+In a stock browser a proxy does not stop a WebRTC leak: the browser's proxy
+setting covers TCP traffic, but WebRTC's STUN step is UDP sent from the
+machine's own interface, so the browser asks a STUN server directly and the real
+IP comes back. SOCKS5 does define a UDP mode (UDP ASSOCIATE), and a stock browser
+still does not use it for WebRTC, even when the proxy could carry it. Disabling
+WebRTC avoids that leak, but a browser with zero ICE candidates is its own
+signature.
 
 "My browser leaks my real IP while using a proxy." "Playwright leaks IP with proxy."
 "How do I prevent WebRTC leaks in Selenium?" Every answer to those questions ends the
@@ -22,8 +25,8 @@ same way: disable WebRTC, or set
 That advice passes every WebRTC leak test and fails at the only thing that matters.
 
 This page covers what actually leaks, why the standard fix creates a bigger problem
-than it solves, and what we learned getting it wrong ourselves, including a release
-gate of ours that printed green over a browser whose WebRTC was completely dead.
+than it solves, and how to test WebRTC so that a check cannot print green over a
+browser whose WebRTC is completely dead.
 
 ## What a real Firefox behind NAT emits
 
@@ -52,10 +55,10 @@ tests are built to catch, and it is the least interesting failure.
 
 **2. You leak the real public IP while claiming another one.** You are on a proxy,
 your HTTP traffic exits from one address, and the srflx candidate names a different
-one. STUN runs over UDP; a SOCKS5 proxy carries TCP. So the browser asks a STUN
-server directly, from the real interface, and the STUN server truthfully answers with
-the real address. Two addresses for one session, and the contradiction is the signal,
-not either address on its own.
+one. STUN runs over UDP, and a stock browser's proxy setting covers TCP. So the
+browser asks a STUN server directly, from the real interface, and the STUN server
+truthfully answers with the real address. Two addresses for one session, and the
+contradiction is the signal, not either address on its own.
 
 **3. You emit nothing at all.** No candidates, or the connection never completes.
 This is the one people create on purpose, and it is the worst of the three.
@@ -65,14 +68,31 @@ because video calls are normal. A session with zero ICE candidates has told the 
 something much more specific than an IP address: it has said *this browser has been
 modified*. An unusual IP is a weak signal. A missing capability is a strong one.
 
+## SOCKS5 has a UDP mode. Does that close the leak?
+
+SOCKS5 defines a UDP command, UDP ASSOCIATE
+([RFC 1928](https://www.rfc-editor.org/rfc/rfc1928)), so "SOCKS5 is TCP only" is
+wrong. Two things keep it from closing the leak:
+
+- Most residential exits do not implement it, or relay UDP from an address that is
+  different from the TCP exit.
+- A stock browser does not ask the proxy to relay WebRTC's UDP even when the proxy
+  could. Its proxy setting covers TCP traffic, and the ICE stack sends UDP from the
+  machine's own interface. A UDP-capable SOCKS5 proxy therefore does not stop the
+  leak in a stock browser.
+
+With this library the answer is different, and it is spelled out in
+[Where this project stands](#where-this-project-stands).
+
 ## What about `disable_non_proxied_udp` and `media.peerconnection.enabled=false`?
 
 These are the two answers you will find, and they are worth taking separately.
 
 **`--force-webrtc-ip-handling-policy=disable_non_proxied_udp`** is a Chromium flag.
-It stops WebRTC from using any network path that does not go through the proxy. Since
-a SOCKS5 proxy carries TCP and STUN wants UDP, in practice this means no srflx
-candidate is gathered. You have converted failure state 2 into failure state 3.
+It stops WebRTC from using any network path that does not go through the proxy. Unless
+the proxy relays UDP, STUN has no path, and most residential exits do not relay it, so
+in practice no srflx candidate is gathered. You have converted failure state 2 into
+failure state 3.
 It does prevent the leak. It also produces a browser that cannot gather a normal
 candidate set, which is a condition a real Chrome almost never ends up in.
 
@@ -87,27 +107,19 @@ browsing, disabling WebRTC is a reasonable trade and you should stop reading her
 you are trying to look like an ordinary browser, you have swapped a leak for a
 signature.
 
-The third option is the harder one: let WebRTC run, and make the address it reports
-be the address you want it to report.
+The third option is the harder one: let WebRTC run, and make sure the only public
+address it can ever report is the proxy's exit address.
 
-## The incident: our gate was green and the feature was dead
+## Testing WebRTC: assert the positive shape, on the shipped configuration
 
-We had a WebRTC gate. It asserted the sensible things: the host candidate does not
-expose the LAN address, no IPv6 candidate appears. Both assertions passed, run after
-run.
+A WebRTC check that only asserts the absence of a bad signal (the host candidate does
+not expose the LAN address, no IPv6 candidate appears) passes on a browser whose WebRTC
+is dead, because a feature that gathers nothing leaks nothing. Such a check cannot tell
+"working correctly" from "not working".
 
-Behind a proxy, on real pages, WebRTC was returning **blocked**. Both the host and
-the STUN section. No candidates at all, failure state 3, shipped.
-
-The gate passed because a dead WebRTC leaks nothing. Every negative assertion is
-trivially satisfied by a feature that does not run. We had written a test that could
-not distinguish "working correctly" from "not working".
-
-The fix to the test was to assert the positive shape: the page has to **complete**,
-the host candidate has to be a `.local` name, the srflx has to be present and has to
-equal the proxy's exit address. An empty result is now a failure.
-
-This is the general rule, and it is the most useful thing on this page:
+Assert the positive shape instead: the page has to **complete**, the host candidate has
+to be a `.local` name, and with a SOCKS5 proxy whose UDP relay works the srflx has to be
+present and has to equal the proxy's exit address. An empty result is a failure.
 
 > A check that only asserts the absence of a bad signal will pass when the feature is
 > broken. Assert the presence of the right signal instead.
@@ -115,107 +127,89 @@ This is the general rule, and it is the most useful thing on this page:
 The same shape shows up in [fonts](headless-fonts-differ.md), in [canvas](canvas-fingerprint-noise.md), in [audio](audiocontext-fingerprinting.md). Anything you can suppress will
 pass a suppression-based test.
 
-## A second gap, found days later: the test wasn't testing what shipped
-
-Fixing the assertion closed one hole and opened up a more uncomfortable question:
-what config had the passing test actually been running against?
-
-The answer was that the test suite set the real-address handling, the derived public
-IP, and the IPv6 filter itself, through explicit overrides, and called that combination
-"the intended production config" in its own comments. A default session - the one an
-actual user gets with no extra arguments - had none of those three switched on in the
-wrapper's own shipped baseline. The gate had been green for every run because it never
-ran the shipped defaults at all; it ran a configuration nobody's real session used.
-
-That is a different failure from the one above, and worth naming separately: the first
-was a test whose assertions couldn't tell working from broken; this one had assertions
-that were fine, aimed at a target that wasn't the one being shipped. Both produce the
-same outward symptom - a green gate over a feature real users don't actually get - for
-opposite reasons. The fix was to make the shipped baseline match what the test already
-assumed, not the other way around: derive the public IP from the proxy's own exit
-address automatically, turn the real-address handling on by default, and only then
-treat the gate as validating a real session instead of a hypothesis about one.
+There is a second, separate rule: test the configuration that ships. A test that sets
+the WebRTC configuration itself, through explicit overrides, validates that
+combination and not the default session a user gets with no extra arguments. Its
+assertions can be fine and still aimed at a target nobody runs. Run the check against
+the shipped defaults, with no overrides, so that a pass describes a real session.
 
 ## `media.peerconnection.ice.disableIPv6` does nothing in current Firefox
 
 This one is worth stating plainly, because the preference is still recommended in a
 lot of places.
 
-We searched for it in the ICE gathering path of the Firefox 151 source. It is not
-read there. What exists is `RESOLVE_DISABLE_IPV6` for DNS and a `DISABLE_IPV6` flag
+The ICE gathering code of current Firefox does not read it. What exists is `RESOLVE_DISABLE_IPV6` for DNS and a `DISABLE_IPV6` flag
 on TCP sockets. Neither is consulted when candidates are gathered.
 
 The consequence, if your machine has a routable IPv6 address: WebRTC emits a host
-candidate carrying that real global IPv6, and a SOCKS5 proxy does nothing about it
-because it only carries TCP. Your IPv4 can be perfectly proxied while your IPv6 sits
-in the SDP in plain text.
+candidate carrying that real global IPv6, and a proxy setting does nothing about it
+because the proxy covers TCP traffic while ICE reads the machine's own interfaces. Your
+IPv4 can be perfectly proxied while your IPv6 sits in the SDP in plain text.
 
 Set the preference, verify it changed nothing, and then go looking for an actual
-fix. We ended up filtering IPv6 addresses in the gathering code itself and proving
-causality with a toggle: flag on, no IPv6 candidate; flag off, the global IPv6 comes
-straight back.
+fix. In this library the browser does not read the machine's interfaces at all: the
+session declares one plausible home network with no IPv6, so no IPv6 candidate is
+produced, with or without a proxy, and the browser does no AAAA lookups.
 
-## The thing that actually broke gathering behind a proxy
-
-This took the longest to find and it is not intuitive.
+## Why a stock Firefox behind a proxy can gather nothing
 
 A page that has not been granted camera or microphone permission causes Firefox to
 gather in a [restricted mode](https://www.rfc-editor.org/rfc/rfc8828): only the
 address of the **default route**, instead of every local interface. That mode is a
 privacy feature and it is the normal case, since most pages never ask for a camera.
 
-Finding the default route works by opening a UDP socket "connected" to the remote
-address of the document and reading back which local address the OS picked. Behind a
-SOCKS proxy that remote host is not directly reachable, so the probe fails, so
-gathering fails, so you get zero candidates on every proxied page.
+In a stock Firefox, finding the default route works by opening a UDP socket
+"connected" to the remote address of the document and reading back which local address
+the OS picked. Behind a SOCKS proxy that remote host is not directly reachable, so the
+probe can fail, and a proxied page can end up with no candidates at all. The lesson
+holds even if you never touch browser source: **behind a proxy, a stock browser's
+WebRTC can fail for reasons that have nothing to do with WebRTC**, and the error
+surfaces as silence.
 
-That was the real cause of the blocked state. Not a missing configuration value, not
-the STUN server, not the proxy credentials. A privacy path in the browser that
-assumes direct connectivity, meeting a setup that does not have it.
+In this library the host candidates come from the network the session declares, so
+they are present behind any proxy, as mDNS `<uuid>.local` names.
 
-Worth knowing even if you never touch browser source: **behind a proxy, WebRTC can
-fail for reasons that have nothing to do with WebRTC**, and the error surfaces as
-silence.
+## Why a made-up candidate gives itself away
 
-## If you synthesise a candidate, the details are the fingerprint
-
-Suppose you decide to supply the srflx candidate yourself, so it names your proxy's
-exit address. The address is the easy part. The candidate carries several other
-fields, and each of them is checkable:
+Suppose someone supplies the srflx candidate by hand, so it names the proxy's exit
+address. The address is the easy part. The candidate carries several other fields, and
+each of them is checkable:
 
 - **Priority** is computed by [a documented formula](https://www.rfc-editor.org/rfc/rfc8445#section-5.1.2)
-  from the candidate type, the interface preference and the component id. Our first attempt hardcoded the local
-  preference to `0xFFFF`. Real candidates on this stack fall in a range around
-  32256 to 32704, so `65535` is a value no genuine candidate ever has. One number,
-  and it was enough on its own.
+  from the candidate type, the interface preference and the component id. A value that
+  no genuine candidate on that stack produces stands out on its own.
 - **Foundation** is an identifier shared by candidates of the same type from the same
-  base. Ours drifted between runs, taking a different value each time and sometimes
-  colliding with the TCP host candidate's. A real one is stable.
+  base. A real one is stable; one that changes between runs, or collides with the
+  foundation of a candidate of another type, is a tell.
 - **The `raddr` and `rport` fields**, and the relationship between a candidate and the
   base it was derived from.
+- **Timing.** A real srflx candidate arrives after a network round trip to a STUN
+  server. One that shows up faster than that round trip is checkable.
 
-A synthesised candidate is not one value to get right. It is a small structure that
-has to be internally consistent and consistent with the other candidates in the same
-SDP. This is the same lesson as every other fingerprint surface, arriving in a
-different costume.
-[The full mechanics of replacing a candidate correctly](webrtc-ice-candidate-spoofing.md),
-including the arrival-timing tell that catches a candidate injected too fast, are
-their own page.
+A hand-made candidate is not one value to get right. It is a small structure that has
+to be internally consistent and consistent with the other candidates in the same SDP.
+This is the same lesson as every other fingerprint surface, arriving in a different
+costume. This library does not go down that road: every candidate comes from Firefox's
+own ICE code, from real STUN/TURN replies, and no address is rewritten.
 
 ## How to check your own setup
 
 Run a WebRTC test page through the proxy you actually deploy with. Not localhost:
-localhost bypasses the proxy and tests nothing. [BrowserLeaks](https://browserleaks.com/webrtc)
-lists the full candidate set, and [CreepJS](https://abrahamjuliot.github.io/creepjs/)
+localhost bypasses the proxy and tests nothing. A public site that shows your IP and WebRTC candidates
+lists the full candidate set, and a public fingerprint test page
 shows what a real detector extracts from it.
 
 What you want to see:
 
 - The page **completes**. A stuck or empty result is a failure, not a pass.
 - Host candidate is a `<uuid>.local` name. Not a LAN IP, and not absent.
-- An srflx candidate exists, and its address equals the exit address of your proxy.
-- No IPv6 candidate, if your proxy is IPv4.
-- The same page in a stock Firefox, side by side, differing only in the IP.
+- With a SOCKS5 proxy whose UDP relay works, an srflx candidate exists and its address
+  equals the exit address of your proxy. With any other proxy there is no srflx, and
+  gathering ends with one `icecandidateerror` 701 after about eleven seconds (see the
+  table below).
+- No IPv6 candidate.
+- The same page in a stock Firefox, side by side, differing only in the IP (or, with a
+  proxy that cannot carry UDP, in the missing srflx).
 
 That last one is the check that catches everything else. If your browser's output
 differs from a normal Firefox in any field except the address, that field is the
@@ -223,33 +217,88 @@ problem.
 
 ## Where this project stands
 
-The engine emits an srflx candidate carrying the proxy's exit address, with priority
-and foundation rebuilt to match the shape the real code produces, and the host
-candidate is left as the mDNS `.local` name Firefox produces by default. IPv6
-candidates are filtered in the gathering path when a proxy is configured. The exit
-address is resolved at launch by the wrapper, in the same lookup that resolves the
-timezone, so the two cannot disagree.
+Candidates are produced by Firefox's own ICE code from real STUN/TURN replies. No
+candidate is made up and no address is rewritten. The browser does not read the
+machine's network interfaces: each session declares one plausible home network (one
+adapter, one private IPv4 drawn from the seed), and the host candidates are mDNS
+`<uuid>.local` names, never an address of the machine. No IPv6 candidate is produced,
+with or without a proxy.
+
+Before launch, and before a context that brings its own SOCKS5 proxy, the library
+measures the proxy. It opens a SOCKS5 UDP ASSOCIATE, sends a STUN Binding request
+through the relay, and compares the address the STUN server saw with the proxy's TCP
+exit. Only if a reply comes back and the two addresses are equal does the browser send
+WebRTC's UDP through the relay. The measurement fits in about three seconds and runs in
+parallel with the exit discovery. Anything else (refused, no reply, a different
+address, an IPv6 TCP exit, a proxy that is not SOCKS5) means the browser treats the
+proxy as a router that drops UDP. With the defaults, the exit address is resolved at
+launch by the library, in the same lookup that resolves the timezone, so the two cannot disagree.
+
+| Session | Where the STUN datagram goes | `srflx` candidate | `host` candidates | ICE error |
+|---|---|---|---|---|
+| SOCKS5 proxy whose UDP relay works and exits from the same address as its TCP | Through the proxy's UDP relay (SOCKS5 UDP ASSOCIATE) | Present, and it is the proxy's exit address | mDNS names (`<uuid>.local`), UDP and TCP | None |
+| SOCKS5 proxy that cannot carry UDP (ASSOCIATE refused, relay silent, UDP exits from another address), or SOCKS4 | Nowhere: no datagram leaves, neither through the proxy nor from the machine | Absent | mDNS names, UDP and TCP | One `icecandidateerror` 701 for the STUN request, after about eleven seconds, when gathering ends |
+| HTTP or HTTPS proxy (CONNECT) | Nowhere, same as above: CONNECT carries no UDP | Absent | mDNS names, UDP and TCP | Same as above |
+| No proxy | Directly from the machine, as in any browser | Present when the STUN server answers: the line's real public address | mDNS names | None |
+
+With a proxy set, no datagram ever leaves directly from the machine: there is no
+fallback to direct. The caller cannot override the measurement. There is no option that
+forces UDP on, declares a public IP, rewrites a candidate or disables WebRTC.
+
+So, to the question "if I use a UDP-capable SOCKS5 proxy there is no leak, right?":
+with a stock browser, no, because the browser never sends WebRTC's UDP through the
+proxy. With this library, the UDP goes through the relay when the relay works and exits
+from the same address as the TCP, and otherwise no datagram leaves at all.
+
+A few more details that hold in every proxied session:
+
+- Each context uses its own proxy for WebRTC: a context created with
+  `browser.new_context(proxy=...)` and its own SOCKS5 proxy gets its own `srflx`.
+- The STUN servers used for the measurement can be chosen with
+  `udp_stun_servers=["192.0.2.10:3478"]` on the constructor (IPv4 literals only); by
+  default two public ones are used. They are used by the Python process only.
+- The names of STUN/TURN servers in `iceServers` are resolved by the browser over
+  DNS-over-HTTPS through the proxy of that context, never by the machine's resolver.
+  Without a proxy the system resolver is used, as in retail Firefox.
+- TURN over TCP goes through the context's proxy.
+- HTTP/3 follows the same road: over the relay when the proxy carries coherent UDP,
+  otherwise the browser falls back to HTTP/2.
 
 Nothing here is turned off. The goal throughout is a browser that emits what a real
-one emits, from an address you chose.
+browser on that network would emit: behind a router that drops UDP, host candidates and
+no server-reflexive one.
 
 ## Short answers to the questions that lead here
 
-**Does a SOCKS5 proxy stop a WebRTC leak?** No. SOCKS5 carries TCP, STUN uses UDP, so
-the STUN request leaves from the real interface and the answer names the real address.
-The proxy is working correctly; WebRTC is simply not going through it.
+**Does a SOCKS5 proxy stop a WebRTC leak?** Not in a stock browser. SOCKS5 defines a UDP
+mode (UDP ASSOCIATE), but most residential exits do not implement it, and a stock
+browser does not route WebRTC's UDP through the proxy even when the proxy could. The
+STUN request leaves from the real interface and the answer names the real address. The
+proxy is working correctly; WebRTC is simply not going through it. With this library
+the UDP goes through the relay when the relay works and exits from the same address as
+the TCP; otherwise no datagram leaves at all.
 
-**Does an HTTP proxy stop it?** No, for the same reason.
+**If I use a UDP-capable SOCKS5 proxy, there is no leak, right?** With a stock browser,
+no: UDP-capable or not, the proxy is not asked to carry WebRTC's UDP. With this library
+the proxy is measured first, and the UDP goes through the relay only if the relay
+answers and exits from the same address as the proxy's TCP.
 
-**Does Playwright's `proxy=` option stop it?** No. It configures the browser's HTTP
-path. ICE gathering is a separate mechanism.
+**Does an HTTP proxy stop it?** Not in a stock browser: CONNECT carries no UDP, so the
+STUN request leaves from the real interface. With this library no datagram leaves at
+all, and there is no srflx candidate.
+
+**Does Playwright's `proxy=` option stop it?** Not in stock Playwright. It configures
+the browser's TCP path. ICE gathering is a separate mechanism. In this library the
+`proxy=` option of `InvisiblePlaywright` and of `browser.new_context` covers WebRTC as
+described in the table above.
 
 **Why does my IP leak in Firefox but not in Chrome, or the other way round?** The two
 engines gather candidates differently and expose different controls. Chromium has a
 handling policy flag; Firefox does not. Test the engine you actually ship.
 
 **Is `media.peerconnection.ice.disableIPv6` the fix for an IPv6 leak?** Not in current
-Firefox. See the section above: the preference is not read during ICE gathering.
+Firefox. See the section above: the preference is not read during ICE gathering. In
+this library no IPv6 candidate is produced, with or without a proxy.
 
 **Will a VPN fix it?** Usually yes, because a VPN moves the whole interface rather
 than just the browser's TCP traffic, so STUN leaves through the tunnel too. That is
@@ -261,10 +310,7 @@ disabled is reporting the absence of a feature, not the presence of protection.
 
 ## Sources
 
-- This project's WebRTC release gate and the two failures described above: the
-  negative-only assertion that passed a dead WebRTC, and the passing test that ran a
-  configuration nobody's default session actually shipped with.
-- A read of the current Firefox 151 WebRTC gathering code confirming that
+- A read of the current Firefox WebRTC gathering code confirming that
   `media.peerconnection.ice.disableIPv6` is honored only for DNS resolution and TCP
   sockets, never on the ICE candidate gathering path.
 - [RFC 8828, WebRTC IP Address Handling Requirements](https://www.rfc-editor.org/rfc/rfc8828),
@@ -275,9 +321,9 @@ disabled is reporting the absence of a feature, not the presence of protection.
 - [Chrome for Developers, `chrome.privacy` API reference](https://developer.chrome.com/docs/extensions/reference/api/privacy),
   retrieved 2026-08-28, documenting the `webRTCIPHandlingPolicy` values, including
   `disable_non_proxied_udp`, behind the Chromium flag.
-- [BrowserLeaks, WebRTC test page](https://browserleaks.com/webrtc), retrieved
+- A public WebRTC test page that shows your IP and candidates, retrieved
   2026-08-28, for checking the full ICE candidate set through a live proxy.
-- [CreepJS](https://abrahamjuliot.github.io/creepjs/), retrieved 2026-08-28, for what a
+- A public fingerprint test page, retrieved 2026-08-28, for what a
   real detector extracts from the candidate set.
 
 **See also:** [when the timezone does not match the proxy](timezone-proxy-mismatch.md),
@@ -288,6 +334,4 @@ another case where the protective setting is itself visible, and
 
 ---
 
-*From the notes of [invisible_playwright](https://github.com/oss-invisible/playwright).
-The dead-gate story is ours, and the rule it produced now applies to every gate we
-run.*
+*From the notes of [invisible_playwright](https://github.com/oss-invisible/playwright).*

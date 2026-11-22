@@ -181,19 +181,20 @@ def _what_the_core_declares_for_a_proxy_is_recorded(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _a_unit_test_asks_mozilla_for_no_intermediates_list(request, monkeypatch):
-    """Outside the e2e, a launch declares no intermediates list.
+def _a_unit_test_asks_mozilla_for_no_security_state(request, monkeypatch):
+    """Outside the e2e, a launch asks Mozilla for nothing and runs no generation.
 
-    The core's `write_user_js` (every launch the server makes) declares Mozilla's list: on a cold cache it downloads it in line, and the line it writes would
-    differ with the cache of whoever runs the test. The function is stubbed, as the core's own suite does (tests/conftest.py of invisible-core): no list, no
-    request. The tests of `fetch` set their own; a test marked `e2e` gets the real one (the CI legs point it at the empty file of `ci/intermediates.json`)."""
+    The core's `write_user_js` (every launch the server makes) places the security state in the profile: on a cold cache it downloads Mozilla's collections in line and
+    has the engine generate the state from them, and what it copies would differ with the cache of whoever runs the test. The function the launch calls
+    (`ensure_security_state`) is stubbed, as the core's own suite does (tests/conftest.py of invisible-core): nothing ready, no request, no engine. The tests of `fetch`
+    set their own; a test marked `e2e` gets the real one (the CI legs point STEALTHFOX_SECURITY_STATE at the ready directory of `ci/security-state/`)."""
     if request.node.get_closest_marker("e2e") is not None:
         return
     try:
-        import invisible_core._intermediates as _im
+        import invisible_core._security_state as _ss
     except Exception:  # the package is absent: the tests that need it say so
         return
-    monkeypatch.setattr(_im, "ensure_intermediates", lambda *a, **kw: None)
+    monkeypatch.setattr(_ss, "ensure_security_state", lambda *a, **kw: None)
 
 
 @pytest.fixture(autouse=True)

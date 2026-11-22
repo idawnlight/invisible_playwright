@@ -54,7 +54,7 @@ hash that implies one GPU while the WebGL renderer string names another is a
 contradiction no single-surface patch avoids. Because these surfaces are drawn
 from the same seed, they tell one story, which is why a seeded invisible_playwright
 session passes most fingerprint-consistency checks - the kind
-[CreepJS runs when it walks descriptors and compares surfaces](how-to-test-bot-detection.md).
+[a consistency checker runs when it walks descriptors and compares surfaces](how-to-test-bot-detection.md).
 
 Being real Firefox rather than patched-Chrome also means the driver layer is
 clean for free: `navigator.webdriver` reads as [a genuine browser's

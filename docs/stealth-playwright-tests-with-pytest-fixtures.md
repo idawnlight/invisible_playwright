@@ -119,14 +119,19 @@ async def test_webdriver_row_reads_real(context):
     assert "false" not in verdict.lower()   # a forced false is its own tell
 ```
 
-CreepJS asks a harder question - whether the browser is lying about itself - and returns a
+A consistency checker asks a harder question - whether the browser is lying about itself - and returns a
 trust score you can gate on. Give its probes time to finish before you read anything, and
 treat a page that never settles as a failure rather than a pass:
 
 ```python
-async def test_creepjs_trust_is_high(context):
+# FINGERPRINT_TEST_PAGE: URL of any public consistency-checking test page you choose;
+# the selector below is a placeholder, adapt it to that page's markup
+FINGERPRINT_TEST_PAGE = "https://fingerprint-test.example/"
+
+
+async def test_page_trust_is_high(context):
     page = await context.new_page()
-    await page.goto("https://abrahamjuliot.github.io/creepjs/")
+    await page.goto(FINGERPRINT_TEST_PAGE)
     await page.wait_for_selector(".trust-score", timeout=30_000)
 
     text = await page.inner_text(".trust-score")     # e.g. "92% trust score"
@@ -237,7 +242,7 @@ assertion proves the browser looks real. It does not prove your IP reputation or
 request cadence, and both fail independently of anything the fixture can assert.
 
 **Which detectors can I assert against?** Open-source ones like sannysoft for a smoke test
-or CreepJS for a trust score. Assert on a signal being present and correct, not merely on
+or a consistency checker for a trust score. Assert on a signal being present and correct, not merely on
 the page not throwing.
 
 ## Sources

@@ -137,8 +137,8 @@ What the integration delivers is a browser that reads as a genuine Firefox drive
 real person: the fingerprint is internally consistent, the TLS handshake is a real
 Firefox handshake because the engine is a real Firefox, and the driver layer does not
 announce automation. That is why it passes most in-browser detection, the fingerprint,
-tampering and driver checks that public suites like CreepJS, BotD, FingerprintJS,
-sannysoft and BrowserLeaks measure.
+tampering and driver checks that public suites like a consistency checker, BotD, an open-source fingerprinting library,
+a basic bot-test page and a raw-value inspector measure.
 
 It does not, and cannot on its own, fix the parts of a session that are not the browser:
 

@@ -44,12 +44,14 @@ carries ``Alt-Svc: h3`` (tests/_h3_server.py).
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
 import time
 
 import pytest
 
+from _evidence_with_files import FailureEvidenceWithFiles
 from _host_address import this_host_address
 from _waits import wait_until
 from _udp_line import (declared_udp, egress_by_proxy, expected_protocols, judge_visits, measure_servers, no_https_record,
@@ -66,6 +68,14 @@ PAUSE_MS = 2000
 #: The roads where QUIC can reach the server, so a QUIC connection of the browser is what its Alt-Svc turns into.
 _UDP_FREE_ROADS = ("direct", "socks5_coherent")
 _NAV_JS = "() => performance.getEntriesByType('navigation')[0].nextHopProtocol"
+#: What the engine logs for the failure evidence of the no-proxy test, by its own names (MOZ_LOG; the file is MOZ_LOG_FILE, one per process).
+#: ``nsHttp`` is the HTTP stack of the engine (``gHttpLog``, netwerk/protocol/http/nsHttpHandler.cpp:146): Alt-Svc, Http3Session, the transaction
+#: and the connection manager. The three Rust crates of HTTP/3 are named by their module path with ``::*``: ``neqo_glue`` (netwerk/socket/neqo_glue),
+#: ``neqo_http3`` and ``neqo_transport`` (third_party/rust/neqo-*). A Rust module reaches MOZ_LOG only by a name that contains ``::`` (xpcom/base/Logging.cpp,
+#: ``LogModule::SetLevel`` calls ``set_rust_log_level`` only then) and the engine's ``log`` crate is built with ``release_max_level_info``
+#: (toolkit/library/rust/shared/Cargo.toml:41): a release engine keeps their info, warn and error lines, not their debug and trace ones.
+#: ``timestamp`` writes the wall clock (UTC) on each line, ``sync`` writes each line at once, ``rotate:30`` keeps at most 30 MB per process.
+H3_MOZ_LOG = "timestamp,sync,rotate:30,nsHttp:5,neqo_glue::*:5,neqo_http3::*:5,neqo_transport::*:5"
 
 
 def _binary():
@@ -96,6 +106,13 @@ def _visits(road, server, monkeypatch, discover, **launch):
     from invisible_playwright import InvisiblePlaywright
 
     monkeypatch.setattr(_geo, "discover_egress_ip", discover)
+    # Failure evidence, only listening: a folder for the engine's own log of this launch, and a list this function fills, visit by visit.
+    engine_log = launch.pop("engine_log", None)
+    visit_log = launch.pop("visit_log", None)
+    if engine_log is not None:
+        os.makedirs(engine_log, exist_ok=True)
+        monkeypatch.setenv("MOZ_LOG", H3_MOZ_LOG)
+        monkeypatch.setenv("MOZ_LOG_FILE", os.path.join(engine_log, "engine-%PID.log"))
     protocols, walls = [], []
     # Firefox turns HTTP/3 off when the certificate chain ends in a root that is not one of its own (a self-signed test
     # server always does): measured, the Alt-Svc is learned, the QUIC handshake of validation succeeds with the override and
@@ -109,16 +126,25 @@ def _visits(road, server, monkeypatch, discover, **launch):
         for visit in range(1, visits_for(road) + 1):
             url = server.url if visit == 1 else "%s?v=%d" % (server.url, visit)
             started = time.monotonic()
+            seen = {"visit": visit, "url": url, "goto_started_m": round(time.perf_counter(), 6), "goto_started_t": round(time.time(), 4)}
+            if visit_log is not None:
+                visit_log.append(seen)
             page.goto(url, wait_until="load", timeout=60000)
             walls.append(round((time.monotonic() - started) * 1000))
+            seen.update(goto_ms=walls[-1], goto_done_m=round(time.perf_counter(), 6), quic_connections_after_goto=len(server.quic_peers))
             if road in _UDP_FREE_ROADS:
                 # The Alt-Svc of the document is absorbed when the browser has made its own QUIC connection to the server (the
                 # server sees it): the next visit reads h3 from then on, and not before. Waited for as a condition with a
                 # deadline, not slept for: on a loaded machine that connection comes later than any pause. A road whose UDP
                 # leads nowhere has nothing to wait for (every visit is h2 and no QUIC arrives): it keeps the pause.
-                wait_until(lambda: server.quic_peers, 30, lambda: page.wait_for_timeout(100))
+                quic_seen = wait_until(lambda: server.quic_peers, 30, lambda: page.wait_for_timeout(100))
+                seen.update(wait_for_quic_ok=quic_seen, wait_for_quic_done_m=round(time.perf_counter(), 6))
             page.wait_for_timeout(PAUSE_MS)           # let the later resources settle
-            protocols.append(page.evaluate(_NAV_JS))
+            seen["read_started_m"] = round(time.perf_counter(), 6)
+            protocol = page.evaluate(_NAV_JS)
+            seen.update(protocol=protocol, read_done_m=round(time.perf_counter(), 6), quic_connections_at_read=len(server.quic_peers),
+                        tcp_alpn_at_read=list(server.tcp_alpn))
+            protocols.append(protocol)
     return protocols, walls
 
 
@@ -137,12 +163,26 @@ def test_a_page_with_no_proxy_reads_h2_then_h3_then_h3(monkeypatch):
     import aioquic  # noqa: F401 - the dev extra installs it: a missing one is a failure, never a skip
     from _h3_server import H3Server
 
-    with H3Server(this_host_address()) as server:
-        assert not no_https_record(server.address), no_https_record(server.address)
-        protocols, walls = _visits("direct", server, monkeypatch, egress_by_proxy(direct=EXIT_DIRECT))
-        problems = judge_visits("direct", protocols, walls)
-        assert not problems, "; ".join(problems) + ". " + _report("direct", protocols, walls, server)
-        assert server.quic_peers, "the h3 visits did not reach the server by QUIC"
+    # On failure: the engine's own HTTP and HTTP/3 log of the launch, the lab server's record of every TCP and QUIC connection, and the
+    # protocol, the goto time and the read time of each visit (``files/``, ``tests/_evidence_with_files.py``). The times of the server record and
+    # of the visits are ``time.perf_counter()`` (``m``) of this process; the engine's log has the wall clock.
+    with FailureEvidenceWithFiles("h3-no-proxy-h2-h3-h3") as evidence:
+        with H3Server(this_host_address()) as server:
+            visit_log = []
+            try:
+                assert not no_https_record(server.address), no_https_record(server.address)
+                protocols, walls = _visits("direct", server, monkeypatch, egress_by_proxy(direct=EXIT_DIRECT),
+                                           engine_log=str(evidence.files / "engine-log"), visit_log=visit_log)
+                # On a real network QUIC completes in 1 RTT and TCP+TLS in 2, so a browser with an Alt-Svc mapping takes QUIC; the lab server
+                # keeps that order (its TCP+TLS waits for the QUIC handshake of the same client, tests/_h3_server.py), so visits 2 and 3 read h3.
+                problems = judge_visits("direct", protocols, walls)
+                assert not problems, "; ".join(problems) + ". " + _report("direct", protocols, walls, server)
+                assert server.quic_peers, "the h3 visits did not reach the server by QUIC"
+            finally:
+                server.write_record(evidence.files / "h3-server-record.jsonl")
+                (evidence.files / "visits.json").write_text(json.dumps(
+                    {"alt_svc": server.alt_svc, "address": server.address, "port": server.port, "moz_log": H3_MOZ_LOG, "visits": visit_log},
+                    indent=1, default=str), encoding="utf-8")
 
 
 def test_a_page_behind_a_gateway_that_relays_udp_starts_on_h2_reaches_h3_within_five_visits_and_the_quic_goes_by_the_relay(monkeypatch):

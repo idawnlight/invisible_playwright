@@ -227,7 +227,7 @@ the browser side; the IP and the behaviour are still yours to supply.
 - This project's own realness gates, which read permission state as one field among many
   cross-checked against a stock Firefox rather than as a standalone pass.
 
-**See also:** [how CreepJS decides you are lying](creepjs-explained.md) for the same
+**See also:** [how a consistency checker decides you are lying](consistency-checker-explained.md) for the same
 truth-versus-report logic at scale, [resist fingerprinting the honest way](resist-fingerprinting.md)
 for why a genuine state beats a patched one, and [the checklist for being detected on one
 site](playwright-detected-as-bot.md) for where the browser layer sits.

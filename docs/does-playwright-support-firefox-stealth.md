@@ -131,7 +131,7 @@ layer only.
 
 What the patched browser handles: the fingerprint, the driver tells, and the TLS
 handshake all read as a genuine Firefox. That is most of what a public detection
-suite - CreepJS, BotD, FingerprintJS, sannysoft, BrowserLeaks - actually
+suite - a consistency checker, BotD, an open-source fingerprinting library, a basic bot-test page, a raw-value inspector - actually
 measures, and it is why a well-configured session passes most of those checks.
 
 What it does not, and cannot, handle on its own:

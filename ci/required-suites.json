@@ -171,7 +171,7 @@
       "linux",
       "windows"
     ],
-    "min_tests": 259,
+    "min_tests": 263,
     "exact": true,
     "tests": [
       "tests/test_doh_session_prefs_unit.py",
@@ -199,7 +199,7 @@
     ],
     "marker": "unit",
     "needs_root": false,
-    "note": "92 = 6+32+21+7+8+3+9+6. The leak watcher file defines exactly one of its two resolver-trap tests per host (7 everywhere), so no test is skipped. `exact`: min_tests is raised by hand when a test is added. The sink of the egress gate (tests/test_the_egress_sink_helpers.py, 20): the engine's log (the same on Linux and Windows) and the witness read on known inputs, and a blind log that must raise, never answer 'nothing'. The lab CA of its OCSP case (tests/test_the_lab_ca_and_its_ocsp_leaf.py, 17; tests/test_the_fake_doh_answers.py +1, the DoH serving a lab-CA leaf): the leaf's AIA, trusted and untrusted issuers, the responder, the xpcshell step."
+    "note": "The leak watcher file defines exactly one of its two resolver-trap tests per host (7 everywhere), so no test is skipped. `exact`: min_tests is raised by hand when a test is added. The sink of the egress gate (tests/test_the_egress_sink_helpers.py, 20): the engine's log (the same on Linux and Windows) and the witness read on known inputs, and a blind log that must raise, never answer 'nothing'. The lab CA of its OCSP case (tests/test_the_lab_ca_and_its_ocsp_leaf.py, 17; tests/test_the_fake_doh_answers.py +1, the DoH serving a lab-CA leaf): the leaf's AIA, trusted and untrusted issuers, the responder, the xpcshell step."
   },
   {
     "id": "wrapper.e2e.page",
@@ -208,7 +208,7 @@
       "linux",
       "windows"
     ],
-    "min_tests": 126,
+    "min_tests": 130,
     "exact": true,
     "tests": [
       "tests/test_a_tiny_download_on_a_served_browser_is_saved_e2e.py",
@@ -218,11 +218,12 @@
       "tests/test_popup_destinations_e2e.py",
       "tests/test_popups_reach_the_client_e2e.py",
       "tests/test_route_superseded_e2e.py",
-      "tests/test_closing_one_of_four_browsers_does_not_hold_the_loop_e2e.py"
+      "tests/test_closing_one_of_four_browsers_does_not_hold_the_loop_e2e.py",
+      "tests/test_a_drag_keeps_its_buttons_pressed_e2e.py"
     ],
     "marker": "e2e",
     "needs_root": false,
-    "note": "114 + the 9 of test_closing_one_of_four_browsers_does_not_hold_the_loop_e2e.py (four browsers in one process, one closes: the loop is never seen inside a step of the close, the removal of the profile is held still and reached on a thread of the reaper while the close has returned, the other three keep answering; one control holds the loop on purpose, the other leaves it late in its selector and must not be charged). 114 = 100 + the 14 of test_a_page_that_moves_on_e2e.py (a navigation the page overtook with location.replace ends; the engine fix 860ef8a6d9 is proved by it). 100 counted at the collection; was 96 = 10+32+16+34+4 before the popup tests of 6200bc2). A page is handed over when the engine says Page.ready; a popup reaches the client (link, noopener, window.open; own site and another; with and without a route; in-process and over launch_server) as Playwright's does; a superseded route. Needs the candidate binary, and the stock Playwright client of the dev extra."
+    "note": "130 = 126 + the 4 of test_a_drag_keeps_its_buttons_pressed_e2e.py (a drag reaches the page with the button it holds: event.buttons is 1 on every mousemove of a left drag, 2 on a right one, 0 after the release; with and without humanize). The 126 before it: 116 + the 9 of test_closing_one_of_four_browsers_does_not_hold_the_loop_e2e.py (four browsers in one process, one closes: the loop is never seen inside a step of the close, the removal of the profile is held still and reached on a thread of the reaper while the close has returned, the other three keep answering; one control holds the loop on purpose, the other leaves it late in its selector and must not be charged). 116 = 100 + the 16 of test_a_page_that_moves_on_e2e.py (a navigation the page overtook with location.replace ends; the engine fix 860ef8a6d9 is proved by it; 2 of them the strict networkidle cases, a document still arriving that moves). 100 counted at the collection; was 96 = 10+32+16+34+4 before the popup tests of 6200bc2). A page is handed over when the engine says Page.ready; a popup reaches the client (link, noopener, window.open; own site and another; with and without a route; in-process and over launch_server) as Playwright's does; a superseded route. Needs the candidate binary, and the stock Playwright client of the dev extra."
   },
   {
     "id": "wrapper.unit.page",
@@ -268,6 +269,23 @@
     "note": "The engine DECLARES software compositing on every machine (core: the compositing entries of zoom.stealth.gfx.feature_status carry the VM decision, and on Windows gfx.webrender.software=true, gfx.webrender.software.d3d11=false). 3 = (1) the compositor read from a privileged context is 'WebRender (Software)' on Windows and on Linux (windowUtils.layerManagerType of each window: Troubleshoot.snapshot().graphics throws on this engine, `ext is null`, so it is not the route); (2) the GPU process uses under 1.5 s of CPU on the fixed 10-scene loop of one browser (Windows runner: 0.32 s declared, 2.7-4.2 s not, runs 43652292533 and 43642744101; on Linux it is held to the bound if a GPU process exists); (3) the 86 keys of the page-bytes probe plus the canvas 2D scenes (drawImage scaled with smoothing off/low/medium/high, text with linear/radial/conic gradients) equal tests/data/page_bytes_<os>.json, PNGs on decoded pixels. EXPECTED RED on the core 64.71.0 (tests 1 and 2 on Windows). The reference of Windows holds the 75 stable keys and 6 of the 11 PNG keys of run 43652292533; the five other PNG keys and the new canvas keys, and all of Linux, are written from the first run on the engine of the reference (the failure of test 3 prints RECORD-BEGIN ... RECORD-END with the entries to merge): a reference that is not complete is red, never skipped. 9 = those 3 + the 6 families of tests/test_a_screenshot_draws_the_text_of_the_bundled_fonts_as_the_content_does_e2e.py (from firefox-66, engine_at_least): a screenshot draws the text of Arial, Times New Roman, Consolas and Segoe UI, with accents, the typographic apostrophe, the euro sign, Chinese, Arabic and Russian, and of MS PGothic (face 2 of msgothic5_32.ttc: Japanese and Latin) and NSimSun (face 1 of simsun.ttc: Chinese), two faces that are not the first of their collection, with the same bytes as the content process drew them in a canvas (an SVG image with a foreignObject of the same markup), cut from the same page.screenshot, on both systems and with no threshold. EXPECTED RED on every engine that rebuilds the text in the parent with another font than the bundle (Linux: fontconfig answers DejaVu Sans), and skipped, hence red here, on an engine older than firefox-66. It saves the screenshot, the two boxes and a result.json under RUNNER_TEMP/invpw-evidence."
   },
   {
+    "id": "wrapper.e2e.fakeweb",
+    "giro": "G2",
+    "os": [
+      "linux",
+      "windows"
+    ],
+    "min_tests": 4,
+    "exact": true,
+    "tests": [
+      "tests/test_fakeweb_p2_e2e.py",
+      "tests/test_fakeweb_p4_e2e.py"
+    ],
+    "marker": "e2e",
+    "needs_root": false,
+    "note": "The fake web, offline: our browser on the hard pages (profile P2: a reused routed page reaches networkidle every time, also under a load of three other browsers; the other site is another process) and on the 17-step journey of a person (profile P4), each judged against what stock Firefox does, as tests/fakeweb/pages.json declares it. 4 = 3 + 1. Stock itself is held to that declaration, and compared with ours step by step, by scripts/run_fakeweb.py in .github/workflows/fakeweb.yml. Needs the candidate binary (STEALTHFOX_E2E_BINARY)."
+  },
+  {
     "id": "wrapper.e2e.fontconfig",
     "giro": "G2",
     "os": [
@@ -305,7 +323,7 @@
     "os": [
       "linux"
     ],
-    "min_tests": 2096,
+    "min_tests": 2271,
     "exact": true,
     "tests": [
       "tests/test_a_162_message_is_read_like_a_161_one.py",
@@ -324,6 +342,7 @@
       "tests/test_a_failed_launch_stops_the_display.py",
       "tests/test_a_field_is_typed_after_a_pause.py",
       "tests/test_a_launch_asks_nobody_on_the_internet_where_it_leaves_from.py",
+      "tests/test_a_launch_gives_the_core_its_engine_for_the_security_state.py",
       "tests/test_a_launch_has_one_deadline.py",
       "tests/test_a_launch_without_a_session_gets_one.py",
       "tests/test_a_live_event_does_not_overtake_the_replay_of_a_new_page.py",
@@ -334,6 +353,7 @@
       "tests/test_a_page_is_handed_over_only_when_the_engine_says_it_is_ready.py",
       "tests/test_a_path_leaves_as_one_stroke.py",
       "tests/test_a_port_number_is_held_until_it_is_used.py",
+      "tests/test_a_read_whose_probe_ran_out_is_the_callers_timeout.py",
       "tests/test_a_request_and_a_response_are_light.py",
       "tests/test_a_request_says_what_it_is.py",
       "tests/test_a_session_ends_before_the_next_test_starts.py",
@@ -349,10 +369,11 @@
       "tests/test_ci_lab_geoip.py",
       "tests/test_ci_lab_geoip_verify.py",
       "tests/test_ci_lab_intermediates.py",
+      "tests/test_ci_lab_security_state.py",
       "tests/test_ci_real_geoip_check.py",
       "tests/test_ci_real_geoip_exit_code.py",
       "tests/test_ci_verdict.py",
-      "tests/test_ci_workflows_set_the_intermediates_list.py",
+      "tests/test_ci_workflows_set_the_security_state.py",
       "tests/test_cli.py",
       "tests/test_click_rhythm.py",
       "tests/test_connect_does_not_start_threads_on_the_loop.py",
@@ -360,7 +381,6 @@
       "tests/test_core_pin.py",
       "tests/test_cpu_by_type_window.py",
       "tests/test_cross_origin_iframe.py",
-      "tests/test_css_calc_is_windows_e2e.py",
       "tests/test_cursor_dispatch.py",
       "tests/test_cursor_wiring.py",
       "tests/test_doh_session_prefs_unit.py",
@@ -372,6 +392,7 @@
       "tests/test_every_refusal_is_declared.py",
       "tests/test_every_route_command_is_answered_may_fail.py",
       "tests/test_expose_binding_refusal.py",
+      "tests/test_fakeweb_p4_report.py",
       "tests/test_fission_identity_parity_e2e.py",
       "tests/test_fixtures_name_why_the_package_is_missing.py",
       "tests/test_fork.py",
@@ -391,8 +412,8 @@
       "tests/test_keyboard_rhythm.py",
       "tests/test_launcher_config.py",
       "tests/test_launcher_helpers.py",
-      "tests/test_math_sin_cos_tan_are_windows_e2e.py",
       "tests/test_motion_never_hides_a_programming_error.py",
+      "tests/test_moving_page_model.py",
       "tests/test_navigation_response.py",
       "tests/test_new_page_defaults.py",
       "tests/test_no_event_of_any_family_is_lost_by_the_hand_over.py",
@@ -432,7 +453,6 @@
       "tests/test_session_transport.py",
       "tests/test_set_input_files_payloads.py",
       "tests/test_strict_and_force.py",
-      "tests/test_system_fonts_and_colors_are_windows_e2e.py",
       "tests/test_the_argument_does_not_rewrite_the_expression.py",
       "tests/test_the_callers_code_runs_once.py",
       "tests/test_the_census_needs_no_package.py",
@@ -448,9 +468,15 @@
       "tests/test_the_fake_doh_answers.py",
       "tests/test_the_fake_doh_delays_and_refuses.py",
       "tests/test_the_fake_doh_tells_a_refused_certificate_from_a_dropped_connection.py",
+      "tests/test_the_fake_web_asks_nothing_of_the_internet.py",
+      "tests/test_the_far_away_probes_say_where_the_time_went.py",
+      "tests/test_the_far_away_watch_never_breaks_the_gateway.py",
       "tests/test_the_floor_says_the_installer_of_this_environment.py",
+      "tests/test_the_frame_evidence_never_changes_the_call_it_watches.py",
+      "tests/test_the_h3_lab_server_lets_quic_finish_first.py",
       "tests/test_the_h3_line_helpers.py",
       "tests/test_the_hand_over_of_a_popup_holds_under_concurrency.py",
+      "tests/test_the_held_keepalive_of_the_journey_starts_after_the_load.py",
       "tests/test_the_host_address_helper.py",
       "tests/test_the_http_proxy_helper_asks_for_credentials.py",
       "tests/test_the_keyboard_follows_the_session_language.py",
@@ -490,18 +516,12 @@
       "tests/test_version.py",
       "tests/test_virtual_display_start_off_the_loop.py",
       "tests/test_wait_for_timeout.py",
-      "tests/test_webgl_dot_has_the_declared_gpu_s_bits_e2e.py",
       "tests/test_webrtc_realness.py",
       "tests/unit/test_bfcache_evidence.py",
-      "tests/unit/test_canvas_icc_refs.py",
-      "tests/unit/test_canvas_text_colors_refs.py",
-      "tests/unit/test_canvas_text_refs.py",
-      "tests/unit/test_compare_canvas_text_runs.py",
       "tests/unit/test_config_public.py",
       "tests/unit/test_engine_at_least.py",
-      "tests/unit/test_fontconfig_criterion.py",
-      "tests/unit/test_processes_counts_sites.py",
-      "tests/unit/test_theme_refusal_drop.py"
+      "tests/unit/test_fontconfig_cache_criterion.py",
+      "tests/unit/test_processes_counts_sites.py"
     ],
     "marker": "not slow and not e2e",
     "needs_root": false,
@@ -514,7 +534,7 @@
     "os": [
       "windows"
     ],
-    "min_tests": 2097,
+    "min_tests": 2272,
     "exact": true,
     "tests": [
       "tests/test_a_162_message_is_read_like_a_161_one.py",
@@ -533,6 +553,7 @@
       "tests/test_a_failed_launch_stops_the_display.py",
       "tests/test_a_field_is_typed_after_a_pause.py",
       "tests/test_a_launch_asks_nobody_on_the_internet_where_it_leaves_from.py",
+      "tests/test_a_launch_gives_the_core_its_engine_for_the_security_state.py",
       "tests/test_a_launch_has_one_deadline.py",
       "tests/test_a_launch_without_a_session_gets_one.py",
       "tests/test_a_live_event_does_not_overtake_the_replay_of_a_new_page.py",
@@ -543,6 +564,7 @@
       "tests/test_a_page_is_handed_over_only_when_the_engine_says_it_is_ready.py",
       "tests/test_a_path_leaves_as_one_stroke.py",
       "tests/test_a_port_number_is_held_until_it_is_used.py",
+      "tests/test_a_read_whose_probe_ran_out_is_the_callers_timeout.py",
       "tests/test_a_request_and_a_response_are_light.py",
       "tests/test_a_request_says_what_it_is.py",
       "tests/test_a_session_ends_before_the_next_test_starts.py",
@@ -558,10 +580,11 @@
       "tests/test_ci_lab_geoip.py",
       "tests/test_ci_lab_geoip_verify.py",
       "tests/test_ci_lab_intermediates.py",
+      "tests/test_ci_lab_security_state.py",
       "tests/test_ci_real_geoip_check.py",
       "tests/test_ci_real_geoip_exit_code.py",
       "tests/test_ci_verdict.py",
-      "tests/test_ci_workflows_set_the_intermediates_list.py",
+      "tests/test_ci_workflows_set_the_security_state.py",
       "tests/test_cli.py",
       "tests/test_click_rhythm.py",
       "tests/test_connect_does_not_start_threads_on_the_loop.py",
@@ -569,7 +592,6 @@
       "tests/test_core_pin.py",
       "tests/test_cpu_by_type_window.py",
       "tests/test_cross_origin_iframe.py",
-      "tests/test_css_calc_is_windows_e2e.py",
       "tests/test_cursor_dispatch.py",
       "tests/test_cursor_wiring.py",
       "tests/test_doh_session_prefs_unit.py",
@@ -581,6 +603,7 @@
       "tests/test_every_refusal_is_declared.py",
       "tests/test_every_route_command_is_answered_may_fail.py",
       "tests/test_expose_binding_refusal.py",
+      "tests/test_fakeweb_p4_report.py",
       "tests/test_fission_identity_parity_e2e.py",
       "tests/test_fixtures_name_why_the_package_is_missing.py",
       "tests/test_fork.py",
@@ -599,8 +622,8 @@
       "tests/test_keyboard_rhythm.py",
       "tests/test_launcher_config.py",
       "tests/test_launcher_helpers.py",
-      "tests/test_math_sin_cos_tan_are_windows_e2e.py",
       "tests/test_motion_never_hides_a_programming_error.py",
+      "tests/test_moving_page_model.py",
       "tests/test_navigation_response.py",
       "tests/test_new_page_defaults.py",
       "tests/test_no_event_of_any_family_is_lost_by_the_hand_over.py",
@@ -642,7 +665,6 @@
       "tests/test_session_transport.py",
       "tests/test_set_input_files_payloads.py",
       "tests/test_strict_and_force.py",
-      "tests/test_system_fonts_and_colors_are_windows_e2e.py",
       "tests/test_the_argument_does_not_rewrite_the_expression.py",
       "tests/test_the_callers_code_runs_once.py",
       "tests/test_the_census_needs_no_package.py",
@@ -658,9 +680,15 @@
       "tests/test_the_fake_doh_answers.py",
       "tests/test_the_fake_doh_delays_and_refuses.py",
       "tests/test_the_fake_doh_tells_a_refused_certificate_from_a_dropped_connection.py",
+      "tests/test_the_fake_web_asks_nothing_of_the_internet.py",
+      "tests/test_the_far_away_probes_say_where_the_time_went.py",
+      "tests/test_the_far_away_watch_never_breaks_the_gateway.py",
       "tests/test_the_floor_says_the_installer_of_this_environment.py",
+      "tests/test_the_frame_evidence_never_changes_the_call_it_watches.py",
+      "tests/test_the_h3_lab_server_lets_quic_finish_first.py",
       "tests/test_the_h3_line_helpers.py",
       "tests/test_the_hand_over_of_a_popup_holds_under_concurrency.py",
+      "tests/test_the_held_keepalive_of_the_journey_starts_after_the_load.py",
       "tests/test_the_host_address_helper.py",
       "tests/test_the_http_proxy_helper_asks_for_credentials.py",
       "tests/test_the_keyboard_follows_the_session_language.py",
@@ -700,22 +728,32 @@
       "tests/test_version.py",
       "tests/test_virtual_display_start_off_the_loop.py",
       "tests/test_wait_for_timeout.py",
-      "tests/test_webgl_dot_has_the_declared_gpu_s_bits_e2e.py",
       "tests/test_webrtc_realness.py",
       "tests/unit/test_bfcache_evidence.py",
-      "tests/unit/test_canvas_icc_refs.py",
-      "tests/unit/test_canvas_text_colors_refs.py",
-      "tests/unit/test_canvas_text_refs.py",
-      "tests/unit/test_compare_canvas_text_runs.py",
       "tests/unit/test_config_public.py",
       "tests/unit/test_engine_at_least.py",
-      "tests/unit/test_fontconfig_criterion.py",
-      "tests/unit/test_processes_counts_sites.py",
-      "tests/unit/test_theme_refusal_drop.py"
+      "tests/unit/test_fontconfig_cache_criterion.py",
+      "tests/unit/test_processes_counts_sites.py"
     ],
     "marker": "not slow and not e2e",
     "needs_root": false,
     "linux_twin": "wrapper.unit.all.linux",
     "note": "The whole unit suite of the wrapper (what tests.yml runs: -m 'not slow and not e2e') with the core of the candidate, which tests.yml does not use until the pin moves, as an explicit list of its files: every file that has a test collected by the marker, but the files of the environment and the files of Linux. It holds the files of wrapper.unit.udp, wrapper.unit.page and wrapper.unit.compositing too: the overlap is on purpose. A file with a test that skips here is red, so a test that depends on its machine has a file of its own, named for what it needs, and is in no row: the files of the environment are named, each with its reason, in tests/test_the_unit_suite_is_accounted_for.py (the package index, a driver bundle tree, the workbench, a bundled stock Firefox, a clone with its hooks armed, a clone with origin/main), and that test refuses a file with tests that is in neither the rows nor that list, and a list that grows without its count. tests/test_prefs_composition_arm_on_windows.py (the hidden desktop is a Windows path) and tests/test_reaper_on_windows.py (job objects are a Windows mechanism) are files of Windows: only this row names them. min_tests counted with the judge's selector."
+  },
+  {
+    "id": "wrapper.e2e.securitystate",
+    "giro": "G2",
+    "os": [
+      "linux",
+      "windows"
+    ],
+    "min_tests": 4,
+    "exact": true,
+    "tests": [
+      "tests/test_security_state_engine_e2e.py"
+    ],
+    "marker": "e2e",
+    "needs_root": false,
+    "note": "The security state the core declares, against the engine: the engine launched directly in its generate mode makes what it is given (the contract's result, security_state/ with the bytes of the full filter and of the delta, the core's own validation of it); a normal launch declares no pref of the mode and re-imports nothing; a certificate that Mozilla's CRLite test data say is revoked in a delta is refused at the first navigation (SEC_ERROR_REVOKED_CERTIFICATE) while a valid one loads, and the revoked one loads when the ready directory has no data; a ready directory with no or an empty security_state/ starts. Certificates made on the run (a fresh root trusted in cert9.db by the engine's own xpcshell, Mozilla's default test key as the key of CN=int), servers on loopback, no network. Red on firefox-67 (no generate mode)."
   }
 ]

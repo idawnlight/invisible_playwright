@@ -23,10 +23,14 @@ The first test proves the frames are in other processes, so the file cannot turn
 from __future__ import annotations
 
 import json
+import threading
+import types
 
 import pytest
 
+from _evidence_on_failure import FailureEvidence
 from _fission_frames import Sites, assert_other_process, launch, new_page, wait_for, wait_frame
+from _frame_evidence import FrameWatch, OnFailure
 
 pytestmark = pytest.mark.e2e
 
@@ -60,7 +64,23 @@ def sites():
 
 
 @pytest.fixture(scope="module")
-def browser(firefox_binary):
+def evidence():
+    """What a failing test that asks for it leaves for a reader (nothing changes in what any test waits for or asserts): the Juggler wire, the engine's
+    own trace, the client's view of the frames of its pages and a reading of the wire. Armed before the browser is launched (the engine reads its
+    trace folder at launch) and held for the module; saved only by a test that opens ``OnFailure`` and fails."""
+    held = FailureEvidence("fission-frames-storage")
+    watch = FrameWatch()
+    held.note_records("client-view-of-the-frames", watch)
+    held.note_records("juggler-wire-reading", watch.wire)
+    held.arm()
+    try:
+        yield held, watch
+    finally:
+        held.__exit__(None, None, None)
+
+
+@pytest.fixture(scope="module")
+def browser(firefox_binary, evidence):
     with launch(firefox_binary) as browser:
         yield browser
 
@@ -209,23 +229,32 @@ def storage_pages(sites):
     return sites
 
 
-def test_what_a_frame_of_another_site_stores_is_seen_by_the_frame_and_by_the_context(page, storage_pages):
+def test_what_a_frame_of_another_site_stores_is_seen_by_the_frame_and_by_the_context(page, storage_pages, evidence):
     """As stock Firefox does: a cookie set by site B inside a frame of A (by a header and by script) is in
     `context.cookies()` with B's domain, `document.cookie` of the frame shows both, and so do `localStorage` and
     `sessionStorage` of the frame what the frame wrote; a second page of the context with the same frame sees
     the same cookies and local storage, and the session storage of its own tab (the frame wrote it there too)."""
-    context = page.context
-    page.goto(storage_pages.url("A", "/storage"), wait_until="load")
-    frame = wait_frame(page, storage_pages.url("B"), "/storage-b")
-    assert frame.evaluate("window.__r") == {"cookie": "hdrcookie=1; jscookie=2", "ls": "frame-ls", "ss": "frame-ss"}
-    assert sorted((c["name"], c["domain"]) for c in context.cookies()) == [("hdrcookie", "localhost"),
-                                                                          ("jscookie", "localhost")]
-    assert sorted(c["name"] for c in context.cookies(storage_pages.url("B"))) == ["hdrcookie", "jscookie"]
-    assert context.cookies(storage_pages.url("A")) == []
-    second = context.new_page()
-    second.goto(storage_pages.url("A", "/storage"), wait_until="load")
-    again = wait_frame(second, storage_pages.url("B"), "/storage-b")
-    assert again.evaluate("window.__r") == {"cookie": "hdrcookie=1; jscookie=2", "ls": "frame-ls", "ss": "frame-ss"}
+    held, watch = evidence
+    held.note_records("fake-web-requests", types.SimpleNamespace(lock=threading.Lock(), records=storage_pages.requests))
+    with OnFailure(held, watch):
+        context = page.context
+        watch.listen(page, "first")
+        page.goto(storage_pages.url("A", "/storage"), wait_until="load")
+        frame = wait_frame(page, storage_pages.url("B"), "/storage-b")
+        assert frame.evaluate("window.__r") == {"cookie": "hdrcookie=1; jscookie=2", "ls": "frame-ls", "ss": "frame-ss"}
+        assert sorted((c["name"], c["domain"]) for c in context.cookies()) == [("hdrcookie", "localhost"),
+                                                                              ("jscookie", "localhost")]
+        assert sorted(c["name"] for c in context.cookies(storage_pages.url("B"))) == ["hdrcookie", "jscookie"]
+        assert context.cookies(storage_pages.url("A")) == []
+        second = context.new_page()
+        watch.listen(second, "second")
+        watch.observed("second.goto A/storage", lambda: second.goto(storage_pages.url("A", "/storage"), wait_until="load"))
+        again = watch.observed("wait_frame B/storage-b of the second page",
+                               lambda: wait_frame(second, storage_pages.url("B"), "/storage-b"),
+                               lambda stage, value: {"frames": watch.frames_of(second)} if stage != "returned" else watch.frame_data(value))
+        answer = watch.observed("evaluate window.__r in the B frame of the second page", lambda: again.evaluate("window.__r"),
+                                lambda stage, value: watch.frame_data(again))
+        assert answer == {"cookie": "hdrcookie=1; jscookie=2", "ls": "frame-ls", "ss": "frame-ss"}
 
 
 def test_storage_of_site_b_is_partitioned_between_a_frame_of_a_and_b_as_a_top_page(page, storage_pages):

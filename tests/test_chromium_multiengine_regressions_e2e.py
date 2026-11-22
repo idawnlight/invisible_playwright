@@ -2027,3 +2027,142 @@ async def _run_mid_evaluate_navigation_reports_context_destroyed(
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_sweep_short_tmps_preserves_live_sibling_pid(tmp_path: Any) -> None:
+    import subprocess as sp
+    import sys
+    from invisible_playwright._cdp.dispatcher import _sweep_short_tmps
+
+    sleeper = sp.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.read()"],
+        stdin=sp.PIPE,
+    )
+    try:
+        live_dir = tmp_path / f"ipw_t_{sleeper.pid}_alive"
+        dead_dir = tmp_path / "ipw_t_999999999_dead"
+        live_dir.mkdir()
+        dead_dir.mkdir()
+        _sweep_short_tmps(str(tmp_path))
+        assert live_dir.is_dir(), "live sibling driver temp dir must not be deleted"
+        assert not dead_dir.exists(), "dead driver temp dir should be cleaned up"
+    finally:
+        if sleeper.stdin:
+            sleeper.stdin.close()
+        sleeper.wait(timeout=30)
+
+
+@pytest.mark.parametrize("backend", ["firefox", "chromium"])
+def test_dual_backend_eval_syntaxerror_no_double_exec_and_worker_dynamic_headers(
+    backend: str,
+) -> None:
+    asyncio.run(
+        _run_eval_syntaxerror_no_double_exec_and_worker_dynamic_headers(backend)
+    )
+
+
+async def _run_eval_syntaxerror_no_double_exec_and_worker_dynamic_headers(
+    backend: str,
+) -> None:
+    seen_worker_headers: list[str] = []
+
+    class EvalWorkerHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            if self.path == "/page1":
+                body = (
+                    b"<!doctype html><script>"
+                    b"window.w = new Worker('/w.js');"
+                    b"window.askWorker = () => new Promise((res, rej) => { window.w.onmessage = e => e.data.ok ? res(e.data.val) : rej(new Error(e.data.err)); window.w.postMessage('ping'); });"
+                    b"</script><div>p1</div>"
+                )
+                mime = "text/html; charset=utf-8"
+            elif self.path == "/page2":
+                body = b"<!doctype html><div>p2</div>"
+                mime = "text/html; charset=utf-8"
+            elif self.path == "/w.js":
+                body = (
+                    b"self.onmessage = async () => {"
+                    b"  try {"
+                    b"    const t = await fetch('/echo-hdr').then(r => r.text());"
+                    b"    self.postMessage({ ok: true, val: t });"
+                    b"  } catch (e) {"
+                    b"    self.postMessage({ ok: false, err: String(e) });"
+                    b"  }"
+                    b"};"
+                )
+                mime = "application/javascript"
+            elif self.path == "/echo-hdr":
+                val = self.headers.get("X-Dyn-Token") or "missing"
+                seen_worker_headers.append(val)
+                body = val.encode("utf-8")
+                mime = "text/plain; charset=utf-8"
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), EvalWorkerHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    nav_hits = 0
+    try:
+        async with InvisiblePlaywright(
+            backend=backend,
+            headless=True,
+            seed=42,
+            humanize=False,
+            locale="en-US",
+            timezone="UTC",
+        ) as browser:
+            context = await browser.new_context(
+                extra_http_headers={"X-Dyn-Token": "v1"}
+            )
+            page = await context.new_page()
+            await page.goto(
+                f"http://127.0.0.1:{srv.server_port}/page1", wait_until="load"
+            )
+
+            # 1. Runtime SyntaxError (JSON.parse) must execute caller side-effects ONCE, never twice
+            with pytest.raises(Exception):
+                await page.evaluate(
+                    "(() => { window.__seCount = (window.__seCount || 0) + 1; JSON.parse('not-json'); })()"
+                )
+            assert await page.evaluate("window.__seCount") == 1
+
+            # 2. Multi-statement script expression still works cleanly
+            assert await page.evaluate("window.__stmtVal = 40; window.__stmtVal + 2") == 42
+
+            # 3. Context extra_http_headers + dynamic set_offline updates already-running Dedicated Workers
+            assert await page.evaluate("window.askWorker()") == "v1"
+            await context.set_offline(True)
+            offline_failed = await page.evaluate(
+                "window.askWorker().then(() => false, () => true)"
+            )
+            assert offline_failed is True
+            await context.set_offline(False)
+            assert await page.evaluate("window.askWorker()") == "v1"
+
+            # 4. In-flight promise navigation must fail with destroyed context, NEVER re-execute in /page2
+            async def _record_hit() -> None:
+                nonlocal nav_hits
+                nav_hits += 1
+
+            await page.expose_function("__recordEvalEntry", _record_hit)
+            with pytest.raises(Exception) as exc_info:
+                await page.evaluate(
+                    "(() => { window.__recordEvalEntry(); location.href = '/page2'; return new Promise(() => {}); })()"
+                )
+            assert "Execution context was destroyed" in str(exc_info.value) or "navigation" in str(exc_info.value).lower()
+            await page.wait_for_url("**/page2", timeout=30000)
+            assert nav_hits == 1, f"expected expression to run once before navigation, ran {nav_hits} times"
+            await context.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()

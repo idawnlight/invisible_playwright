@@ -175,7 +175,7 @@ launched browser draws a fresh identity: a different GPU string, a different can
 different audio device, a different screen, roughly 400 fields that will not match the tab
 that opened it. Two tabs from one user action reporting two different machines is a
 contradiction a consistency-oriented detector reads immediately, and
-[CreepJS is built to notice exactly that kind of internal disagreement](creepjs-explained.md).
+[a consistency checker is built to notice exactly that kind of internal disagreement](consistency-checker-explained.md).
 
 A popup opened with `context.expect_page()` stays inside the same browser context, so it
 inherits the same seed-derived fingerprint as the tab that spawned it. The GPU string, the
