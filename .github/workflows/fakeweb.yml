@@ -58,6 +58,9 @@ jobs:
     needs: core-on-index
     if: needs.core-on-index.outputs.available == 'true'
     runs-on: ${{ matrix.runner }}
+    env:
+      TEMP: ${{ matrix.os == 'windows' && 'D:\a\_temp' || '/tmp' }}
+      TMP: ${{ matrix.os == 'windows' && 'D:\a\_temp' || '/tmp' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -67,7 +70,6 @@ jobs:
           - { profile: p2, os: windows, runner: windows-2022 }
           - { profile: p4, os: linux, runner: ubuntu-24.04 }
           - { profile: p4, os: windows, runner: windows-2022 }
-        exclude: ${{ fromJSON(needs.core-on-index.outputs.windows == 'true' && '[]' || '[{"os":"windows"}]') }}
     defaults:
       run:
         shell: bash
@@ -94,17 +96,18 @@ jobs:
       - name: The security state (a fixed directory of the repository)
         run: python scripts/ci_lab_security_state.py set --pin ci/security-state.pin.json
       - name: Fetch the published firefox binary
+        if: matrix.os == 'linux' || needs.core-on-index.outputs.windows == 'true'
         run: echo "FF=$(cd "$RUNNER_TEMP" && python -m invisible_playwright fetch | tail -1)" >> "$GITHUB_ENV"
       # The GeoIP database made by the repository (no download, the same bytes every run).
       - name: The GeoIP database (made by the repository, same bytes every run)
         run: python scripts/ci_lab_geoip.py build
       - name: Profile P2, stock first and ours second, on a reused routed page
-        if: matrix.profile == 'p2'
+        if: matrix.profile == 'p2' && (matrix.os == 'linux' || needs.core-on-index.outputs.windows == 'true')
         run: |
           PREFIX=""; [ "$RUNNER_OS" = Linux ] && PREFIX="xvfb-run -a"
           $PREFIX python -u scripts/run_fakeweb.py --profile p2 --binary "$FF" --repetitions 10 --out fakeweb-p2.json
       - name: Profile P4, stock first and ours second, three walks of the journey
-        if: matrix.profile == 'p4'
+        if: matrix.profile == 'p4' && (matrix.os == 'linux' || needs.core-on-index.outputs.windows == 'true')
         run: |
           PREFIX=""; [ "$RUNNER_OS" = Linux ] && PREFIX="xvfb-run -a"
           set +e
@@ -123,7 +126,7 @@ jobs:
           esac
           exit "$rc"
       - name: Profile P4, the types of the requests of stock and of ours (one traced walk each)
-        if: matrix.profile == 'p4' && always()
+        if: matrix.profile == 'p4' && (matrix.os == 'linux' || needs.core-on-index.outputs.windows == 'true') && always()
         run: |
           PREFIX=""; [ "$RUNNER_OS" = Linux ] && PREFIX="xvfb-run -a"
           set +e

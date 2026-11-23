@@ -1,6 +1,7 @@
 import ast
 import json
 from email.message import Message
+import os
 from pathlib import Path
 import shlex
 import sys
@@ -28,7 +29,9 @@ def command(monkeypatch, *, url=None, repository=None, commit="a" * 40,
                     if isinstance(node, ast.FunctionDef) and node.name == "reinstall_command")
     namespace = {"DIST_NAME": "invisible-playwright", "_sys": sys}
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), namespace)
-    return shlex.split(namespace["reinstall_command"]())
+    raw = namespace["reinstall_command"]()
+    parts = shlex.split(raw, posix=(os.name != "nt"))
+    return [p[1:-1] if len(p) >= 2 and p[0] == p[-1] and p[0] in ("'", '"') else p for p in parts]
 
 
 @pytest.mark.parametrize("installer", ["pip", "uv"])

@@ -84,6 +84,7 @@ def slow(monkeypatch):
     monkeypatch.setattr(async_api.InvisiblePlaywright, "_teardown", teardown)
     monkeypatch.setattr(async_api, "prepare_session_geo", lambda *_a, **_k: geo)
     monkeypatch.setattr(async_api, "resolve_executable", lambda _p: "firefox")
+    monkeypatch.setattr(_session, "resolve_executable", lambda _p: "firefox")
     return vd
 
 
