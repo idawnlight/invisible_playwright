@@ -9,6 +9,9 @@ on:
       pin:
         description: The invisible-core version pinned in pyproject.toml.
         value: ${{ jobs.probe.outputs.pin }}
+      windows:
+        description: '"true" when the pinned core seal ships a Windows x86_64 engine.'
+        value: ${{ jobs.probe.outputs.windows }}
 
 permissions:
   contents: read
@@ -21,6 +24,7 @@ jobs:
     outputs:
       available: ${{ steps.probe.outputs.available }}
       pin: ${{ steps.probe.outputs.pin }}
+      windows: ${{ steps.probe.outputs.windows }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with: { fetch-depth: 1 }
@@ -45,8 +49,17 @@ jobs:
           if result.returncode not in (0, 2):
               raise SystemExit(f"Git core probe failed: {result.stderr}")
           available = result.returncode == 0
+          windows = False
+          if available:
+              import json, urllib.request
+              repo_slug = url.split("github.com/", 1)[1].removesuffix(".git")
+              seal_url = f"https://raw.githubusercontent.com/{repo_slug}/{ref}/src/invisible_core/seal.json"
+              with urllib.request.urlopen(seal_url, timeout=30) as resp:
+                  seal = json.loads(resp.read().decode("utf-8"))
+              legs = {(a.get("platform"), a.get("arch")) for a in seal.get("assets", {}).values()}
+              windows = ("win32", "x86_64") in legs or ("windows", "x86_64") in legs
           with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
-              output.write(f"pin={pin}\navailable={str(available).lower()}\n")
+              output.write(f"pin={pin}\navailable={str(available).lower()}\nwindows={str(windows).lower()}\n")
           if available:
               message = f"Pinned Git core {ref} exists in {url}.\n{result.stdout}"
           else:

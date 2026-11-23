@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.2] - 2026-11-24
+
+### Fixed
+- **Documentation & GitHub Actions CI consistency**:
+  - Updated all engine release tags and version references across `README.md` and `docs/` (`firefox-160.0.1-r1` / `160.0.1` and `chromium-158.0.8127.36-r1` / `158.0.8127.36`), fixing the scheduled `user-install` `test_release_e2e.py` release-tag assertions, and added unit-level seal/tag drift guards in `tests/test_readme_claims.py`.
+  - Restored GitHub-hosted `scripts/core_requirement.py` dependency resolution and Linux-seal platform gating across `.github/workflows/{core-on-index.yml,tests.yml,e2e.yml,fakeweb.yml}`.
+
 ## [0.58.1] - 2026-11-23
 
 ### Changed

@@ -370,3 +370,54 @@ def test_the_stated_field_count_is_in_the_right_order_of_magnitude():
             f"against 197 leaves, 155 emitted prefs and 157 including the stealth "
             f"baseline - an overstatement of about 2x on every reading, written "
             f"once and never compared to a profile.")
+
+
+def test_docs_and_readme_engine_tags_and_git_pins_match_seals_and_pyproject():
+    """Every engine tag, browser version, and Git install tag in README/docs matches the active seals."""
+    import json
+    import tomllib
+
+    fx_seal = _seal()
+    fx_tag = fx_seal["tag"]
+    fx_ver = fx_seal["upstream_version"]
+
+    cr_seal = json.loads(
+        (_REPO / "src" / "invisible_playwright" / "_cdp" / "seal.json").read_text(encoding="utf-8")
+    )
+    cr_tag = cr_seal["tag"]
+    cr_ver = cr_seal["version"]
+
+    pyproject = tomllib.loads((_REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    pw_ver = pyproject["project"]["version"]
+    core_pin = next(
+        dep.split("==", 1)[1].strip()
+        for dep in pyproject["project"]["dependencies"]
+        if dep.replace("_", "-").startswith("invisible-core==")
+    )
+
+    for rel in ("README.md", "docs/installation.md", "docs/quickstart.md", "docs/cli-reference.md"):
+        text = (_REPO / rel).read_text(encoding="utf-8")
+        fx_tags = set(re.findall(r"firefox-\d+\.\d+(?:\.\d+)?-r\d+", text))
+        assert not (fx_tags - {fx_tag}), f"{rel} names stale Firefox release tag(s): {fx_tags} != {fx_tag}"
+        cr_tags = set(re.findall(r"chromium-\d+\.\d+\.\d+\.\d+-r\d+", text))
+        assert not (cr_tags - {cr_tag}), f"{rel} names stale Chromium release tag(s): {cr_tags} != {cr_tag}"
+        cr_vers = set(re.findall(r"Chromium\s+(\d+\.\d+\.\d+\.\d+)", text))
+        assert not (cr_vers - {cr_ver}), f"{rel} names stale Chromium version(s): {cr_vers} != {cr_ver}"
+        core_git = set(re.findall(r"invisible_core\.git@v([^\s\"'`]+)", text))
+        assert not (core_git - {core_pin}), f"{rel} names stale invisible_core Git tag(s): {core_git} != {core_pin}"
+        pw_git = set(re.findall(r"invisible_playwright\.git@v([^\s\"'`]+)", text))
+        assert not (pw_git - {pw_ver}), f"{rel} names stale invisible_playwright Git tag(s): {pw_git} != {pw_ver}"
+
+
+def test_no_workflow_installs_wrapper_from_pypi_without_core_requirement():
+    """Every CI workflow installing this checkout resolves invisible-core via scripts/core_requirement.py."""
+    offenders = []
+    for wf in sorted((_REPO / ".github" / "workflows").glob("*.yml")):
+        for lineno, line in enumerate(wf.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if re.search(r"pip\s+install\s+(?:-e\s+)?(?:\"\.\[dev\]\"|\.\s*$|\.\"$)", stripped):
+                if "core_requirement.py" not in stripped:
+                    offenders.append(f"{wf.name}:{lineno}: {stripped}")
+    assert not offenders, f"workflow installs wrapper without scripts/core_requirement.py: {offenders}"

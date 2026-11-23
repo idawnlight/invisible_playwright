@@ -31,8 +31,8 @@ accept `backend="firefox"` (the default) or `backend="chromium"` (or the
 
 | Backend | Engine | OS & Hardware Persona | Best When |
 |---|---|---|---|
-| `backend="firefox"` (default) | Patched Firefox 160.0 (`-juggler-pipe`) | Coherent **Windows 10/11 64-bit** desktop persona on Linux (119 bundled Windows fonts, ANGLE GPU personas, WebGL readback projection, native SOCKS5/ICE routing) | You want diverse Windows desktop identities (~400 fields) from a Linux host |
-| `backend="chromium"` | Patched Chromium 157.0.8103.78 (`--remote-debugging-pipe`) | Authentic **Linux x86_64 Desktop** Chromium with server CPU/RAM/V8-heap tiers normalized (`2..32 GiB`), GPU-less `llvmpipe` normalized to Intel Mesa `iris` OpenGL 4.6, `webdriver === false`, and zero `Runtime.enable` leaks | Target sites require Blink/Chromium behavior or TLS/HTTP3 stack while running in GPU-less Linux containers |
+| `backend="firefox"` (default) | Patched Firefox 160.0.1 (`-juggler-pipe`) | Coherent **Windows 10/11 64-bit** desktop persona on Linux (119 bundled Windows fonts, ANGLE GPU personas, WebGL readback projection, native SOCKS5/ICE routing) | You want diverse Windows desktop identities (~400 fields) from a Linux host |
+| `backend="chromium"` | Patched Chromium 158.0.8127.36 (`--remote-debugging-pipe`) | Authentic **Linux x86_64 Desktop** Chromium with server CPU/RAM/V8-heap tiers normalized (`2..32 GiB`), GPU-less `llvmpipe` normalized to Intel Mesa `iris` OpenGL 4.6, `webdriver === false`, and zero `Runtime.enable` leaks | Target sites require Blink/Chromium behavior or TLS/HTTP3 stack while running in GPU-less Linux containers |
 
 ## Sync
 

@@ -24,14 +24,14 @@ absolute path as the final line on stdout.
 
 - By default (`INVPW_BACKEND` unset or `firefox`), `fetch` verifies every cached
   Firefox tree against the seal shipped in `invisible-core`, reports any stale
-  tree on stderr, and downloads `firefox-160.0-r2` if needed:
+  tree on stderr, and downloads `firefox-160.0.1-r1` if needed:
 
 ```bash
 FIREFOX_BIN="$(invisible-playwright fetch)"
 ```
 
 - When `INVPW_BACKEND=chromium` is set, `fetch` downloads and SHA256-verifies
-  the sealed Chromium release (`chromium-157.0.8103.78-r1`) and prints the
+  the sealed Chromium release (`chromium-158.0.8127.36-r1`) and prints the
   verified `chrome` binary path:
 
 ```bash
@@ -44,11 +44,11 @@ check with zero network traffic.
 ## `version`
 
 ```text
-invisible_playwright 0.55.1
-invisible_core       160.76.0   (declared: ==160.76.0)
-engine               firefox-160.0-r2  Firefox 160.0  build 20261119104835
-seal                 bc41cacd8e68  [.../invisible_core/seal.json]
-chromium_engine      chromium-157.0.8103.78-r1  Chromium 157.0.8103.78
+invisible_playwright 0.58.2
+invisible_core       160.81.0   (declared: ==160.81.0)
+engine               firefox-160.0.1-r1  Firefox 160.0.1  build 20261123020000
+seal                 07989576c3f8  [.../invisible_core/seal.json]
+chromium_engine      chromium-158.0.8127.36-r1  Chromium 158.0.8127.36
 engines              /home/you/.cache/invisible-playwright
 chromium_engines     /home/you/.cache/invisible-chromium
 state                /home/you/.cache/invisible-playwright

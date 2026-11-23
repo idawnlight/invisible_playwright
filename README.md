@@ -1,19 +1,19 @@
-# InvisiblePlaywright on Firefox 160 and Chromium 157
+# InvisiblePlaywright on Firefox 160.0.1 and Chromium 158.0.8127.36
 
 `invisible_playwright` is the unified Python Playwright entrypoint for two
 native stealth browser engines:
 
-- **`backend="firefox"` (default)**: Firefox 160.0
-  ([`firefox-160.0-r3`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0-r3)),
+- **`backend="firefox"` (default)**: Firefox 160.0.1
+  ([`firefox-160.0.1-r1`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0.1-r1)),
   declaring a coherent Windows 10/11 desktop persona on Linux through native
   Gecko declarations, 119 bundled Windows fonts, and isolated Juggler worlds.
-- **`backend="chromium"`**: Chromium 157.0.8103.78
-  (`chromium-157.0.8103.78-r1`), presenting a genuine Linux Desktop Chromium
+- **`backend="chromium"`**: Chromium 158.0.8127.36
+  (`chromium-158.0.8127.36-r1`), presenting a genuine Linux Desktop Chromium
   session that normalizes server CPU/RAM/V8-heap tiers and GPU-less Mesa
   `llvmpipe` WebGL1/2 parameters while driving `--remote-debugging-pipe` with
   `navigator.webdriver === false` and zero `Runtime.enable` leaks.
 
-This release pairs `invisible_core 160.81.0` with `invisible_playwright 0.58.1`
+This release pairs `invisible_core 160.81.0` with `invisible_playwright 0.58.2`
 and bundles the Playwright Python 1.61 client (both `sync_api` and `async_api`).
 
 ## Install
@@ -31,7 +31,7 @@ python3 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.81.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.1"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.2"
 ```
 
 See [the installation guide](docs/installation.md) for Ubuntu/Linux system
@@ -48,13 +48,13 @@ Bezier-curve humanized input:
 ```python
 from invisible_playwright import InvisiblePlaywright
 
-# Windows desktop persona on patched Firefox 160.0 (default)
+# Windows desktop persona on patched Firefox 160.0.1 (default)
 with InvisiblePlaywright(seed=42, headless=True, backend="firefox") as browser:
     page = browser.new_page()
     page.goto("https://example.com/")
     print("Firefox:", browser.version, page.title())
 
-# Linux desktop persona on patched Chromium 157.0.8103.78
+# Linux desktop persona on patched Chromium 158.0.8127.36
 with InvisiblePlaywright(seed=42, headless=True, backend="chromium") as browser:
     page = browser.new_page()
     page.goto("https://example.com/")
@@ -142,11 +142,11 @@ passed via `binary_path`.
 | --- | --- |
 | [invisible_playwright](https://github.com/idawnlight/invisible_playwright) | **User entrypoint**: Playwright sync/async API, bundled client, and dual-engine Juggler/CDP server |
 | [invisible_core](https://github.com/idawnlight/invisible_core) | Profile generation, GeoIP/timezone resolution, humanized motion/typing, Juggler client, and release verification |
-| [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native Gecko 160 declarations, bundled Windows fonts, Juggler worlds, and `firefox-160.0-r2` builds |
-| [Chromium patches](https://github.com/idawnlight/chromium_antidetect_patch) | Native Chromium 157 hardware/WebGL normalization, CDP/V8 stealth patches, and `chromium-157.0.8103.78-r1` builds |
+| [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native Gecko 160.0.1 declarations, bundled Windows fonts, Juggler worlds, and `firefox-160.0.1-r1` builds |
+| [Chromium patches](https://github.com/idawnlight/chromium_antidetect_patch) | Native Chromium 158 hardware/WebGL normalization, CDP/V8 stealth patches, and `chromium-158.0.8127.36-r1` builds |
 
-The native repositories maintain Firefox 160 on `release/160` and Chromium 157
-on `release/157`; `invisible_core` and `invisible_playwright` use `main`.
+The native repositories maintain Firefox 160 on `release/160` and Chromium 158
+on `release/158`; `invisible_core` and `invisible_playwright` use `main`.
 
 ## Tests
 
