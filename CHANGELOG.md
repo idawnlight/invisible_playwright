@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.3] - 2026-11-24
+
+### Fixed
+- **Chromium keyboard modifier state, shortcut text suppression, numpad location, and Linux X11 `nativeVirtualKeyCode` handling (`_cdp/bridge.py`)**:
+  - Track active physical modifier keys (`Alt=1`, `Control=2`, `Meta=4`, `Shift=8`, keyed by physical `code`/`key` slot) per `_PageSessionState` across Juggler `Page.dispatchKeyEvent` `keydown`/`keyup` streams and clear them on `Inspector.targetCrashed`, restoring trusted `ctrlKey`/`shiftKey`/`altKey`/`metaKey` flags and native Blink editing commands (`SelectAll`, `Paste`, `Copy`, `Cut`, `Undo`, `Redo`).
+  - Omit `nativeVirtualKeyCode` on CDP `Input.dispatchKeyEvent`: on Linux X11/Ozone, `NativeInputEventBuilder::CreateEvent` interprets `native_key_code` as an X11 hardware keycode (`VK_V=86` collides with X11 `KP_Add`), which previously turned `Control+KeyV` into browser zoom-in (`Ctrl++`) and swallowed paste events under `locator.focus()`.
+  - Suppress printable `text` (including `Enter`'s `"\r"` fallback) whenever any non-Shift modifier (`Alt`, `Control`, `Meta`) is held, populate `unmodifiedText` for shortcut/accesskey handling, and map DOM numpad `location=3` to `isKeypad=True, location=0`.
+
 ## [0.58.2] - 2026-11-24
 
 ### Fixed

@@ -121,6 +121,26 @@ _JUGGLER_TO_CDP_MODS = (
     (8, 4),  # Meta -> 4
 )
 
+_CDP_KEY_MODIFIER_BITS = {
+    "Alt": 1,
+    "Control": 2,
+    "Meta": 4,
+    "Shift": 8,
+}
+
+_CDP_CODE_MODIFIER_BITS = {
+    "AltLeft": 1,
+    "AltRight": 1,
+    "ControlLeft": 2,
+    "ControlRight": 2,
+    "MetaLeft": 4,
+    "MetaRight": 4,
+    "OSLeft": 4,
+    "OSRight": 4,
+    "ShiftLeft": 8,
+    "ShiftRight": 8,
+}
+
 _MOUSE_BUTTON_NAMES = {
     0: "left",
     1: "middle",
@@ -868,6 +888,8 @@ class _PageSessionState:
     screencast_ack_ids: "collections.deque[int]" = field(
         default_factory=lambda: collections.deque(maxlen=64)
     )
+    # Physical code/key -> active CDP modifier bit (Alt=1, Control=2, Meta=4, Shift=8)
+    held_key_modifiers: Dict[str, int] = field(default_factory=dict)
     ready_emitted: bool = False
     dialog_open: bool = False
     window_opened_seq: int = 0
@@ -1414,28 +1436,65 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             return ("Input.dispatchMouseEvent", wp, None)
 
         if method == "Page.dispatchKeyEvent":
-            is_down = p["type"] == "keydown"
+            ev_type = p.get("type")
+            if ev_type not in ("keydown", "keyup"):
+                raise juggler_conn.ProtocolError(
+                    f"Page.dispatchKeyEvent: Unknown type {ev_type}"
+                )
+            is_down = ev_type == "keydown"
             key = p.get("key") or ""
             code = p.get("code") or ""
             vk = int(p.get("keyCode") or 0)
             loc = int(p.get("location") or 0)
             repeat = bool(p.get("repeat", False))
             text = p.get("text") or ""
-            if is_down and key == "Enter" and not text:
+
+            mod_bit = (
+                _CDP_KEY_MODIFIER_BITS.get(key)
+                or _CDP_CODE_MODIFIER_BITS.get(code)
+                or 0
+            )
+            slot = code or key
+            with self._lock:
+                if mod_bit and slot:
+                    if is_down:
+                        state.held_key_modifiers[slot] = mod_bit
+                    else:
+                        state.held_key_modifiers.pop(slot, None)
+                cdp_mods = _cdp_modifiers(p.get("modifiers") or 0)
+                for bit in state.held_key_modifiers.values():
+                    cdp_mods |= bit
+
+            # Non-Shift modifiers (Alt=1, Control=2, Meta=4) never emit printable text.
+            if cdp_mods & ~8:
+                text = ""
+            elif is_down and key == "Enter" and not text:
                 text = "\r"
+
+            # DOM location 3 (numpad) maps to isKeypad=True in CDP Input.dispatchKeyEvent;
+            # CDP location only encodes 1=Left / 2=Right. Omit nativeVirtualKeyCode: on
+            # Linux X11/Ozone, native_key_code is interpreted as an X11 hardware keycode
+            # (e.g. VK_V=86 == X11 KP_Add, turning Ctrl+V into browser zoom-in Ctrl++).
+            is_keypad = loc == 3
+            cdp_loc = loc if loc in (1, 2) else 0
             kp: Dict[str, Any] = {
                 "type": ("keyDown" if text else "rawKeyDown") if is_down else "keyUp",
                 "key": key,
                 "code": code,
                 "windowsVirtualKeyCode": vk,
-                "nativeVirtualKeyCode": vk,
-                "location": loc,
+                "location": cdp_loc,
+                "modifiers": cdp_mods,
                 "autoRepeat": repeat,
                 "timestamp": ts,
             }
-            if is_down and text:
-                kp["text"] = text
-                kp["unmodifiedText"] = text.lower()
+            if is_keypad:
+                kp["isKeypad"] = True
+            if is_down:
+                if text:
+                    kp["text"] = text
+                    kp["unmodifiedText"] = text
+                elif len(key) == 1:
+                    kp["unmodifiedText"] = key
             return ("Input.dispatchKeyEvent", kp, None)
 
         if method == "Page.insertText":
@@ -2599,6 +2658,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
 
         if method == "Inspector.targetCrashed":
             if raw_sid == page_sid:
+                with self._lock:
+                    state.held_key_modifiers.clear()
                 self.dispatch_event("Page.crashed", {}, page_sid)
             return
 

@@ -2166,3 +2166,178 @@ async def _run_eval_syntaxerror_no_double_exec_and_worker_dynamic_headers(
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+@pytest.mark.parametrize("backend", ["chromium", "firefox"])
+@pytest.mark.parametrize("entry_mode", ["click", "focus"])
+def test_keyboard_modifier_shortcuts_and_native_clipboard_paste_parity(
+    backend: str, entry_mode: str
+) -> None:
+    """Regression for Chromium modifier tracking + Linux X11 nativeVirtualKeyCode bug:
+    both click() and focus() -> Control+KeyA -> native clipboard -> Control+KeyV -> Enter
+    must select all, fire trusted paste/beforeinput/input with ctrlKey=True, and submit
+    the exact replacement query without swallowing KeyV as X11 KP_Add (Ctrl++ zoom)."""
+    asyncio.run(_run_keyboard_modifier_and_paste_check(backend, entry_mode))
+
+
+async def _run_keyboard_modifier_and_paste_check(
+    backend: str, entry_mode: str
+) -> None:
+    from urllib.parse import parse_qs
+    import shutil
+
+    query = '\u4e2d\u6587 "quotes" \'single\' & + = ? # % \\ / \U0001f600'
+    received: List[Dict[str, Any]] = []
+    html = (
+        b'<!doctype html><meta charset="utf-8">'
+        b'<form method="post" action="/submit">'
+        b'<input id="q" name="q" value="replace this old query">'
+        b'<input id="src" value="">'
+        b'<input id="events" name="events" type="hidden">'
+        b'<button>Search</button></form><script>'
+        b"const events=[];"
+        b"for(const name of ['click','keydown','keyup','paste','beforeinput','input','change','submit'])"
+        b" document.addEventListener(name,e=>{events.push({"
+        b"  type:e.type,isTrusted:e.isTrusted,key:e.key||null,code:e.code||null,"
+        b"  location:typeof e.location==='number'?e.location:null,"
+        b"  ctrlKey:!!e.ctrlKey,shiftKey:!!e.shiftKey,altKey:!!e.altKey,metaKey:!!e.metaKey"
+        b" });"
+        b" if(e.type==='submit')document.querySelector('#events').value=JSON.stringify(events)},true);"
+        b"</script>"
+    )
+
+    class FormHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_args: Any) -> None:
+            pass
+
+        def _reply(self, body: bytes, ct: str) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:
+            self._reply(html, "text/html; charset=utf-8")
+
+        def do_POST(self) -> None:
+            raw = self.rfile.read(int(self.headers["Content-Length"])).decode("utf-8")
+            fields = parse_qs(raw)
+            record = {
+                "query": fields["q"][0],
+                "events": json.loads(fields["events"][0]),
+            }
+            received.append(record)
+            self._reply(json.dumps(record, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), FormHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    xclip_proc: Optional[asyncio.subprocess.Process] = None
+    try:
+        launcher = InvisiblePlaywright(
+            backend=backend,
+            headless=True,
+            seed=42,
+            humanize=True,
+            locale="en-US",
+            timezone="UTC",
+        )
+        async with launcher as browser:
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(
+                f"http://127.0.0.1:{srv.server_port}/", wait_until="load"
+            )
+
+            vdisplay = getattr(launcher, "_virtual_display", None)
+            use_xclip = bool(
+                vdisplay is not None
+                and os.name != "nt"
+                and shutil.which("xclip")
+            )
+            if use_xclip:
+                env = os.environ.copy()
+                for k, v in vdisplay.launch_env().items():
+                    if v is None:
+                        env.pop(k, None)
+                    else:
+                        env[k] = v
+                xclip_proc = await asyncio.create_subprocess_exec(
+                    "xclip",
+                    "-quiet",
+                    "-in",
+                    "-selection",
+                    "clipboard",
+                    "-target",
+                    "UTF8_STRING",
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+                assert xclip_proc.stdin is not None
+                xclip_proc.stdin.write(query.encode("utf-8"))
+                await xclip_proc.stdin.drain()
+                xclip_proc.stdin.close()
+                await xclip_proc.stdin.wait_closed()
+                # Confirm X11 selection ownership is live before pasting.
+                probe = await asyncio.create_subprocess_exec(
+                    "xclip",
+                    "-out",
+                    "-selection",
+                    "clipboard",
+                    "-target",
+                    "UTF8_STRING",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    env=env,
+                )
+                out_bytes, _ = await probe.communicate()
+                assert out_bytes.decode("utf-8") == query
+            else:
+                # Cross-platform fallback when xclip is absent: populate OS clipboard via Ctrl+C.
+                await page.locator("#src").evaluate("(el, val) => { el.value = val; }", query)
+                await page.locator("#src").focus()
+                await page.keyboard.press("Control+KeyA", delay=0)
+                await page.keyboard.press("Control+KeyC", delay=0)
+
+            if entry_mode == "click":
+                await page.locator("#q").click()
+            else:
+                await page.locator("#q").focus()
+
+            await page.keyboard.press("Control+KeyA", delay=0)
+            after_sel = await page.locator("#q").evaluate(
+                "el => ({start: el.selectionStart, end: el.selectionEnd, active: document.activeElement === el})"
+            )
+            assert after_sel == {"start": 0, "end": 22, "active": True}
+
+            await page.keyboard.press("Control+KeyV", delay=0)
+            after_paste = await page.locator("#q").evaluate("el => el.value")
+            assert after_paste == query
+
+            async with page.expect_navigation(wait_until="load"):
+                await page.keyboard.press("NumpadEnter", delay=0)
+
+            assert len(received) == 1
+            rec = received[0]
+            assert rec["query"] == query
+            evs = rec["events"]
+            assert all(e["isTrusted"] for e in evs)
+            ev_types = {e["type"] for e in evs}
+            assert {"keydown", "keyup", "paste", "beforeinput", "input", "submit"} <= ev_types
+
+            keydowns_a = [e for e in evs if e["type"] == "keydown" and e["code"] == "KeyA"]
+            keydowns_v = [e for e in evs if e["type"] == "keydown" and e["code"] == "KeyV"]
+            numpad_enters = [e for e in evs if e["type"] == "keydown" and e["code"] == "NumpadEnter"]
+            assert keydowns_a and all(e["ctrlKey"] is True for e in keydowns_a)
+            assert keydowns_v and all(e["ctrlKey"] is True for e in keydowns_v)
+            assert numpad_enters and all(e["location"] == 3 for e in numpad_enters)
+
+            await context.close()
+    finally:
+        if xclip_proc is not None and xclip_proc.returncode is None:
+            xclip_proc.kill()
+            await xclip_proc.wait()
+        srv.shutdown()
+        srv.server_close()
