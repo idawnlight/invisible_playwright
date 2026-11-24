@@ -2524,16 +2524,18 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         parent_st = self._child_to_page.pop(child_sid, None)
                         if parent_st is not None:
                             was_worker = child_sid in parent_st.worker_sessions
+                            was_child = child_sid in parent_st.child_sessions
                             parent_st.worker_sessions.discard(child_sid)
                             parent_st.worker_frames.pop(child_sid, None)
                             parent_st.had_extra_headers.discard(child_sid)
                             parent_st.applied_offline.pop(child_sid, None)
-                            if was_worker:
+                            if was_worker or was_child:
                                 for d_id, d_req in list(parent_st.deferred_paused.items()):
                                     if d_id not in parent_st.sent_requests:
                                         parent_st.deferred_paused.pop(d_id, None)
                                         parent_st.sent_requests.add(d_id)
                                         flushed_paused.append((parent_st.session_id, d_req))
+                            if was_worker:
                                 for r_id in list(parent_st.sent_requests):
                                     if (
                                         r_id not in parent_st.finished_requests
@@ -3209,11 +3211,16 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                 **({"navigationId": nav_id} if nav_id else {}),
                 **({"postData": post_b64} if post_b64 is not None else {}),
             }
+            # Browser-process Fetch.requestPaused collapses both fetch() and XHR into
+            # resourceType="XHR" and can win the IPC race against an OOPIF or Worker
+            # renderer's Network.requestWillBeSent (which carries exact "Fetch" vs "XHR").
             if (
                 net_id
-                and not params.get("frameId")
                 and net_id not in state.req_types
-                and state.worker_sessions
+                and (
+                    params.get("resourceType") == "XHR"
+                    or (not params.get("frameId") and state.worker_sessions)
+                )
             ):
                 state.deferred_paused[net_id] = j_req
                 t = threading.Timer(

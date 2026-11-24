@@ -1,9 +1,7 @@
 {
- "os": "linux",
- "source": "GitHub Actions run 43661728392 (workflow page-bytes-reference-hunt, runner image ubuntu24 20261111.370.1), wrapper commit 455d5619e5, invisible-core 64.71.0, engine firefox-64_159.0_20261114003728, seed 42, locale en-US, timezone Europe/Rome, headless=True; 2 launches, every key below is equal in all of them. `pngs`: the PNG keys, compared on their length and decoded pixels because every PNG carries a per-launch chunk.",
  "keys": {
   "c2d.composite.getImageData": {
-   "h": "df65ebe03bf31",
+   "h": "1ec7457e27445a",
    "n": 131072
   },
   "c2d.composite.jpeg": {
@@ -19,16 +17,16 @@
    "n": 352800
   },
   "c2d.image.getImageData": {
-   "h": "8218d41a1794c",
+   "h": "94de3e601f2b7",
    "n": 76800
   },
   "c2d.image.jpeg": {
-   "h": "125de65c968e30",
+   "h": "114e69d9a9e9b5",
    "n": 7315
   },
   "c2d.image.webp": {
-   "h": "26ea5dc80f98c",
-   "n": 5659
+   "h": "117b8ff03c9e72",
+   "n": 5671
   },
   "c2d.measure": {
    "h": "14a71ef40cb01c",
@@ -113,7 +111,7 @@
    "s": "[1920,1080,1920,1032,24,24]"
   },
   "env.ua": {
-   "s": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:159.0) Gecko/20100101 Firefox/159.0"
+   "s": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0"
   },
   "gl1.anisotropy": {
    "s": "16"
@@ -180,7 +178,7 @@
    "n": 16384
   },
   "gl1.triangle.drawImage": {
-   "h": "81a61d733e561",
+   "h": "1f470abf5539ee",
    "n": 36864
   },
   "gl1.triangle.readPixels": {
@@ -266,7 +264,7 @@
    "n": 16384
   },
   "gl2.triangle.drawImage": {
-   "h": "81a61d733e561",
+   "h": "1f470abf5539ee",
    "n": 36864
   },
   "gl2.triangle.readPixels": {
@@ -292,118 +290,120 @@
    "s": "{\"vendor\":\"Mozilla\",\"renderer\":\"ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar\",\"unmasked\":[\"Google Inc. (Intel)\",\"ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar\"],\"exts\":[\"ANGLE_instanced_arrays\",\"EXT_blend_minmax\",\"EXT_clip_control\",\"EXT_color_buffer_half_float\",\"EXT_depth_clamp\",\"EXT_float_blend\",\"EXT_frag_depth\",\"EXT_polygon_offset_clamp\",\"EXT_shader_texture_lod\",\"EXT_sRGB\",\"EXT_texture_compression_bptc\",\"EXT_texture_compression_rgtc\",\"EXT_texture_filter_anisotropic\",\"EXT_texture_mirror_clamp_to_edge\",\"OES_element_index_uint\",\"OES_fbo_render_mipmap\",\"OES_standard_derivatives\",\"OES_texture_float\",\"OES_texture_float_linear\",\"OES_texture_half_float\",\"OES_texture_half_float_linear\",\"OES_vertex_array_object\",\"WEBGL_color_buffer_float\",\"WEBGL_compressed_texture_s3tc\",\"WEBGL_compressed_texture_s3tc_srgb\",\"WEBGL_debug_renderer_info\",\"WEBGL_debug_shaders\",\"WEBGL_depth_texture\",\"WEBGL_draw_buffers\",\"WEBGL_lose_context\",\"WEBGL_provoking_vertex\"],\"px\":[64,128,191,255,64,128,191,255,64,128,191,255,64,128,191,255]}"
   }
  },
+ "os": "linux",
  "pngs": {
   "c2d.composite.png": {
-   "n": 2414,
-   "w": 256,
-   "h": 128,
    "ct": 6,
-   "sha256": "fb585f18240eb1a787a5b146d6332a0376dae76f8c8716e99f68fbbf9eff905e"
+   "h": 128,
+   "n": 2414,
+   "sha256": "fb585f18240eb1a787a5b146d6332a0376dae76f8c8716e99f68fbbf9eff905e",
+   "w": 256
   },
   "c2d.composite.toBlob": {
-   "n": 1794,
-   "w": 256,
-   "h": 128,
    "ct": 6,
-   "sha256": "fb585f18240eb1a787a5b146d6332a0376dae76f8c8716e99f68fbbf9eff905e"
+   "h": 128,
+   "n": 1794,
+   "sha256": "fb585f18240eb1a787a5b146d6332a0376dae76f8c8716e99f68fbbf9eff905e",
+   "w": 256
   },
   "c2d.gradtext.png": {
-   "n": 56850,
-   "w": 420,
-   "h": 210,
    "ct": 6,
-   "sha256": "a294763c6eca0c9178d09052cfaa5ac92932d8cf32909f31bbb387810d473310"
+   "h": 210,
+   "n": 56850,
+   "sha256": "a294763c6eca0c9178d09052cfaa5ac92932d8cf32909f31bbb387810d473310",
+   "w": 420
   },
   "c2d.image.png": {
-   "n": 19502,
-   "w": 160,
-   "h": 120,
    "ct": 6,
-   "sha256": "51bc3789f2e238dfbf8899eb7a965a4f04d3e0e7f2246b1bd3cfdc9597bd2a77"
+   "h": 120,
+   "n": 19526,
+   "sha256": "ca92da197c467966ab34af1e6c50f48047ff91107532177de34bf2ef41a88ecf",
+   "w": 160
   },
   "c2d.image.toBlob": {
-   "n": 14610,
-   "w": 160,
-   "h": 120,
    "ct": 6,
-   "sha256": "51bc3789f2e238dfbf8899eb7a965a4f04d3e0e7f2246b1bd3cfdc9597bd2a77"
+   "h": 120,
+   "n": 14626,
+   "sha256": "ca92da197c467966ab34af1e6c50f48047ff91107532177de34bf2ef41a88ecf",
+   "w": 160
   },
   "c2d.offscreen.convertToBlob": {
-   "n": 2687,
-   "w": 160,
-   "h": 80,
    "ct": 6,
-   "sha256": "38b7fa4aa1d61a5bae5b92e8b9216ff61ce4d4a8d15cc0fa6d8a8c8441a3fdb8"
+   "h": 80,
+   "n": 2687,
+   "sha256": "38b7fa4aa1d61a5bae5b92e8b9216ff61ce4d4a8d15cc0fa6d8a8c8441a3fdb8",
+   "w": 160
   },
   "c2d.scale.high.png": {
-   "n": 47314,
-   "w": 220,
-   "h": 130,
    "ct": 6,
-   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21"
+   "h": 130,
+   "n": 47314,
+   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21",
+   "w": 220
   },
   "c2d.scale.low.png": {
-   "n": 47314,
-   "w": 220,
-   "h": 130,
    "ct": 6,
-   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21"
+   "h": 130,
+   "n": 47314,
+   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21",
+   "w": 220
   },
   "c2d.scale.medium.png": {
-   "n": 47314,
-   "w": 220,
-   "h": 130,
    "ct": 6,
-   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21"
+   "h": 130,
+   "n": 47314,
+   "sha256": "8672b8676f90d662b4809e56c55da58e05be4e72b2f7c543b33da4bdafb0ce21",
+   "w": 220
   },
   "c2d.scale.off.png": {
-   "n": 20890,
-   "w": 220,
-   "h": 130,
    "ct": 6,
-   "sha256": "c28700e28636d69dfe9bf293fadebae1fdf970949ac90147836ab1837065f46d"
+   "h": 130,
+   "n": 20890,
+   "sha256": "c28700e28636d69dfe9bf293fadebae1fdf970949ac90147836ab1837065f46d",
+   "w": 220
   },
   "c2d.shapes.png": {
-   "n": 19226,
-   "w": 256,
-   "h": 160,
    "ct": 6,
-   "sha256": "89ee57c100f4682099bd3a5f2de56c5b31091dae253bd7e3db4f254fb8b9e6a3"
+   "h": 160,
+   "n": 19226,
+   "sha256": "89ee57c100f4682099bd3a5f2de56c5b31091dae253bd7e3db4f254fb8b9e6a3",
+   "w": 256
   },
   "c2d.shapes.toBlob": {
-   "n": 14402,
-   "w": 256,
-   "h": 160,
    "ct": 6,
-   "sha256": "89ee57c100f4682099bd3a5f2de56c5b31091dae253bd7e3db4f254fb8b9e6a3"
+   "h": 160,
+   "n": 14402,
+   "sha256": "89ee57c100f4682099bd3a5f2de56c5b31091dae253bd7e3db4f254fb8b9e6a3",
+   "w": 256
   },
   "c2d.text.png": {
-   "n": 51610,
-   "w": 520,
-   "h": 412,
    "ct": 6,
-   "sha256": "1c56511f78721be0423bbcef100bf7b52e9997da498bd1f771d0d8348a791d3b"
+   "h": 412,
+   "n": 51610,
+   "sha256": "1c56511f78721be0423bbcef100bf7b52e9997da498bd1f771d0d8348a791d3b",
+   "w": 520
   },
   "c2d.text.toBlob": {
-   "n": 38691,
-   "w": 520,
-   "h": 412,
    "ct": 6,
-   "sha256": "1c56511f78721be0423bbcef100bf7b52e9997da498bd1f771d0d8348a791d3b"
+   "h": 412,
+   "n": 38691,
+   "sha256": "1c56511f78721be0423bbcef100bf7b52e9997da498bd1f771d0d8348a791d3b",
+   "w": 520
   },
   "gl1.triangle.toDataURL": {
-   "n": 7470,
-   "w": 96,
-   "h": 96,
    "ct": 6,
-   "sha256": "3f24afcf21a411e18ef9256e558a30ec589bbb51923fedf485cd0e6a2dcd9919"
+   "h": 96,
+   "n": 7470,
+   "sha256": "3f24afcf21a411e18ef9256e558a30ec589bbb51923fedf485cd0e6a2dcd9919",
+   "w": 96
   },
   "gl2.triangle.toDataURL": {
-   "n": 7470,
-   "w": 96,
-   "h": 96,
    "ct": 6,
-   "sha256": "3f24afcf21a411e18ef9256e558a30ec589bbb51923fedf485cd0e6a2dcd9919"
+   "h": 96,
+   "n": 7470,
+   "sha256": "3f24afcf21a411e18ef9256e558a30ec589bbb51923fedf485cd0e6a2dcd9919",
+   "w": 96
   }
- }
+ },
+ "source": "GitHub Actions run 43661728392 (workflow page-bytes-reference-hunt, runner image ubuntu24 20261111.370.1), wrapper commit 455d5619e5, invisible-core 64.71.0, engine firefox-64_159.0_20261114003728, seed 42, locale en-US, timezone Europe/Rome, headless=True; 2 launches, every key below is equal in all of them. `pngs`: the PNG keys, compared on their length and decoded pixels because every PNG carries a per-launch chunk."
 }

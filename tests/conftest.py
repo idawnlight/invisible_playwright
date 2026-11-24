@@ -342,12 +342,20 @@ def firefox_binary():
 # No new pytest marker: the marker vocabulary is shared with invisible_core
 # and a marker only here would make the two drift.
 _ENGINE_TAG = re.compile(r"^firefox-(\d+)(?:-candidate)?$")
+# Fork release tags follow Mozilla's version (`firefox-160.0.1-r1`); Firefox 160
+# in this fork absorbs upstream `firefox-68`.
+_FORK_SEAL_TAG = re.compile(r"^firefox-(\d+)\.\d+(?:\.\d+)?-r\d+$")
 
 
 def _engine_number(tag):
-    """N of `firefox-N` or `firefox-N-candidate`, or None."""
+    """N of `firefox-N` / `firefox-N-candidate` (or fork `firefox-160.*-r*`), or None."""
     m = _ENGINE_TAG.match(tag or "")
-    return int(m.group(1)) if m else None
+    if m:
+        return int(m.group(1))
+    fm = _FORK_SEAL_TAG.match(tag or "")
+    if fm:
+        return 68 + (int(fm.group(1)) - 160)
+    return None
 
 
 def _skip_unless_engine_at_least(minimum, tag):

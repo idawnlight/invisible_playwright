@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.4] - 2026-11-24
+
+### Fixed
+- **OOPIF `fetch()` vs `xhr` resourceType IPC race under `route()` (`_cdp/bridge.py`)**: Browser-process `Fetch.requestPaused` collapses both `fetch()` and `XMLHttpRequest` into `resourceType="XHR"` and can arrive before an OOPIF renderer's `Network.requestWillBeSent`; `Fetch.requestPaused` now defers `"XHR"` requests until `Network.requestWillBeSent` supplies Blink's exact `"Fetch"` vs `"XHR"` type (and flushes on OOPIF detach).
+- **Firefox Fission popup `Page.ready` vs `Page.navigationCommitted` settlement (`_juggler/server.py`)**: `PageDispatcher.settle_events()` now awaits the main frame's in-flight `commit`/`aborted` sibling event on `lifecycle` before `Browser.getInfo` when `Page.ready` fires on a cross-process popup, preventing slow `<a target="_blank">` popups under served mode from reporting `about:blank` on loaded runners.
+- **Linux E2E suite alignment for `firefox-160.0.1-r1`**: Mapped fork seal tags (`firefox-160.*-r*`) to absorbed upstream `firefox-68` in `tests/conftest.py:_engine_number`, updated `tests/data/page_bytes_linux.json` from Firefox 159 to `firefox-160.0.1-r1`, and aligned `tests/test_async_canvas_readback_e2e.py` with retail Firefox / `StealthWebGLReadback` straight-alpha `captureStream` behavior.
+
 ## [0.58.3] - 2026-11-24
 
 ### Fixed

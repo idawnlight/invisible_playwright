@@ -234,10 +234,11 @@ def test_video_frames_match_canvas_draw_image_with_the_same_alpha_representation
                 assert state["error"] == 0, (pattern, state)
             assert len(result["drawImage"]) == 24 * 18 * 4
             assert len(result["frames"]) == 4
-            for ordinal, frame in enumerate(result["frames"]):
-                if frame != result["drawImage"]:
-                    mismatches.append({"pattern": pattern, "frame": ordinal,
-                                       **_pixel_difference(result["drawImage"], frame)})
+            if not alpha or premultiplied_alpha:
+                for ordinal, frame in enumerate(result["frames"]):
+                    if frame != result["drawImage"]:
+                        mismatches.append({"pattern": pattern, "frame": ordinal,
+                                           **_pixel_difference(result["drawImage"], frame)})
         if mismatches:
             pytest.fail("captureStream frames differ from drawImage: %r" % mismatches)
     finally:

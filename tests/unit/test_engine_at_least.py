@@ -16,9 +16,15 @@ def test_an_older_engine_is_skipped_with_the_reason():
         _check("firefox-58")
 
 
-@pytest.mark.parametrize("tag", ["firefox-64", "firefox-64-candidate", "firefox-65"])
+@pytest.mark.parametrize("tag", ["firefox-64", "firefox-64-candidate", "firefox-65", "firefox-160.0.1-r1"])
 def test_the_engine_that_promises_it_runs(tag):
     _check(tag)
+
+
+def test_fork_seal_tag_maps_to_absorbed_upstream_release():
+    _check("firefox-160.0.1-r1", minimum="firefox-68")
+    with pytest.raises(Skipped, match="needs firefox-69 or later; this engine is firefox-160.0.1-r1"):
+        _check("firefox-160.0.1-r1", minimum="firefox-69")
 
 
 def test_a_candidate_counts_as_its_number():

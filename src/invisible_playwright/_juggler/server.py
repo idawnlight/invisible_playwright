@@ -3169,6 +3169,25 @@ class PageDispatcher(Dispatcher):
 
     def settle_events(self) -> None:
         """Return once every event the engine sent before this call has been handled: its reply comes after them, on one stream."""
+        if "opener" in self.initializer:
+            # Under Fission, a popup's `Page.ready` leaves on the `'page'` actor channel while `Page.navigationCommitted`
+            # follows `frameDocumentInserted` on the `'frames'` channel a few milliseconds later; `Browser.getInfo` only
+            # round-trips the parent process, so give an in-flight main-frame commit a brief window to land first.
+            deadline = time.monotonic() + 0.15
+            with self.lifecycle._cv:
+                while not self._announced_closed:
+                    f = self.lifecycle.frames.get(self.main_frame_id)
+                    if (
+                        f is None
+                        or f.navigation is None
+                        or "commit" in f.states
+                        or f.navigation in f.aborted
+                    ):
+                        break
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        break
+                    self.lifecycle._cv.wait(left)
         try:
             self.conn.send("Browser.getInfo", {}, timeout=5.0)
         except Exception:

@@ -111,7 +111,7 @@ jobs:
       - name: System deps (xvfb + Firefox & Chromium runtime libs)
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox x11-xserver-utils x11-utils strace
+          sudo apt-get install -y xvfb openbox x11-xserver-utils x11-utils xclip strace
           sudo "$(which python)" -m playwright install-deps firefox chromium
       # The security state is a ready directory of the repository (ci/security-state/, a result with no data, the sha256 in ci/security-state.pin.json): with
       # STEALTHFOX_SECURITY_STATE set the core neither downloads nor generates one. BEFORE `fetch`, which makes the state present (it would download and generate it).
