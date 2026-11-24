@@ -427,6 +427,12 @@ def test_the_warm_parent_reads_the_bundle_from_fontconfig_cache_and_does_not_sca
         pytest.fail("needs strace (apt install strace): without it nothing is measured", pytrace=False)
     _require_strace_can_trace(tmp_path)
 
+    # Isolate HOME as well as XDG_CACHE_HOME: Ubuntu's /etc/fonts/fonts.conf also searches
+    # <cachedir>~/.fontconfig</cachedir>, so a cache written under $HOME/.fontconfig by an
+    # earlier parallel test would otherwise warm the cold launch before it touches XDG_CACHE_HOME.
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
     xdg = tmp_path / "xdg-cache"
     xdg.mkdir()
     monkeypatch.setenv("XDG_CACHE_HOME", str(xdg))
