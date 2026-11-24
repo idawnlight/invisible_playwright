@@ -85,7 +85,7 @@ jobs:
     needs: core-on-index
     if: needs.core-on-index.outputs.available == 'true' && inputs.only != 'windows-control-a'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with: { fetch-depth: 1 }
@@ -120,6 +120,8 @@ jobs:
         run: python scripts/ci_lab_security_state.py set --pin ci/security-state.pin.json
       - name: Fetch the published firefox binary
         run: echo "FF=$(python -m invisible_playwright fetch | tail -1)" >> "$GITHUB_ENV"
+      - name: Fetch the published chromium binary
+        run: python -c "from invisible_playwright._cdp.engine import ensure_chromium_binary; print(ensure_chromium_binary())"
       - name: The protocol mirror agrees with the engine it is pinned to
         # `invisible_core.juggler.protocol` is generated from the Protocol.js INSIDE the
         # shipped binary, and nothing used to tie the two together after a pin
