@@ -2185,6 +2185,7 @@ async def _run_keyboard_modifier_and_paste_check(
 ) -> None:
     from urllib.parse import parse_qs
     import shutil
+    from _waits import awatch
 
     query = '\u4e2d\u6587 "quotes" \'single\' & + = ? # % \\ / \U0001f600'
     received: List[Dict[str, Any]] = []
@@ -2272,7 +2273,7 @@ async def _run_keyboard_modifier_and_paste_check(
                     "UTF8_STRING",
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
                     env=env,
                 )
                 assert xclip_proc.stdin is not None
@@ -2280,20 +2281,32 @@ async def _run_keyboard_modifier_and_paste_check(
                 await xclip_proc.stdin.drain()
                 xclip_proc.stdin.close()
                 await xclip_proc.stdin.wait_closed()
-                # Confirm X11 selection ownership is live before pasting.
-                probe = await asyncio.create_subprocess_exec(
-                    "xclip",
-                    "-out",
-                    "-selection",
-                    "clipboard",
-                    "-target",
-                    "UTF8_STRING",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                    env=env,
+                # Confirm X11 selection ownership is live before pasting (`xclip -in` registers
+                # XSetSelectionOwner asynchronously after closing stdin).
+                last_clip = [""]
+
+                async def _probe_clipboard() -> None:
+                    probe = await asyncio.create_subprocess_exec(
+                        "xclip",
+                        "-out",
+                        "-selection",
+                        "clipboard",
+                        "-target",
+                        "UTF8_STRING",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
+                        env=env,
+                    )
+                    out_bytes, _ = await probe.communicate()
+                    if probe.returncode == 0:
+                        last_clip[0] = out_bytes.decode("utf-8", errors="replace")
+                    else:
+                        await page.wait_for_timeout(20)
+
+                owned = await awatch(
+                    lambda: last_clip[0], lambda val: val == query, 30.0, _probe_clipboard
                 )
-                out_bytes, _ = await probe.communicate()
-                assert out_bytes.decode("utf-8") == query
+                assert owned.ok, f"xclip never owned X11 CLIPBOARD within 30s: {owned.render()}"
             else:
                 # Cross-platform fallback when xclip is absent: populate OS clipboard via Ctrl+C.
                 await page.locator("#src").evaluate("(el, val) => { el.value = val; }", query)
