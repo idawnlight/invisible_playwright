@@ -7,16 +7,16 @@ nav_order: 1
 
 # Installation
 
-This guide installs `invisible_playwright 0.58.4` and `invisible_core 160.81.0`
-(tags `v0.58.4` and `v160.81.0`), supporting both native stealth engines out of
+This guide installs `invisible_playwright 0.58.5` and `invisible_core 160.81.0`
+(tags `v0.58.5` and `v160.81.0`), supporting both native stealth engines out of
 the box:
 
 - **Firefox 160.0.1** (`backend="firefox"`, default) from
   [`firefox-160.0.1-r1`](https://github.com/idawnlight/firefox_antidetect_patch/releases/tag/firefox-160.0.1-r1)
   (~280 MB compressed)
 - **Chromium 158.0.8127.36** (`backend="chromium"`) from
-  [`chromium-158.0.8127.36-r1`](https://github.com/idawnlight/chromium_antidetect_patch/releases/tag/chromium-158.0.8127.36-r1)
-  (~240 MB compressed)
+  [`chromium-158.0.8127.36-r2`](https://github.com/idawnlight/chromium_antidetect_patch/releases/tag/chromium-158.0.8127.36-r2)
+  (~185 MB compressed)
 
 Supported platforms: **Linux x86_64**. Use Python **3.11 or newer** and Git.
 
@@ -54,7 +54,7 @@ python3 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.81.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.4"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.5"
 ```
 
 The wrapper requires `invisible-core==160.81.0`; supplying both references
@@ -112,7 +112,7 @@ python -m pip check
 ```
 
 `version` prints the wrapper and core versions, both sealed engine releases
-(`firefox-160.0.1-r1` and `chromium-158.0.8127.36-r1`), and both cache roots:
+(`firefox-160.0.1-r1` and `chromium-158.0.8127.36-r2`), and both cache roots:
 
 - Firefox cache root: `INVISIBLE_PLAYWRIGHT_CACHE_DIR` (defaults to
   `~/.cache/invisible-playwright`)
@@ -152,11 +152,11 @@ the browser release archives, and install without network access:
 ```bash
 python -m pip wheel --wheel-dir wheelhouse \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.81.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.4"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.5"
 
 # On the offline target machine:
 python -m pip install --no-index --find-links wheelhouse \
-  invisible-core==160.81.0 invisible-playwright==0.58.4
+  invisible-core==160.81.0 invisible-playwright==0.58.5
 ```
 
 ## Update

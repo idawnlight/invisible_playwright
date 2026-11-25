@@ -1128,6 +1128,13 @@ class FrameDispatcher(Dispatcher):
     def call(self, method: str, params: Dict) -> Any:
         if self.detached:
             raise ProtocolException("Frame was detached")
+        if getattr(getattr(self, "page", None), "_crashed", False) and method not in (
+            "goto",
+            "waitForTimeout",
+            "setTestIdAttributeName",
+            "registerSelectorEngine",
+        ):
+            raise ProtocolException("Page crashed")
         return super().call(method, params)
 
     def gc_bucket(self) -> str:
@@ -1210,6 +1217,9 @@ class FrameDispatcher(Dispatcher):
             url, base)
 
     def op_goto(self, params: Dict) -> Any:
+        page = getattr(self, "page", None)
+        if page is not None and getattr(self, "parent_frame", None) is None:
+            page._crashed = False
         result = self.lifecycle.goto(
             self._navigation_url(params["url"]), frame_id=self.frame_id,
             until=params.get("waitUntil") or "load",
@@ -2882,6 +2892,8 @@ class PageDispatcher(Dispatcher):
         "setNetworkInterceptionPatterns": "op_set_interception",
     }
 
+    _crashed = False
+
     def __init__(self, server, context: "BrowserContextDispatcher",
                  session: str, target_id: str, number: int,
                  opener: Optional["PageDispatcher"] = None, is_gone=None) -> None:
@@ -2914,6 +2926,7 @@ class PageDispatcher(Dispatcher):
         # and an event whose handling ends the page closes it from inside.
         self._close_lock = threading.RLock()
         self._announced_closed = False
+        self._crashed = False
         # The id Juggler gave the running screencast, or None. One per page,
         # because the engine holds one capture sink per window.
         self._screencast_id: Optional[str] = None
@@ -3422,6 +3435,8 @@ class PageDispatcher(Dispatcher):
             # the page is closed: `_deliver` would not have delivered it.
             if self._announced_closed:
                 return
+            if frame_id == self.frame.frame_id:
+                self._crashed = False
             self._forget_said_before_announcement(child)
             for state in ("commit", "domcontentloaded", "load", "networkidle"):
                 child.emit("loadstate", {"remove": state})
@@ -3621,6 +3636,9 @@ class PageDispatcher(Dispatcher):
         elif method == "Page.bindingCalled":
             self._on_binding_called(params)
         elif method == "Page.crashed":
+            self._crashed = True
+            with self.injected._contexts_changed:
+                self.injected._contexts_changed.notify_all()
             self.emit("crash")
         # ⛔ `Page.frameAttached` / `Page.frameDetached` ARE NOT READ HERE: the
         # client hears a frame from `_on_lifecycle`, which the lifecycle calls
@@ -3946,6 +3964,7 @@ class PageDispatcher(Dispatcher):
         the recorded trace exists to stop.
         """
         frame_id = self.frame.frame_id
+        self._crashed = False
         # ⛔ THE MARK IS TAKEN FIRST. History gives back no navigationId, so
         # the only thing to anchor the wait on is that the frame has moved -
         # and reading it after the command would sometimes read the new one.
@@ -4100,6 +4119,8 @@ class PageDispatcher(Dispatcher):
     def op_screenshot(self, params: Dict) -> Any:
         """⛔ The engine answers base64 and the client wants base64: it does
         NOT want bytes. Decoding here would send a str() of a bytes object."""
+        if self._crashed:
+            raise ProtocolException("Page crashed")
         # ⛔ `clip` IS MANDATORY, whatever it looks like. The declaration
         # does not wrap it in `Optional`, so leaving it out is rejected exactly
         # like sending it as null: `Object "<root>.clip" is undefined, but has

@@ -753,6 +753,24 @@ class _RawCDPPipe:
                 box.append(("ok", {}))
             done.set()
 
+    def fail_sessions_pending(
+        self, sessions: set[str], reason: str, *, closed: bool = False
+    ) -> None:
+        if not sessions:
+            return
+        matched: List[tuple[threading.Event, List[Any]]] = []
+        with self._lock:
+            for mid, (done, box, _mname, sid) in list(self._pending.items()):
+                if sid is not None and sid in sessions:
+                    self._pending.pop(mid, None)
+                    matched.append((done, box))
+        payload: Any = reason if closed else {"message": reason}
+        kind = "closed" if closed else "error"
+        for done, box in matched:
+            if not box:
+                box.append((kind, payload))
+            done.set()
+
     def _fail_pending(self, reason: str) -> None:
         with self._lock:
             self.closed = True
@@ -890,6 +908,8 @@ class _PageSessionState:
     )
     # Physical code/key -> active CDP modifier bit (Alt=1, Control=2, Meta=4, Shift=8)
     held_key_modifiers: Dict[str, int] = field(default_factory=dict)
+    # CDP session_ids whose renderer crashed and has not yet committed a recovery navigation
+    crashed_sessions: set[str] = field(default_factory=set)
     ready_emitted: bool = False
     dialog_open: bool = False
     window_opened_seq: int = 0
@@ -1510,6 +1530,11 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
     ) -> _CDPPendingReply:
         p = params or {}
         if session is not None:
+            with self._lock:
+                st = self._pages.get(session)
+                is_crashed = st is not None and session in st.crashed_sessions
+            if is_crashed:
+                raise juggler_conn.ProtocolError(f"{method}: Target crashed")
             direct = self._build_cdp_input_command(session, method, p)
             if direct is not None:
                 cdp_method, cdp_params, transform = direct
@@ -2510,7 +2535,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             child_sid = params.get("sessionId")
             aborted_worker_reqs: List[tuple[str, str]] = []
             flushed_paused: List[tuple[str, Dict[str, Any]]] = []
+            detached_sids: set[str] = set()
             if child_sid:
+                detached_sids.add(child_sid)
                 with self._lock:
                     st = self._pages.pop(child_sid, None)
                     if st:
@@ -2520,9 +2547,11 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                             *list(st.worker_sessions),
                         ]:
                             self._child_to_page.pop(sub_sid, None)
+                            detached_sids.add(sub_sid)
                     else:
                         parent_st = self._child_to_page.pop(child_sid, None)
                         if parent_st is not None:
+                            parent_st.crashed_sessions.discard(child_sid)
                             was_worker = child_sid in parent_st.worker_sessions
                             was_child = child_sid in parent_st.child_sessions
                             parent_st.worker_sessions.discard(child_sid)
@@ -2574,6 +2603,11 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                             for fid, f_sid in list(parent_st.frame_sessions.items()):
                                 if f_sid == child_sid:
                                     parent_st.frame_sessions[fid] = parent_st.session_id
+                self._raw.fail_sessions_pending(
+                    detached_sids, "Target closed", closed=True
+                )
+                with self._ctx_cv:
+                    self._ctx_cv.notify_all()
                 for p_sid, d_req in flushed_paused:
                     self.dispatch_event("Network.requestWillBeSent", d_req, p_sid)
                 for p_sid, r_id in aborted_worker_reqs:
@@ -2662,7 +2696,34 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             if raw_sid == page_sid:
                 with self._lock:
                     state.held_key_modifiers.clear()
+                    dead_sids = {
+                        page_sid,
+                        *list(state.child_sessions),
+                        *list(state.worker_sessions),
+                    }
+                    state.crashed_sessions.update(dead_sids)
+                    aborted_navs = list(state.nav_loaders.items())
+                self._raw.fail_sessions_pending(dead_sids, "Target crashed")
+                with self._ctx_cv:
+                    self._ctx_cv.notify_all()
+                for fid, nav_id in aborted_navs:
+                    if fid and nav_id:
+                        self.dispatch_event(
+                            "Page.navigationAborted",
+                            {
+                                "frameId": fid,
+                                "navigationId": nav_id,
+                                "errorText": "Page crashed",
+                            },
+                            page_sid,
+                        )
                 self.dispatch_event("Page.crashed", {}, page_sid)
+            else:
+                with self._lock:
+                    state.crashed_sessions.add(raw_sid)
+                self._raw.fail_sessions_pending({raw_sid}, "Target crashed")
+                with self._ctx_cv:
+                    self._ctx_cv.notify_all()
             return
 
         if method == "Page.screencastFrame":
@@ -2727,6 +2788,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             return
 
         if method == "Runtime.executionContextCreated":
+            with self._lock:
+                state.crashed_sessions.discard(raw_sid)
             cinfo = params.get("context") or {}
             aux = cinfo.get("auxData") or {}
             fid_raw = aux.get("frameId")
@@ -3032,6 +3095,8 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             return
 
         if method == "Page.frameNavigated":
+            with self._lock:
+                state.crashed_sessions.discard(raw_sid)
             frame = params.get("frame") or {}
             fid = frame.get("id") or state.main_frame_id
             state.frame_sessions[fid] = raw_sid
@@ -3925,6 +3990,10 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         if method == "Page.navigate":
             fid = p.get("frameId") or state.main_frame_id
             frame_sid = self._session_for_frame(state, fid)
+            with self._lock:
+                state.crashed_sessions.discard(frame_sid)
+                if fid == state.main_frame_id:
+                    state.crashed_sessions.discard(session_id)
             nav_params: Dict[str, Any] = {"url": p["url"], "frameId": fid}
             if p.get("referer"):
                 nav_params["referrer"] = p["referer"]
@@ -3944,10 +4013,14 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             return {"navigationId": res.get("loaderId")}
 
         if method == "Page.reload":
+            with self._lock:
+                state.crashed_sessions.discard(session_id)
             self._raw.send("Page.reload", {}, session=session_id, timeout=timeout)
             return {}
 
         if method in ("Page.goBack", "Page.goForward"):
+            with self._lock:
+                state.crashed_sessions.discard(session_id)
             hist = self._raw.send(
                 "Page.getNavigationHistory", {}, session=session_id, timeout=timeout
             )
@@ -3974,6 +4047,19 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                     timeout=timeout,
                 )
             return {}
+
+        if method not in (
+            "Page.bringToFront",
+            "Page.setViewportSize",
+            "Page.setEmulatedMedia",
+            "Network.resumeInterceptedRequest",
+            "Network.fulfillInterceptedRequest",
+            "Network.abortInterceptedRequest",
+        ):
+            with self._lock:
+                page_crashed = session_id in state.crashed_sessions
+            if page_crashed:
+                raise juggler_conn.ProtocolError(f"{method}: Target crashed")
 
         if method == "Page.bringToFront":
             self._raw.send("Page.bringToFront", {}, session=session_id, timeout=timeout)

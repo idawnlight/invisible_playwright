@@ -8,12 +8,12 @@ native stealth browser engines:
   declaring a coherent Windows 10/11 desktop persona on Linux through native
   Gecko declarations, 119 bundled Windows fonts, and isolated Juggler worlds.
 - **`backend="chromium"`**: Chromium 158.0.8127.36
-  (`chromium-158.0.8127.36-r1`), presenting a genuine Linux Desktop Chromium
+  (`chromium-158.0.8127.36-r2`), presenting a genuine Linux Desktop Chromium
   session that normalizes server CPU/RAM/V8-heap tiers and GPU-less Mesa
   `llvmpipe` WebGL1/2 parameters while driving `--remote-debugging-pipe` with
   `navigator.webdriver === false` and zero `Runtime.enable` leaks.
 
-This release pairs `invisible_core 160.81.0` with `invisible_playwright 0.58.4`
+This release pairs `invisible_core 160.81.0` with `invisible_playwright 0.58.5`
 and bundles the Playwright Python 1.61 client (both `sync_api` and `async_api`).
 
 ## Install
@@ -31,7 +31,7 @@ python3 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.81.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.4"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.5"
 ```
 
 See [the installation guide](docs/installation.md) for Ubuntu/Linux system
@@ -143,7 +143,7 @@ passed via `binary_path`.
 | [invisible_playwright](https://github.com/idawnlight/invisible_playwright) | **User entrypoint**: Playwright sync/async API, bundled client, and dual-engine Juggler/CDP server |
 | [invisible_core](https://github.com/idawnlight/invisible_core) | Profile generation, GeoIP/timezone resolution, humanized motion/typing, Juggler client, and release verification |
 | [Firefox engine](https://github.com/idawnlight/firefox_antidetect_patch) | Native Gecko 160.0.1 declarations, bundled Windows fonts, Juggler worlds, and `firefox-160.0.1-r1` builds |
-| [Chromium patches](https://github.com/idawnlight/chromium_antidetect_patch) | Native Chromium 158 hardware/WebGL normalization, CDP/V8 stealth patches, and `chromium-158.0.8127.36-r1` builds |
+| [Chromium patches](https://github.com/idawnlight/chromium_antidetect_patch) | Native Chromium 158 hardware/WebGL normalization, CDP/V8 stealth patches, and `chromium-158.0.8127.36-r2` builds |
 
 The native repositories maintain Firefox 160 on `release/160` and Chromium 158
 on `release/158`; `invisible_core` and `invisible_playwright` use `main`.

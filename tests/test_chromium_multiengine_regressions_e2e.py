@@ -2354,3 +2354,129 @@ async def _run_keyboard_modifier_and_paste_check(
             await xclip_proc.wait()
         srv.shutdown()
         srv.server_close()
+
+
+def test_chromium_renderer_crash_rejects_inflight_and_subsequent_commands_and_recovers() -> None:
+    """Regression guard: when a Chromium renderer crashes (`Inspector.targetCrashed`),
+    in-flight and subsequent `evaluate`/`content`/`screenshot` calls must immediately
+    raise `Error` (`Page crashed` / `Target crashed`) rather than hanging until
+    `TimeoutError`, and a subsequent `page.goto()` must revive the Sad Tab."""
+    asyncio.run(_run_chromium_renderer_crash_check())
+
+
+async def _run_chromium_renderer_crash_check() -> None:
+    from invisible_playwright.async_api import Error
+
+    async with InvisiblePlaywright(
+        backend="chromium",
+        headless=True,
+        seed=606,
+        humanize=False,
+        locale="en-US",
+        timezone="UTC",
+    ) as browser:
+        context = await browser.new_context(locale="en-US")
+        try:
+            page = await context.new_page()
+            await page.goto("data:text/html,<h1 id='alive'>alive</h1>")
+
+            eval_entered = asyncio.Event()
+            crashed = asyncio.Event()
+            await page.expose_binding(
+                "__notifyEvalEntered", lambda _src: eval_entered.set()
+            )
+            page.on("crash", lambda: crashed.set())
+
+            inflight = asyncio.create_task(
+                page.evaluate(
+                    "window.__notifyEvalEntered().then(() => new Promise(() => {}))"
+                )
+            )
+            await eval_entered.wait()
+
+            with pytest.raises(Error):
+                await page.goto("chrome://crash")
+            await crashed.wait()
+
+            with pytest.raises(Error, match="crashed"):
+                await inflight
+
+            for op in (
+                lambda: page.evaluate("1 + 1"),
+                lambda: page.content(),
+                lambda: page.screenshot(),
+            ):
+                with pytest.raises(Error, match="crashed"):
+                    await op()
+
+            await page.goto("data:text/html,<h1 id='recovered'>recovered</h1>")
+            assert await page.locator("#recovered").inner_text() == "recovered"
+            png = await page.screenshot()
+            assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        finally:
+            await context.close()
+
+
+def test_chromium_locale_override_concurrent_tierup_navigations_do_not_crash() -> None:
+    """Regression guard for V8 `Isolate::DefaultLocale()` / `LocalIsolate` race on
+    `ThreadPoolForeg` when `locale="en-US"` (`Emulation.setLocaleOverride`) is active
+    across cross-origin navigations with concurrent Maglev/Turbofan compilation."""
+    asyncio.run(_run_chromium_locale_tierup_check())
+
+
+async def _run_chromium_locale_tierup_check() -> None:
+    html = (
+        "<!doctype html><html><body><script>\n"
+        "const fns = [];\n"
+        "for (let i = 0; i < 24; i++) {\n"
+        "  fns.push(new Function('x', `let s = x; for (let k = 0; k < 3000; k++) s = (s * 31 + k + ${i}) | 0; return s;`));\n"
+        "}\n"
+        "let acc = 0;\n"
+        "for (let r = 0; r < 4; r++) for (let i = 0; i < 24; i++) acc ^= fns[i](r);\n"
+        "document.body.dataset.ready = String(acc) + ':' + Intl.DateTimeFormat().resolvedOptions().locale;\n"
+        "</script></body></html>"
+    ).encode("utf-8")
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    servers = [ThreadingHTTPServer(("127.0.0.1", 0), _Handler) for _ in range(4)]
+    for s in servers:
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+
+    crashes: list[bool] = []
+    try:
+        async with InvisiblePlaywright(
+            backend="chromium",
+            headless=True,
+            seed=607,
+            humanize=False,
+            locale="en-US",
+            timezone="UTC",
+        ) as browser:
+            context = await browser.new_context(locale="en-US")
+            try:
+                page = await context.new_page()
+                page.on("crash", lambda: crashes.append(True))
+                for i in range(16):
+                    port = servers[i % len(servers)].server_address[1]
+                    await page.goto(
+                        f"http://127.0.0.1:{port}/?n={i}", wait_until="load"
+                    )
+                    ready = await page.evaluate("document.body.dataset.ready")
+                    assert isinstance(ready, str) and ready.endswith(":en-US")
+                assert crashes == []
+            finally:
+                await context.close()
+    finally:
+        for s in servers:
+            s.shutdown()
+            s.server_close()

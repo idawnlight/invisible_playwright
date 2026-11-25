@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.5] - 2026-11-25
+
+### Fixed
+- **Bundled Chromium upgraded to `chromium-158.0.8127.36-r2` (`_cdp/seal.json`)**:
+  - Fixes the V8 `Isolate::DefaultLocale()` / `set_default_locale()` / `ResetDefaultLocale()` vs off-thread `LocalIsolate` (`ThreadPoolForeg`) `std::string default_locale_` data race triggered under `Emulation.setLocaleOverride` during concurrent Maglev/Turbofan compilation (previously crashing renderers with `SIGTRAP` on `default_locale_.length() == 0`).
+  - Explicitly configures `dcheck_always_on = false` and `enable_expensive_dchecks = false` in Chromium's Linux Release GN args so the shipped engine matches retail Release Chromium (eliminating fatal non-official DCHECKs such as `image_decoder_wrapper.cc:168` and full V8/Blink debug-check overhead).
+- **Immediate failure on crashed renderer targets instead of hanging until `TimeoutError` (`_cdp/bridge.py`, `_juggler/server.py`)**:
+  - On `Inspector.targetCrashed` (and `Target.detachedFromTarget`), immediately fail all in-flight raw CDP commands for the dead session(s), abort pending navigations with `Page.navigationAborted`, and reject subsequent renderer-bound commands (`Runtime.evaluate`, `Page.content`, `Page.screenshot`, input dispatch) with `Page crashed` / `Target crashed` instead of letting them hang until timeout.
+  - Clear crashed state on subsequent top-level navigation (`Page.navigate`, `Page.reload`, `Page.goBack`, `Page.goForward`, `Page.frameNavigated`, `Runtime.executionContextCreated`) so Sad Tab recovery works cleanly.
+
 ## [0.58.4] - 2026-11-24
 
 ### Fixed

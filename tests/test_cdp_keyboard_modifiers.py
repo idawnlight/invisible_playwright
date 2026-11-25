@@ -42,11 +42,17 @@ class _RecordingRawCDP:
         self.calls.append((method, dict(params or {}), session))
         return _CompletedHandle()
 
+    def fail_sessions_pending(
+        self, sessions: set[str], reason: str, *, closed: bool = False
+    ) -> None:
+        pass
+
 
 def _make_bridge(*session_ids: str) -> Tuple[CDPBridgeConnection, _RecordingRawCDP]:
     bridge = object.__new__(CDPBridgeConnection)
     juggler_conn.EventListeners.__init__(bridge)
     bridge._lock = threading.RLock()
+    bridge._ctx_cv = threading.Condition()
     bridge._raw = _RecordingRawCDP()
     bridge._pages = {
         sid: _PageSessionState(session_id=sid, target_id=f"t-{sid}", context_id=None)
