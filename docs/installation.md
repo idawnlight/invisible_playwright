@@ -7,8 +7,8 @@ nav_order: 1
 
 # Installation
 
-This guide installs `invisible_playwright 0.58.5` and `invisible_core 160.81.0`
-(tags `v0.58.5` and `v160.81.0`), supporting both native stealth engines out of
+This guide installs `invisible_playwright 0.58.6` and `invisible_core 160.81.0`
+(tags `v0.58.6` and `v160.81.0`), supporting both native stealth engines out of
 the box:
 
 - **Firefox 160.0.1** (`backend="firefox"`, default) from
@@ -54,7 +54,7 @@ python3 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.81.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.5"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.6"
 ```
 
 The wrapper requires `invisible-core==160.81.0`; supplying both references
@@ -152,11 +152,11 @@ the browser release archives, and install without network access:
 ```bash
 python -m pip wheel --wheel-dir wheelhouse \
   "invisible-core @ git+https://github.com/idawnlight/invisible_core.git@v160.81.0" \
-  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.5"
+  "invisible-playwright @ git+https://github.com/idawnlight/invisible_playwright.git@v0.58.6"
 
 # On the offline target machine:
 python -m pip install --no-index --find-links wheelhouse \
-  invisible-core==160.81.0 invisible-playwright==0.58.5
+  invisible-core==160.81.0 invisible-playwright==0.58.6
 ```
 
 ## Update

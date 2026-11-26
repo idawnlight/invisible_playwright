@@ -1229,6 +1229,55 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
         sid = state.ctx_sessions.get(ctx_id) or state.session_id
         return sid, int(ctx_id)
 
+    def _is_execution_context_alive(
+        self,
+        state: _PageSessionState,
+        ctx_id: str,
+        *,
+        timeout: Optional[float],
+    ) -> bool:
+        if ctx_id.startswith("caller:"):
+            parts = ctx_id.split(":")
+            fid = parts[1] if len(parts) >= 2 else state.main_frame_id
+            if state.caller_contexts.get(fid) != ctx_id:
+                return False
+            v8_pair = state.caller_v8_contexts.get(ctx_id)
+            if v8_pair is None:
+                return False
+            probe_sid, probe_v8_id = v8_pair
+        else:
+            if (
+                ctx_id not in state.ctx_sessions
+                and ctx_id not in state.utility_contexts.values()
+            ):
+                return False
+            try:
+                probe_sid, probe_v8_id = self._parse_util_ctx(state, ctx_id)
+            except (ValueError, juggler_conn.ProtocolError):
+                return False
+        with self._lock:
+            if probe_sid in state.crashed_sessions:
+                return False
+        probe_timeout = min(float(timeout), 5.0) if timeout is not None else 5.0
+        try:
+            self._raw.send(
+                "Runtime.evaluate",
+                {
+                    "expression": "1",
+                    "contextId": probe_v8_id,
+                    "returnByValue": True,
+                },
+                session=probe_sid,
+                timeout=probe_timeout,
+            )
+            return True
+        except (
+            juggler_conn.TargetClosedError,
+            juggler_conn.ProtocolError,
+            TimeoutError,
+        ):
+            return False
+
     def _session_for_object(
         self, state: _PageSessionState, object_id: Optional[str]
     ) -> str:
@@ -4531,6 +4580,13 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
             call_sid = session_id
             try:
                 if ctx_id.startswith("caller:"):
+                    parts = ctx_id.split(":")
+                    fid = parts[1] if len(parts) >= 2 else state.main_frame_id
+                    cur_caller = state.caller_contexts.get(fid)
+                    if cur_caller is not None and cur_caller != ctx_id:
+                        raise juggler_conn.ProtocolError(
+                            "Execution context was destroyed!"
+                        )
                     first_oid = (
                         args[0].get("objectId")
                         if (args and isinstance(args[0], dict))
@@ -4599,8 +4655,9 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         timeout=timeout,
                     )
             except juggler_conn.ProtocolError as exc:
+                msg_str = str(exc)
                 if any(
-                    msg in str(exc)
+                    msg in msg_str
                     for msg in (
                         "Cannot find context",
                         "Execution context was destroyed",
@@ -4609,9 +4666,21 @@ class CDPBridgeConnection(juggler_conn.EventListeners):
                         "Inspected target navigated or closed",
                     )
                 ):
-                    raise juggler_conn.ProtocolError(
-                        "Execution context was destroyed!"
-                    ) from exc
+                    if not self._is_execution_context_alive(
+                        state, ctx_id, timeout=timeout
+                    ):
+                        raise juggler_conn.ProtocolError(
+                            "Execution context was destroyed!"
+                        ) from exc
+                    oids = [
+                        a["objectId"]
+                        for a in args
+                        if isinstance(a, dict) and a.get("objectId")
+                    ]
+                    if oids:
+                        raise juggler_conn.ProtocolError(
+                            f"Cannot find object with id = {oids[-1]}"
+                        ) from exc
                 raise
             return self._normalize_eval_response(state, call_sid, res)
 

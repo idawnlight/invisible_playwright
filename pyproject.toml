@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "invisible_playwright"
-version = "0.58.5"
+version = "0.58.6"
 description = "Playwright wrapper for patched Firefox and Chromium with deterministic stealth profiles."
 readme = "README.md"
 requires-python = ">=3.11"

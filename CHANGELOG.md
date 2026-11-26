@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.6] - 2026-11-26
+
+### Fixed
+- **Stale `JSHandle` / `ElementHandle` calls after navigation no longer erase the live page's execution context on Chromium (`_cdp/bridge.py`)**:
+  - Previously, `Runtime.callFunction` unconditionally translated CDP's `"Cannot find object with id"`, `"Argument should belong to the same JavaScript world"`, `"Cannot find context"`, and `"Execution context was destroyed"` errors into `"Execution context was destroyed!"` even when the target `executionContextId` belonged to the newly navigated live document and only a stale `objectId` from an earlier document was gone. That caused `InjectedScript._send_in()` to call `_forget_context()` on the new document's live `CALLER_WORLD` (or `UTILITY_WORLD`), permanently deadlocking every subsequent `page.evaluate()`, `frame.evaluate_handle()`, and `handle.dispose()` on that document until timeout.
+  - `Runtime.callFunction` now checks upfront whether `ctx_id` was superseded and, on object/context lookup errors, verifies liveness of `ctx_id` via `_is_execution_context_alive()` before reporting `"Execution context was destroyed!"`. When `ctx_id` is still alive, it raises `"Cannot find object with id = ..."` (matching Firefox Juggler) and leaves the live execution context intact.
+- **Non-blocking `ElementHandleDispatcher.op_dispose` (`_juggler/server.py`)**:
+  - Record each handle's originating context on creation and look up `injected.contexts` without blocking during `op_dispose()`, preventing stale or post-navigation handle disposal from waiting up to 30 seconds in `caller_context()` / `context_id()` and starving `InProcessTransport` workers.
+
 ## [0.58.5] - 2026-11-25
 
 ### Fixed

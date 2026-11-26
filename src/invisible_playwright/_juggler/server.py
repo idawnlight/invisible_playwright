@@ -53,8 +53,9 @@ from ._threads import ThreadStarterLease
 from .pointer import Pointer
 from .dispatcher import (Dispatcher, ExpectNotMet, ProtocolException,
                          Server, current_call)
-from invisible_core.juggler.injected import (ContextDestroyed, EvaluationError,
-                                             InjectedScript, js_truthy)
+from invisible_core.juggler.injected import (CALLER_WORLD, ContextDestroyed,
+                                             EvaluationError, InjectedScript,
+                                             UTILITY_WORLD, js_truthy)
 from invisible_core.juggler.keyboard import MODIFIER_MASK
 from invisible_core.juggler.keyboard import layouts_for as keyboard_layouts_for
 from invisible_core.juggler.keyboard import profiles_pref
@@ -627,6 +628,10 @@ class ElementHandleDispatcher(Dispatcher):
         # asked the utility world about an objectId it had never seen and
         # failed with "Cannot find object" [B324].
         self.world = world
+        # Record the context that minted this objectId (when available) so
+        # `op_dispose` never blocks waiting for a future context or sends a
+        # release against a newer document's context after navigation.
+        self._origin_context = self._current_context_nonblocking()
         # ⛔ THE PARENT IS THE FRAME, NOT THE PAGE, and the parent is not
         # bookkeeping: `_element_handle.py` does `self._frame = cast("Frame",
         # parent)` - the client learns which frame a handle belongs to from the
@@ -655,6 +660,15 @@ class ElementHandleDispatcher(Dispatcher):
     def page(self) -> "PageDispatcher":
         return self.frame.page
 
+    def _current_context_nonblocking(self) -> Optional[str]:
+        page = getattr(self.frame, "page", None)
+        injected = getattr(page, "injected", None)
+        contexts = getattr(injected, "contexts", None)
+        if isinstance(contexts, dict):
+            world_name = CALLER_WORLD if self.world == "caller" else UTILITY_WORLD
+            return contexts.get((self.frame.frame_id, world_name))
+        return None
+
     def _handle_context(self) -> str:
         if self.world == "isolated":
             return self.injected.context_id(self.frame.frame_id)
@@ -670,21 +684,33 @@ class ElementHandleDispatcher(Dispatcher):
             by_value=by_value)
 
     def op_dispose(self, params: Dict) -> Any:
-        if self.world in ("caller", "isolated"):
-            if self.object_id:
+        if self.object_id:
+            contexts = getattr(self.injected, "contexts", None)
+            if isinstance(contexts, dict):
+                current = self._current_context_nonblocking()
+                # Never block waiting for a future execution context during
+                # cleanup: if the handle's context is gone (navigation, detach,
+                # or crash), the engine already reclaimed the remote object.
+                if current is not None and (
+                    self._origin_context is None or self._origin_context == current
+                ):
+                    try:
+                        self.injected.release(current, self.object_id)
+                    except Exception:
+                        pass
+            elif self.world in ("caller", "isolated"):
                 try:
                     self.injected.release(self._handle_context(), self.object_id)
                 except Exception:
                     pass
-            self.dispose()
-            return None
-        try:
-            self.injected.dispose(self.frame.frame_id, self.object_id)
-        except Exception:
-            # ⛔ A handle whose context is already gone is not an error worth
-            # raising: the caller is tidying up, and the node it pointed at
-            # stopped existing on its own.
-            pass
+            else:
+                try:
+                    self.injected.dispose(self.frame.frame_id, self.object_id)
+                except Exception:
+                    # ⛔ A handle whose context is already gone is not an error worth
+                    # raising: the caller is tidying up, and the node it pointed at
+                    # stopped existing on its own.
+                    pass
         self.dispose()
         return None
 

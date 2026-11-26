@@ -2480,3 +2480,104 @@ async def _run_chromium_locale_tierup_check() -> None:
         for s in servers:
             s.shutdown()
             s.server_close()
+
+
+@pytest.mark.parametrize("backend", ["chromium", "firefox"])
+def test_stale_handle_after_navigation_does_not_poison_live_page_context(
+    backend: str,
+) -> None:
+    """Regression guard: evaluating, inspecting, or disposing a stale JSHandle/ElementHandle
+    from a previous document after navigation must fail cleanly without erasing the new
+    document's live CALLER_WORLD or UTILITY_WORLD execution context."""
+    asyncio.run(_run_stale_handle_after_navigation_check(backend))
+
+
+async def _run_stale_handle_after_navigation_check(backend: str) -> None:
+    from invisible_playwright.async_api import Error
+
+    pages = {
+        "/first": b"<!doctype html><html><head><title>first</title></head><body><div id='a'>A</div></body></html>",
+        "/second": b"<!doctype html><html><head><title>second</title></head><body><div id='b'>B</div></body></html>",
+        "/data.txt": b"payload-ok",
+    }
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            body = pages.get(self.path, b"not-found")
+            self.send_response(200)
+            ctype = "text/plain" if self.path.endswith(".txt") else "text/html; charset=utf-8"
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base_url = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    try:
+        async with InvisiblePlaywright(
+            backend=backend,
+            headless=True,
+            seed=608,
+            humanize=False,
+        ) as browser:
+            context = await browser.new_context()
+            try:
+                page = await context.new_page()
+                await page.goto(f"{base_url}/first", wait_until="load")
+                caller_handle = await page.main_frame.evaluate_handle(
+                    "() => ({ drain: () => 'doc-first', x: 7 })"
+                )
+                isolated_handle = await page.main_frame.evaluate_handle(
+                    "() => ({ tag: 'iso-first' })", isolated=True
+                )
+                el_handle = await page.query_selector("#a")
+                assert el_handle is not None
+                assert await caller_handle.evaluate("h => h.drain()") == "doc-first"
+                assert await isolated_handle.evaluate("h => h.tag") == "iso-first"
+                assert await el_handle.evaluate("e => e.textContent") == "A"
+
+                await page.goto(f"{base_url}/second", wait_until="load")
+                assert await page.evaluate("document.title") == "second"
+
+                for stale_op in (
+                    lambda: caller_handle.evaluate("h => h.drain()"),
+                    lambda: caller_handle.json_value(),
+                    lambda: caller_handle.get_property("x"),
+                    lambda: caller_handle.get_properties(),
+                    lambda: isolated_handle.evaluate("h => h.tag"),
+                    lambda: el_handle.evaluate("e => e.textContent"),
+                    lambda: el_handle.text_content(),
+                ):
+                    with pytest.raises(Error):
+                        await stale_op()
+
+                async with asyncio.timeout(5.0):
+                    await caller_handle.dispose()
+                    await isolated_handle.dispose()
+                    await el_handle.dispose()
+
+                async with asyncio.timeout(5.0):
+                    assert await page.evaluate("document.title") == "second"
+                    assert await page.locator("#b").inner_text() == "B"
+                    fresh = await page.main_frame.evaluate_handle(
+                        "() => ({ drain: () => 'doc-second' })"
+                    )
+                    assert await fresh.evaluate("h => h.drain()") == "doc-second"
+                    await fresh.dispose()
+                    async with page.expect_response("**/data.txt") as resp_info:
+                        txt = await page.evaluate(
+                            "async () => (await fetch('/data.txt')).text()"
+                        )
+                    resp = await resp_info.value
+                    assert txt == "payload-ok"
+                    assert await resp.body() == b"payload-ok"
+            finally:
+                await context.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
