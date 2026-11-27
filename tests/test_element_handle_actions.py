@@ -61,6 +61,25 @@ PAGE = b"""<!doctype html>
   // and those are different defects.
   window.registro.movimenti = 0;
   b.addEventListener('mousemove', () => window.registro.movimenti++);
+  // EVIDENCE ONLY, never judged: what the page saw of the pointer, printed when
+  // the opening sequence is wrong (candidate 45621332479 recorded ['hover',
+  // 'hover','click'] once, with nothing to tell an exit and re-entry from a
+  // spurious second mouseover). Every mouseover and mouseout of the button with
+  // its relatedTarget, point and the button's box at that instant, and the
+  // first moves the document saw.
+  window.prove = {bottone: [], movimenti: []};
+  const nome = n => n ? (n.id ? '#' + n.id : n.nodeName) : null;
+  const scatola = () => { const q = b.getBoundingClientRect();
+    return [q.x, q.y, q.width, q.height]; };
+  for (const tipo of ['mouseover', 'mouseout', 'click'])
+    b.addEventListener(tipo, e => window.prove.bottone.push({tipo,
+      da: nome(e.relatedTarget), x: e.clientX, y: e.clientY,
+      t: Math.round(e.timeStamp), box: scatola()}));
+  document.addEventListener('mousemove', e => {
+    if (window.prove.movimenti.length < 40)
+      window.prove.movimenti.push([e.clientX, e.clientY, Math.round(e.timeStamp),
+                                  nome(e.target)]);
+  });
   for (const id of ['casella','tendina'])
     document.getElementById(id).addEventListener('change',
       () => window.registro.change.push(id));
@@ -203,15 +222,55 @@ def _serve():
     return srv, "http://127.0.0.1:%d/" % port
 
 
+def _record_the_core_turns(monkeypatch):
+    """EVIDENCE ONLY: the turns of the core's actionability loop (`Actions._retry`) and what each turn ended with, recorded by wrapping
+    the class's own methods (the server runs in this process; the core logs nothing of its turns). Nothing is changed: every wrapper
+    calls the original with the same arguments."""
+    from invisible_core.juggler import actions as core_actions
+
+    cls = core_actions.Actions
+    turns = []
+    retry, center, hit = cls._retry, cls._center_point, cls.hit_target
+
+    def _retry(self, selector, run, *a, **kw):
+        turns.append({"turns": 0, "hit_target": [], "ended": None})
+        try:
+            result = retry(self, selector, run, *a, **kw)
+            turns[-1]["ended"] = "done"
+            return result
+        except BaseException as exc:
+            turns[-1]["ended"] = "%s: %s" % (type(exc).__name__, str(exc)[:160])
+            raise
+
+    def _center_point(self, *a, **kw):
+        if turns:
+            turns[-1]["turns"] += 1
+        return center(self, *a, **kw)
+
+    def hit_target(self, *a, **kw):
+        verdict = hit(self, *a, **kw)
+        if turns:
+            turns[-1]["hit_target"].append(str(verdict)[:80])
+        return verdict
+
+    monkeypatch.setattr(cls, "_retry", _retry)
+    monkeypatch.setattr(cls, "_center_point", _center_point)
+    monkeypatch.setattr(cls, "hit_target", hit_target)
+    return turns
+
+
 @pytest.mark.e2e
-def test_the_nine_actions_reach_the_page_through_a_handle(firefox_binary):
+def test_the_nine_actions_reach_the_page_through_a_handle(firefox_binary, monkeypatch):
     """One browser, every action, and the PAGE is asked what happened.
 
     Never the method's own silence: a driver that accepts `click` and does
     nothing returns None exactly as happily as one that clicks.
     """
+    import json
+
     from invisible_playwright import InvisiblePlaywright
 
+    turns = _record_the_core_turns(monkeypatch)
     srv, url = _serve()
     try:
         with InvisiblePlaywright(seed=4242, binary_path=firefox_binary,
@@ -227,7 +286,14 @@ def test_the_nine_actions_reach_the_page_through_a_handle(firefox_binary):
             assert r["fidato"] is True, "the click was not a trusted event"
             assert r["ordine"][:2] == ["hover", "click"], (
                 "the pointer did not approach before pressing, so this is not "
-                "the humanised path: %r" % r["ordine"])
+                "the humanised path: %r. What the page saw of the button (each "
+                "mouseover/mouseout with its relatedTarget, point and the box "
+                "then): %s. The first moves of the document: %s. The core's "
+                "actionability loop for this click (turns, hit-target verdicts, "
+                "how it ended): %s" % (
+                    r["ordine"], json.dumps(page.evaluate("() => window.prove.bottone")),
+                    json.dumps(page.evaluate("() => window.prove.movimenti")),
+                    json.dumps(turns)))
 
             # the same handle, again: the action must not have disposed it
             button.click()

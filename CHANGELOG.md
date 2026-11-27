@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.59.0] - 2026-11-27
+
+### Changed
+- **Paired with `invisible_core 160.82.0`**: Includes upstream `wait_for_selector(state="hidden")` returning immediately (`None`) when no element matches (and releasing handles on hidden elements) instead of polling until timeout.
+- **Humanized `ElementHandle` pointer walk (`_juggler/pointer.py`, `_juggler/server.py`)**: `ElementHandle` pointer actions (`click`, `dblclick`, `hover`, `tap`, `check`, `uncheck`, `set_checked`) now walk onto the element along the same humanized trajectory as selector actions instead of jumping directly to the element center.
+
+### Added
+- **Complex argument decoding for `evaluate` and its kin (`_juggler/_arguments.py`, `_juggler/_marshal.py`, `_juggler/server.py`)**: `page.evaluate`, `frame.evaluate`, `evaluate_handle`, `eval_on_selector`, `eval_on_selector_all`, `wait_for_function`, and `ElementHandle.evaluate` now pass `ElementHandle` / `JSHandle`, `Date`, `URL`, `Error`, `RegExp`, `Map`, `Set`, `BigInt`, `ArrayBuffer`, `undefined`, `-0`, and shared/cyclic references into the page without calling page-observable constructors or collapsing them to `null`.
+- **16 `ElementHandle` methods (`_juggler/server.py`)**: Added `query_selector`, `query_selector_all` (single-command array property read), `eval_on_selector`, `eval_on_selector_all`, `evaluate_handle`, `is_visible`, `is_hidden`, `is_enabled`, `is_disabled`, `is_checked`, `is_editable`, `wait_for_element_state`, `dblclick`, `select_text`, and `dispatch_event`.
+- **Remote `connect()` file upload streaming (`_juggler/server.py`, `_juggler/remote.py`, `_juggler/perimeter.py`)**: Serves `createTempFiles` and `WritableStream` with per-context stream ownership validation so `set_input_files(path)` works seamlessly over remote WebSocket connections, plus diagnostic logging when a file chooser cannot be announced.
+- **Comprehensive upstream & dual-engine test suites**: Ported upstream unit and E2E suites covering complex evaluate arguments, all 16 `ElementHandle` methods, humanized handle pointer walks, remote file upload streaming, `Frame.tap` `hasTouch` refusal, `screenshot(scale="css")`, and `wait_for_selector(state="hidden")`, plus dual-engine Chromium/Firefox parity E2E coverage (preserving `screenshot(..., caret="initial")` compatibility).
+
+### Fixed
+- **`Frame.tap` without `has_touch` (`_juggler/server.py`)**: Refuses `tap` on contexts without `hasTouch` upfront with Playwright's standard error message before looking up or dispatching to the page.
+
 ## [0.58.6] - 2026-11-26
 
 ### Fixed

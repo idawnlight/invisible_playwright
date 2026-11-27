@@ -2581,3 +2581,148 @@ async def _run_stale_handle_after_navigation_check(backend: str) -> None:
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+@pytest.mark.parametrize("backend", ["chromium", "firefox"])
+def test_complex_arguments_element_handle_methods_walk_and_hidden_wait_parity(
+    backend: str,
+) -> None:
+    """Dual-engine parity for upstream 0.59/0.60 Python layer additions:
+    complex evaluate arguments, 16 ElementHandle methods, humanized ElementHandle
+    pointer walk, wait_for_selector(state='hidden') with no match, Frame.tap
+    without has_touch, and screenshot(scale='css', caret='initial')."""
+    asyncio.run(_run_v059_parity_check(backend))
+
+
+async def _run_v059_parity_check(backend: str) -> None:
+    import datetime
+    from invisible_playwright.async_api import Error
+
+    async with InvisiblePlaywright(
+        backend=backend,
+        headless=True,
+        seed=609,
+        humanize=True,
+    ) as browser:
+        context = await browser.new_context()
+        try:
+            page = await context.new_page()
+            await page.set_content(
+                """<!doctype html><html><body>
+                <div id="box">
+                  <p id="p">text</p>
+                  <span class="item">one</span>
+                  <span class="item">two</span>
+                  <span class="item">three</span>
+                  <button id="go" style="width:120px;height:40px"
+                    onclick="window.__clicks=(window.__clicks||0)+1"
+                    ondblclick="window.__dbl=(window.__dbl||0)+1">Go</button>
+                  <input id="inp" type="text" value="hello world">
+                  <input id="chk" type="checkbox">
+                  <button id="dis" disabled>Dis</button>
+                  <div id="hid" style="display:none">hidden</div>
+                </div>
+                <script>
+                  window.__moves = 0;
+                  window.addEventListener('pointermove', () => { window.__moves++; });
+                  window.__pings = [];
+                  document.getElementById('box').addEventListener(
+                    'ping', e => window.__pings.push([e.type, e.bubbles]));
+                </script>
+                </body></html>"""
+            )
+
+            # 1. Complex arguments via _arguments.py (handles, Date, -0, shared refs)
+            el = await page.query_selector("#p")
+            assert el is not None
+            jsh = await page.evaluate_handle("() => ({ k: 42 })")
+            dt = datetime.datetime(2026, 11, 27, 5, 6, 7, tzinfo=datetime.timezone.utc)
+            shared = {"x": 1}
+            arg_res = await page.evaluate(
+                """(a) => ({
+                    elText: a.el.textContent,
+                    jsVal: a.js.k,
+                    isDate: a.dt instanceof Date,
+                    iso: a.dt.toISOString(),
+                    negZero: Object.is(a.nz, -0),
+                    shared: a.s1 === a.s2,
+                })""",
+                {"el": el, "js": jsh, "dt": dt, "nz": -0.0, "s1": shared, "s2": shared},
+            )
+            assert arg_res == {
+                "elText": "text",
+                "jsVal": 42,
+                "isDate": True,
+                "iso": "2026-11-27T05:06:07.000Z",
+                "negZero": True,
+                "shared": True,
+            }
+
+            # 2. All newly added ElementHandle queries, states, select_text, dispatch_event
+            box = await page.query_selector("#box")
+            assert box is not None
+            p = await box.query_selector("#p")
+            assert p is not None and await p.text_content() == "text"
+            items = await box.query_selector_all(".item")
+            assert [await it.text_content() for it in items] == ["one", "two", "three"]
+            assert await box.eval_on_selector("#p", "e => e.textContent") == "text"
+            assert await box.eval_on_selector_all(
+                ".item", "es => es.map(e => e.textContent)"
+            ) == ["one", "two", "three"]
+            eh = await box.evaluate_handle(
+                "(e, n) => ({ len: e.querySelectorAll('.item').length + n })", 10
+            )
+            assert await eh.json_value() == {"len": 13}
+            assert await p.is_visible() is True
+            assert await p.is_hidden() is False
+            hid = await page.query_selector("#hid")
+            assert hid is not None
+            assert await hid.is_visible() is False
+            assert await hid.is_hidden() is True
+            go = await page.query_selector("#go")
+            dis = await page.query_selector("#dis")
+            chk = await page.query_selector("#chk")
+            inp = await page.query_selector("#inp")
+            assert go is not None and dis is not None and chk is not None and inp is not None
+            assert await go.is_enabled() is True and await go.is_disabled() is False
+            assert await dis.is_enabled() is False and await dis.is_disabled() is True
+            assert await chk.is_checked() is False
+            assert await inp.is_editable() is True
+            await p.wait_for_element_state("visible")
+            await hid.wait_for_element_state("hidden")
+            await inp.select_text()
+            assert await page.evaluate("window.getSelection().toString()") == "hello world"
+            await box.dispatch_event("ping", {"bubbles": False})
+            assert await page.evaluate("window.__pings") == [["ping", False]]
+
+            # 3. ElementHandle humanized pointer walk
+            await go.click()
+            await go.dblclick()
+            assert await page.evaluate("window.__moves") > 2
+            assert await page.evaluate("window.__clicks") >= 2
+            assert await page.evaluate("window.__dbl") == 1
+
+            # 4. wait_for_selector(state='hidden') returns None immediately when nothing matches
+            async with asyncio.timeout(5.0):
+                assert (
+                    await page.wait_for_selector(
+                        "#does-not-exist", state="hidden", timeout=30000
+                    )
+                    is None
+                )
+                assert (
+                    await page.wait_for_selector("#hid", state="hidden", timeout=30000)
+                    is None
+                )
+
+            # 5. Frame.tap without has_touch fails with stock message
+            with pytest.raises(Error, match="hasTouch"):
+                await page.tap("#go")
+
+            # 6. screenshot(type='png', scale='css', caret='initial', animations='allow')
+            png = await page.screenshot(
+                type="png", scale="css", caret="initial", animations="allow"
+            )
+            assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        finally:
+            await context.close()

@@ -62,8 +62,6 @@ OUTSIDE = {
     "clockRunFor":                     "clock",
     "clockSetFixedTime":               "clock",
     "clockSetSystemTime":              "clock",
-    # the streamed upload path - set_input_files with local paths works
-    "createTempFiles":                 "the streamed upload path - set_input_files with local paths works",
     # recorder
     "cancelPickLocator":               "recorder",
     "createSelectorForTest":           "recorder",
@@ -103,7 +101,6 @@ OUTSIDE = {
     "tracingStarted":                  "tracing",
     "tracingStop":                     "tracing",
     "tracingStopChunk":                "tracing",
-    "write":                           "tracing",
     "zip":                             "tracing",
     # video annotations. ⛔ `screencastStart` and `screencastStop` are NOT
     # here any more: since the engine's screencast came back (firefox-28) the

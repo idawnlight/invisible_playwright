@@ -43,8 +43,12 @@ locale, timezone), and `context_options_override=True` makes the server's win.
 LIMITS OF THIS FIRST VERSION, said instead of hidden.
   * `launchPersistentContext` and `profile_dir` are not served.
   * `x-playwright-proxy` (exposeNetwork) is recorded, not honoured.
-  * Downloads, file choosers and other fused types follow the in-process
-    client's path and are not carried to a remote client.
+  * Downloads and other fused types follow the in-process client's path and
+    are not carried to a remote client. A file chooser is: the `fileChooser`
+    event reaches the client, and `set_files` with a path streams the file
+    (`createTempFiles`, `WritableStream`) into the session's upload area, where
+    it lives as long as its context and goes with it, or with a client that
+    drops in the middle of the copy (`_client_gone` closes the contexts it owns).
   * `RemoteServer.process` is the core's handle for the browser process
     (`Connection._process`, a private attribute of the core: pid / poll / wait).
   * Page numbers (`pageNumber`, which the in-process client reserves) are drawn

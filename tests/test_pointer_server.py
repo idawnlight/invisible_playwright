@@ -152,7 +152,7 @@ def build_page(clock, boxes, *, seed, number, budget, hits="all", draws=True,
     messages = []
     server.attach(SimpleNamespace(emit_message=messages.append))
     context = Dispatcher(server, None)
-    context.options = {}
+    context.options = {"hasTouch": True}   # the golden has a tap, and stock refuses one on a context without touch
     conn = RecordingConnection(clock, boxes)
     injected = FakeInjected(conn, boxes, hits)
     actions = Actions(conn, "sess", Life(), injected, acts=PageActs(number),

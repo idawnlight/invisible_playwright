@@ -22,9 +22,12 @@ used to answer, carried over unchanged):
 * NOT `Mouse.move`: an explicit move is the caller's. (The in-process client
   marks its own with `humanise`, see `_cursor._wrap_mouse_move`; a client that
   does not say so is answered with exactly the point it named.)
-* NOT the actions of an ElementHandle (they name a node, never a selector, and
-  the in-process client never walked onto them either) and NOT `dragAndDrop`,
-  whose travel the core's `Actions` already draws.
+* `ElementHandle.click / dblclick / hover / tap / check / uncheck` (and so
+  `set_checked`): the same walk, onto the node the handle already names
+  (`act(..., element=)`: the node is not looked up again and is not disposed).
+  One click path is one fingerprint, so a handle click and a selector click
+  arrive as the same kind of stroke;
+* NOT `dragAndDrop`, whose travel the core's `Actions` already draws.
 
 HOW IT STAYS THE SAME AS THE CLIENT WAS. The stroke generator, the planners
 (`_behaviour`) and the discipline events are delivered under (`Pacer`) are the
@@ -391,8 +394,13 @@ class Pointer:
 
     # -- the probes --------------------------------------------------------
 
-    def _element_box(self, frame_id: str, selector: str) -> Tuple[Optional[str], Optional[dict]]:
+    def _element_box(self, frame_id: str, selector: str,
+                     element: Optional[str] = None) -> Tuple[Optional[str], Optional[dict]]:
         """Resolve the element and its box, or (None, None). Never raises.
+
+        ``element`` is a node the caller already holds (an ElementHandle's): it is
+        measured as it is, never looked up again from ``selector``, and it is not
+        ours to dispose.
 
         Deliberately non-blocking and deliberately forgiving: this is a hint
         used to aim a mouse path, never a correctness step. It resolves the
@@ -401,6 +409,12 @@ class Pointer:
         failing one - the action itself still does its own waiting and raises
         its own errors.
         """
+        if element is not None:
+            try:
+                box = self.injected.bounding_box(frame_id, element)
+            except _PROBE_ERRORS:
+                return None, None  # the handle's node is gone: the action meets that itself
+            return (element, box) if box else (None, None)
         try:
             handle = self.injected.query_selector(frame_id, selector)
         except _PROBE_ERRORS:
@@ -442,10 +456,11 @@ class Pointer:
             return False
 
     def _choose_landing(self, frame_id: str, selector: str,
-                        position: Optional[dict]) -> Optional[_Aim]:
+                        position: Optional[dict],
+                        element: Optional[str] = None) -> Optional[_Aim]:
         """Pick the point on the element this action will land on."""
         hand = self.hand
-        handle, box = self._element_box(frame_id, selector)
+        handle, box = self._element_box(frame_id, selector, element)
         if handle is None or box is None:
             return None
         try:
@@ -476,7 +491,8 @@ class Pointer:
             return _Aim(box, (box["x"] + box["width"] / 2.0,
                               box["y"] + box["height"] / 2.0), None)
         finally:
-            self._dispose(frame_id, handle)
+            if element is None:  # a node the caller holds stays the caller's
+                self._dispose(frame_id, handle)
 
     # -- travelling --------------------------------------------------------
 
@@ -582,7 +598,8 @@ class Pointer:
     # -- the entry points --------------------------------------------------
 
     def approach(self, frame_id: str, selector: str, position: Optional[dict],
-                 trial: bool = False) -> Optional[Dict[str, float]]:
+                 trial: bool = False,
+                 element: Optional[str] = None) -> Optional[Dict[str, float]]:
         """Walk the pointer onto the element this action is about to touch.
 
         Returns the `position` the action should run with, or None.
@@ -598,7 +615,7 @@ class Pointer:
         hand.busy = True
         hand.action += 1
         try:
-            aim = self._choose_landing(frame_id, selector, position)
+            aim = self._choose_landing(frame_id, selector, position, element)
             if aim is None:
                 return None
             w, h = self._viewport()
@@ -614,8 +631,11 @@ class Pointer:
 
     def act(self, frame_id: str, selector: str, position: Optional[dict],
             timeout: Optional[float], run: Callable[[Optional[dict], Optional[float]], Any],
-            *, trial: bool = False) -> Any:
+            *, trial: bool = False, element: Optional[str] = None) -> Any:
         """Run a pointer action on an element the way a hand would.
+
+        ``element`` is the object id of a node the caller already holds (an
+        ElementHandle): the walk aims at THAT node and `selector` is not looked up.
 
         `run(position, timeout)` performs the plain action with those two
         arguments. The approach comes first; if it chose a landing point the
@@ -626,7 +646,7 @@ class Pointer:
         """
         override = None
         try:
-            override = self.approach(frame_id, selector, position, trial)
+            override = self.approach(frame_id, selector, position, trial, element)
         except _PROBE_ERRORS as exc:  # motion never fails an action for what the engine or the page answers; a bug of ours is not that
             _cursor._warn_once(
                 "approach-failed",

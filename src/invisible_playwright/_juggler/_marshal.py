@@ -85,7 +85,12 @@ def _as_script(expression: str) -> str:
 
 
 def _deserialize(value: Any) -> Any:
-    """The tagged union Playwright sends for an ARGUMENT, back to a value."""
+    """The tagged union Playwright sends for an ARGUMENT, back to a plain value.
+
+    ⛔ ONLY FOR THE CONSUMERS THAT CARRY THEIR VALUE AS JSON (an event's init, an expected value): the argument of the caller's code is
+    `_arguments.Argument`, which keeps what this cannot (a handle, a date, `undefined`, a reference). `undefined` is `None` here because a
+    JSON value has no `undefined`; `-0` is `-0.0`, which JSON does carry (it was `None` until the Python client's `0.0` came through here).
+    """
     if not isinstance(value, dict):
         return value
     if "value" in value and "handles" in value:
@@ -96,7 +101,7 @@ def _deserialize(value: Any) -> Any:
             return convert(value[tag])
     if "v" in value:
         return {"null": None, "undefined": None, "NaN": float("nan"),
-                "Infinity": float("inf"),
+                "Infinity": float("inf"), "-0": -0.0,
                 "-Infinity": float("-inf")}.get(value["v"])
     if "a" in value:
         return [_deserialize(x) for x in value["a"]]
