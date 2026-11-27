@@ -206,6 +206,7 @@ exclude = ["tests/playwright-upstream"]
 [tool.invisible.hooks]
 pytest = true
 pin = true
+lint = "F821,F811,F601"
 release_tags = ["v"]
 release_backend = "github"
 
