@@ -726,7 +726,6 @@ class ElementHandleDispatcher(Dispatcher):
         "querySelectorAll": "op_query_selector_all",
         "evalOnSelector": "op_eval_on_selector",
         "evalOnSelectorAll": "op_eval_on_selector_all",
-        "evaluateExpressionHandle": "op_evaluate_handle",
         "isVisible": "op_is_visible",
         "isHidden": "op_is_hidden",
         "isEnabled": "op_is_enabled",
